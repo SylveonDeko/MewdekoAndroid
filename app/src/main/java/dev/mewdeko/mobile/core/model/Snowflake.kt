@@ -14,7 +14,7 @@ import java.time.Instant
 typealias Snowflake = String
 
 /** The Discord epoch start, in milliseconds since the Unix epoch. */
-const val DISCORD_EPOCH_MILLIS: Long = 1_420_070_400_000L
+val DISCORD_EPOCH_MILLIS: Long = 1_420_070_400_000L
 
 /** The snowflake parsed as an unsigned integer, or `null` if non-numeric. */
 val Snowflake.snowflakeValue: ULong?
