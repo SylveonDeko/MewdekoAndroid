@@ -4,6 +4,10 @@ keystore.properties
 *.jks
 *.keystore
 
+# Play Console service-account credentials, never committed
+app/play.properties
+*play-service-account*.json
+
 # Build outputs and caches
 *.iml
 .gradle/

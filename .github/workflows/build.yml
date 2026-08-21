@@ -33,7 +33,19 @@ jobs:
       - name: Assemble debug
         run: ./gradlew :app:assembleDebug
 
-      - name: Assemble release (unsigned)
+      - name: Decode release keystore
+        env:
+          MEWDEKO_KEYSTORE_B64: ${{ secrets.MEWDEKO_KEYSTORE }}
+        if: env.MEWDEKO_KEYSTORE_B64 != ''
+        run: |
+          echo "$MEWDEKO_KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/mewdeko-release.jks"
+          echo "MEWDEKO_KEYSTORE=$RUNNER_TEMP/mewdeko-release.jks" >> "$GITHUB_ENV"
+
+      - name: Assemble release
+        env:
+          MEWDEKO_KEYSTORE_PASSWORD: ${{ secrets.MEWDEKO_KEYSTORE_PASSWORD }}
+          MEWDEKO_KEY_ALIAS: ${{ secrets.MEWDEKO_KEY_ALIAS }}
+          MEWDEKO_KEY_PASSWORD: ${{ secrets.MEWDEKO_KEY_PASSWORD }}
         run: ./gradlew :app:assembleRelease
 
       - name: Upload debug APK
@@ -41,5 +53,14 @@ jobs:
         with:
           name: mewdeko-mobile-debug
           path: app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Upload release APK
+        if: env.MEWDEKO_KEYSTORE != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: mewdeko-mobile-release
+          path: app/build/outputs/apk/release/*.apk
           if-no-files-found: error
           retention-days: 7

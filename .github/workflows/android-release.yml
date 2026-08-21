@@ -1,0 +1,94 @@
+name: Android Internal Release
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch: {}
+
+concurrency:
+  group: android-release
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    if: "!contains(github.event.head_commit.message, '[skip ci]')"
+    env:
+      COMMIT_MSG: ${{ github.event.head_commit.message }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Bump version
+        run: |
+          set -euo pipefail
+          CURRENT_CODE=$(grep -oP '(?<=versionCode = )\d+' app/build.gradle.kts)
+          NEW_CODE=$((CURRENT_CODE + 1))
+          sed -i "s/versionCode = $CURRENT_CODE/versionCode = $NEW_CODE/" app/build.gradle.kts
+
+          # versionName is what Play Console shows as the release label
+          # (e.g. "Latest release: 0.1.7") - bump its patch component too
+          # so each automated release gets a distinct human-readable version,
+          # not just a distinct internal versionCode.
+          CURRENT_NAME=$(grep -oP '(?<=versionName = ")[^"]+' app/build.gradle.kts)
+          PATCH="${CURRENT_NAME##*.}"
+          PREFIX="${CURRENT_NAME%.*}"
+          NEW_NAME="$PREFIX.$((PATCH + 1))"
+          sed -i "s/versionName = \"$CURRENT_NAME\"/versionName = \"$NEW_NAME\"/" app/build.gradle.kts
+
+          echo "versionCode: $CURRENT_CODE -> $NEW_CODE"
+          echo "versionName: $CURRENT_NAME -> $NEW_NAME"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add app/build.gradle.kts
+          git commit -m "ci: bump version to $NEW_NAME ($NEW_CODE) [skip ci]"
+          git push origin HEAD:main
+
+      - name: Write release notes from commit message
+        run: |
+          set -euo pipefail
+          mkdir -p app/src/main/play/release-notes/en-US
+          printf '%s' "$COMMIT_MSG" | head -c 500 > app/src/main/play/release-notes/en-US/internal.txt
+
+      - name: Reconstitute signing and Play credentials
+        env:
+          MEWDEKO_KEYSTORE_B64: ${{ secrets.MEWDEKO_KEYSTORE }}
+          MEWDEKO_KEYSTORE_PASSWORD: ${{ secrets.MEWDEKO_KEYSTORE_PASSWORD }}
+          MEWDEKO_KEY_ALIAS: ${{ secrets.MEWDEKO_KEY_ALIAS }}
+          MEWDEKO_KEY_PASSWORD: ${{ secrets.MEWDEKO_KEY_PASSWORD }}
+          MEWDEKO_PLAY_SERVICE_ACCOUNT_JSON: ${{ secrets.MEWDEKO_PLAY_SERVICE_ACCOUNT_JSON }}
+        run: |
+          set -euo pipefail
+          KEYSTORE_PATH="$GITHUB_WORKSPACE/upload-keystore.jks"
+          SERVICE_ACCOUNT_PATH="$GITHUB_WORKSPACE/play-service-account.json"
+
+          echo "$MEWDEKO_KEYSTORE_B64" | base64 -d > "$KEYSTORE_PATH"
+          printf '%s' "$MEWDEKO_PLAY_SERVICE_ACCOUNT_JSON" > "$SERVICE_ACCOUNT_PATH"
+
+          {
+            echo "storeFile=$KEYSTORE_PATH"
+            echo "storePassword=$MEWDEKO_KEYSTORE_PASSWORD"
+            echo "keyAlias=$MEWDEKO_KEY_ALIAS"
+            echo "keyPassword=$MEWDEKO_KEY_PASSWORD"
+          } > keystore.properties
+
+          echo "serviceAccountCredentials=$SERVICE_ACCOUNT_PATH" > app/play.properties
+
+      - name: Build and publish to Play internal track
+        run: ./gradlew :app:publishReleaseBundle --track internal --release-status=completed
+
+      - name: Clean up secrets from workspace
+        if: always()
+        run: |
+          rm -f upload-keystore.jks play-service-account.json keystore.properties app/play.properties

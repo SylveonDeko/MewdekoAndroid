@@ -1,0 +1,50 @@
+Mewdeko Mobile is the companion app for the Mewdeko Discord bot. It gives server administrators a native way to configure and moderate their communities from a phone, instead of reaching for a laptop every time something needs attention.
+
+  Sign in with Discord and the app shows the servers you administer. Everything the web dashboard can do is here, laid out for a small screen.
+
+  WHAT YOU CAN MANAGE
+
+  Moderation and safety
+  • Warnings, punishments and warn thresholds
+  • Anti-raid, anti-spam, anti-alt and anti-mass-mention protection
+  • Role states, auto-assigned roles and self-assignable roles
+  • Server logging, with per-event channels
+  • Saved chat logs
+
+  Community
+  • XP levels, leaderboards, role rewards and multipliers
+  • Support tickets, panels, priorities and tags
+  • Custom forms with conditional questions and an approval workflow
+  • Suggestions with voting and status tracking
+  • Starboard, highlights, birthdays and confessions
+  • Counting channels and reputation
+
+  Engagement
+  • Giveaways
+  • Repeating messages and chat triggers
+  • Welcome and goodbye greets, role greets and multi-greets
+  • Stream and RSS notifications
+  • Invite tracking and vote rewards
+
+  Music and utilities
+  • Music player with queue, filters and live playback status
+  • Custom voice channels
+  • Stat channels
+  • Minecraft server status and RCON
+  • Todo lists
+  • Message statistics
+
+  Message builder
+  Compose rich embeds with a live preview, add buttons and select menus, save them for reuse across your server, and send them straight to a channel. The same builder is available wherever a message can be customised.
+
+  BUILT FOR YOUR SERVER
+
+  The app picks up each server's colours from its icon, so every screen is themed to the community you are looking at. Pinned shortcuts to Settings, Music and XP sit in the bottom bar, with the full feature list one tap away.
+
+  SELF-HOSTING
+
+  Mewdeko is open source. If you run your own instance, point the app at your own dashboard URL during setup and it will work exactly the same.
+
+  BEFORE YOU START
+
+  You need a Discord account, and Mewdeko needs to already be in a server where you have administrator permissions. The app configures an existing bot; it does not replace the Discord app and cannot be used to chat.

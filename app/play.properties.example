@@ -1,0 +1,31 @@
+# Copy to app/play.properties (gitignored) and fill in.
+# Used by the gradle-play-publisher plugin to upload AABs to Play Console.
+#
+# Set up (one-time):
+#
+# 1. https://console.cloud.google.com/iam-admin/serviceaccounts
+#    - Create project (or reuse existing) and a Service Account.
+#    - Skip the "Grant this service account access to project" step
+#      (Play Console grants the actual permissions, not IAM).
+#    - On the service account, Keys tab -> Add key -> JSON -> download.
+#
+# 2. https://console.cloud.google.com/apis/library/androidpublisher.googleapis.com
+#    - Enable the "Google Play Android Developer API" for the same project.
+#
+# 3. https://play.google.com/console -> Setup -> API access
+#    - Link the Cloud project that contains the service account.
+#    - Find the service account in the list, click "Grant access".
+#    - App permissions: select this app; release manager role is enough
+#      for internal-testing pushes (or use Admin for full store-listing
+#      control).
+#
+# 4. Play requires the *first* release on a new app to be uploaded by hand
+#    through the Play Console UI - the Android Publisher API this plugin
+#    uses can only update an app that already has at least one release.
+#    Create the app in Play Console and upload one signed AAB manually
+#    before running any ./gradlew publish* task.
+#
+# 5. Store the downloaded JSON outside the repo, e.g.
+#    ~/.android-keys/mewdeko-play-service.json, and point at it below.
+
+serviceAccountCredentials=/Users/<you>/.android-keys/mewdeko-play-service.json

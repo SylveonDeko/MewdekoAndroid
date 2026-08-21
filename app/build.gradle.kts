@@ -6,6 +6,28 @@ plugins {
     alias(libs.plugins.compose.compiler)
     alias(libs.plugins.ksp)
     alias(libs.plugins.hilt)
+    alias(libs.plugins.play.publisher)
+}
+
+/*
+ * Play Store publishing (gradle-play-publisher). Reads the service-account
+ * JSON path from a gitignored `play.properties`; see play.properties.example
+ * for one-time Play Console/GCP setup steps. If absent, the play* tasks are
+ * still registered but fail at execution - no setup penalty for devs who
+ * only need installRelease.
+ */
+val playProperties = Properties().apply {
+    val file = file("play.properties")
+    if (file.exists()) file.inputStream().use { load(it) }
+}
+
+play {
+    playProperties.getProperty("serviceAccountCredentials")?.let { path ->
+        serviceAccountCredentials.set(file(path))
+    }
+    defaultToAppBundles.set(true)
+    track.set("internal")
+    releaseStatus.set(com.github.triplet.gradle.androidpublisher.ReleaseStatus.DRAFT)
 }
 
 android {
@@ -16,13 +38,14 @@ android {
         /*
          * The Play identity, deliberately distinct from `namespace`: the code
          * package stays `dev.mewdeko.mobile` while the published app matches
-         * the mewdeko.tech reverse-domain convention used by the other apps.
+         * the package name locked in on Play Console when the app listing
+         * was created there.
          */
-        applicationId = "tech.mewdeko.mobile"
+        applicationId = "mobile.mewdeko.tech"
         minSdk = 26
         targetSdk = 36
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = 2
+        versionName = "0.1.1"
     }
 
     /*

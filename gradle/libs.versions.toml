@@ -8,6 +8,7 @@ activityCompose = "1.9.3"
 composeBom = "2024.12.01"
 navigation = "2.8.5"
 hilt = "2.60.1"
+playPublisher = "4.1.1"
 hiltNavigation = "1.2.0"
 ktor = "3.0.3"
 serialization = "1.7.3"
@@ -58,3 +59,4 @@ kotlin-serialization = { id = "org.jetbrains.kotlin.plugin.serialization", versi
 compose-compiler = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }
 ksp = { id = "com.google.devtools.ksp", version.ref = "ksp" }
 hilt = { id = "com.google.dagger.hilt.android", version.ref = "hilt" }
+play-publisher = { id = "com.github.triplet.play", version.ref = "playPublisher" }
