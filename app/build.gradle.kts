@@ -92,9 +92,11 @@ android {
 
     /*
      * Lint's UAST analysis crashes on this source set with AGP 8.7 and Kotlin
-     * 2.1 ("symbol pointer already disposed"), which is a lint bug rather than
-     * a finding. Release packaging must not depend on it; run `lintDebug`
-     * explicitly to keep the checks.
+     * 2.1 ("symbol pointer already disposed"), a lint bug rather than a
+     * finding. It reproduces on lintDebug too, in a different codepath, and
+     * disabling the detector the error message names doesn't help, so lint
+     * is not runnable at all right now. Release packaging must not depend
+     * on it.
      */
     lint {
         checkReleaseBuilds = false
