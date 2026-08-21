@@ -152,9 +152,15 @@ class RoleStatesViewModel @Inject constructor(
     /** Updates the member search query. */
     fun setQuery(value: String) = _state.update { it.copy(query = value) }
 
-    /** Stages the roles excluded from being saved. */
+    /**
+     * Stages the roles excluded from being saved.
+     *
+     * The backend's `RoleStatesService` splits `DeniedRoles` on `,` with a
+     * throwing `ulong.Parse`, so this must be comma-joined even though the
+     * read side tolerates either delimiter.
+     */
     fun setDeniedRoles(ids: List<Snowflake>) = _state.update {
-        it.copy(settings = it.settings.copy(deniedRoles = ids.joinToString(" ")))
+        it.copy(settings = it.settings.copy(deniedRoles = ids.joinToString(",")))
     }
 
     /** Stages whether auto-assign roles are skipped when restoring. */

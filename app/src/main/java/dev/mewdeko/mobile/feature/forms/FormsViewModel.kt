@@ -642,25 +642,52 @@ class FormsViewModel @Inject constructor(
                 _state.value.questions.firstOrNull { it.id == question.id }?.options.orEmpty()
             }
             val wanted = question.options.orEmpty().filter { it.optionText.isNotBlank() }
-            wanted.forEachIndexed { index, option ->
-                val alreadyStored = existingOptions.any {
-                    it.id != 0 && it.id == option.id && it.optionText == option.optionText
-                }
-                if (alreadyStored) return@forEachIndexed
-                runCatching {
-                    api.sendIgnoringBody(
-                        Endpoint(
-                            "api/forms/questions/${saved.id}/options",
-                            HttpMethod.POST,
-                            jsonBody(
-                                "id" to 0,
-                                "questionId" to saved.id,
-                                "optionText" to option.optionText,
-                                "optionValue" to option.optionValue.ifEmpty { option.optionText },
-                                "displayOrder" to index,
-                            ),
+
+            existingOptions.filter { existing -> wanted.none { it.id == existing.id } }
+                .forEach { removed ->
+                    runCatching {
+                        api.sendIgnoringBody(
+                            Endpoint("api/forms/questions/options/${removed.id}", HttpMethod.DELETE)
                         )
-                    )
+                    }
+                }
+
+            wanted.forEachIndexed { index, option ->
+                val existing = existingOptions.firstOrNull { it.id != 0 && it.id == option.id }
+                runCatching {
+                    when {
+                        existing == null -> api.sendIgnoringBody(
+                            Endpoint(
+                                "api/forms/questions/${saved.id}/options",
+                                HttpMethod.POST,
+                                jsonBody(
+                                    "id" to 0,
+                                    "questionId" to saved.id,
+                                    "optionText" to option.optionText,
+                                    "optionValue" to option.optionValue.ifEmpty { option.optionText },
+                                    "displayOrder" to index,
+                                ),
+                            )
+                        )
+
+                        existing.optionText != option.optionText ||
+                            existing.optionValue != option.optionValue ||
+                            existing.displayOrder != index -> api.sendIgnoringBody(
+                            Endpoint(
+                                "api/forms/questions/options/${option.id}",
+                                HttpMethod.PUT,
+                                jsonBody(
+                                    "id" to option.id,
+                                    "questionId" to saved.id,
+                                    "optionText" to option.optionText,
+                                    "optionValue" to option.optionValue.ifEmpty { option.optionText },
+                                    "displayOrder" to index,
+                                ),
+                            )
+                        )
+
+                        else -> Unit
+                    }
                 }
             }
 

@@ -331,7 +331,7 @@ fun CountingScreen(
                             selection = config.requiredRoleIds,
                             onSelectionChange = { ids ->
                                 viewModel.updateConfig(channelId) {
-                                    it.copy(requiredRoles = ids.joinToString(" "))
+                                    it.copy(requiredRoles = ids.joinToString(","))
                                 }
                             },
                         )
@@ -344,7 +344,7 @@ fun CountingScreen(
                             selection = config.bannedRoleIds,
                             onSelectionChange = { ids ->
                                 viewModel.updateConfig(channelId) {
-                                    it.copy(bannedRoles = ids.joinToString(" "))
+                                    it.copy(bannedRoles = ids.joinToString(","))
                                 }
                             },
                         )

@@ -19,6 +19,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -108,63 +109,65 @@ fun MultiGreetsScreen(
             }
         } else {
             state.greets.forEach { greet ->
-                SectionCard {
-                    SectionCardHeader(
-                        title = "#${greet.channelName ?: state.channelName(greet.channelId)}",
-                        icon = Icons.Default.Tag,
-                        trailing = {
-                            IconButton(onClick = { pendingDelete = greet }) {
-                                Icon(
-                                    Icons.Default.Delete,
-                                    contentDescription = "Remove greet",
-                                    tint = MaterialTheme.colorScheme.error,
-                                )
-                            }
-                        },
-                    )
-                    SwitchRow(
-                        title = "Enabled",
-                        checked = !greet.disabled,
-                        onCheckedChange = { viewModel.setDisabled(greet.id, !it) },
-                    )
-                    SwitchRow(
-                        title = "Greet bots",
-                        subtitle = "Post this greeting for bot accounts too",
-                        checked = greet.greetBots,
-                        onCheckedChange = { viewModel.setGreetBots(greet.id, it) },
-                    )
-                    Row(
-                        horizontalArrangement = Arrangement.spacedBy(4.dp),
-                        modifier = Modifier.fillMaxWidth(),
-                    ) {
-                        Text(
-                            text = "Auto-delete",
-                            style = MaterialTheme.typography.bodyMedium,
-                            modifier = Modifier.weight(1f),
+                key(greet.id) {
+                    SectionCard {
+                        SectionCardHeader(
+                            title = "#${greet.channelName ?: state.channelName(greet.channelId)}",
+                            icon = Icons.Default.Tag,
+                            trailing = {
+                                IconButton(onClick = { pendingDelete = greet }) {
+                                    Icon(
+                                        Icons.Default.Delete,
+                                        contentDescription = "Remove greet",
+                                        tint = MaterialTheme.colorScheme.error,
+                                    )
+                                }
+                            },
                         )
-                        listOf(0, 30, 60, 300).forEach { seconds ->
-                            TextButton(
-                                onClick = { viewModel.updateDeleteTime(greet.id, seconds) },
-                            ) {
-                                Text(
-                                    text = if (seconds == 0) "Never" else "${seconds}s",
-                                    color = if (greet.deleteTime == seconds) {
-                                        MaterialTheme.colorScheme.primary
-                                    } else {
-                                        MaterialTheme.colorScheme.onSurfaceVariant
-                                    },
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                )
+                        SwitchRow(
+                            title = "Enabled",
+                            checked = !greet.disabled,
+                            onCheckedChange = { viewModel.setDisabled(greet.id, !it) },
+                        )
+                        SwitchRow(
+                            title = "Greet bots",
+                            subtitle = "Post this greeting for bot accounts too",
+                            checked = greet.greetBots,
+                            onCheckedChange = { viewModel.setGreetBots(greet.id, it) },
+                        )
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(4.dp),
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            Text(
+                                text = "Auto-delete",
+                                style = MaterialTheme.typography.bodyMedium,
+                                modifier = Modifier.weight(1f),
+                            )
+                            listOf(0, 30, 60, 300).forEach { seconds ->
+                                TextButton(
+                                    onClick = { viewModel.updateDeleteTime(greet.id, seconds) },
+                                ) {
+                                    Text(
+                                        text = if (seconds == 0) "Never" else "${seconds}s",
+                                        color = if (greet.deleteTime == seconds) {
+                                            MaterialTheme.colorScheme.primary
+                                        } else {
+                                            MaterialTheme.colorScheme.onSurfaceVariant
+                                        },
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
+                                }
                             }
                         }
-                    }
-                    EmbedMessageEditor(
-                        message = EmbedMessage.parse(greet.message),
-                        onMessageChange = { viewModel.updateMessage(greet.id, it) },
-                    )
-                    if (!greet.webhookUrl.isNullOrBlank()) {
-                        TagChip("Webhook")
+                        EmbedMessageEditor(
+                            message = EmbedMessage.parse(greet.message),
+                            onMessageChange = { viewModel.updateMessage(greet.id, it) },
+                        )
+                        if (!greet.webhookUrl.isNullOrBlank()) {
+                            TagChip("Webhook")
+                        }
                     }
                 }
             }

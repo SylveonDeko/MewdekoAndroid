@@ -330,7 +330,7 @@ private fun ChatTriggerEditor(
                         multiple = true,
                         selection = draft.grantedRoleIds,
                         onSelectionChange = {
-                            draft = draft.copy(grantedRoles = it.joinToString(" "))
+                            draft = draft.copy(grantedRoles = it.joinToString("@@@"))
                         },
                     )
                     DiscordSelector(
@@ -341,7 +341,7 @@ private fun ChatTriggerEditor(
                         multiple = true,
                         selection = draft.removedRoleIds,
                         onSelectionChange = {
-                            draft = draft.copy(removedRoles = it.joinToString(" "))
+                            draft = draft.copy(removedRoles = it.joinToString("@@@"))
                         },
                     )
                     DiscordSelectorSingle(

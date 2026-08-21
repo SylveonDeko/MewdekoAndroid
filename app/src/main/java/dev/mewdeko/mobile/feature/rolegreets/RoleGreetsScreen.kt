@@ -17,6 +17,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -87,50 +88,52 @@ fun RoleGreetsScreen(
             }
         } else {
             state.greets.forEach { greet ->
-                SectionCard {
-                    SectionCardHeader(
-                        title = "@${state.roleName(greet.roleId)}",
-                        icon = Icons.Default.PersonAddAlt,
-                        trailing = {
-                            TagChip("#${state.channelName(greet.channelId)}", icon = Icons.Default.Tag)
-                        },
-                    )
-                    SwitchRow(
-                        title = "Enabled",
-                        checked = !greet.disabled,
-                        onCheckedChange = { viewModel.updateDisabled(greet.id, !it) },
-                    )
-                    SwitchRow(
-                        title = "Greet bots",
-                        subtitle = "Post this greeting for bot accounts too",
-                        checked = greet.greetBots,
-                        onCheckedChange = { viewModel.updateGreetBots(greet.id, it) },
-                    )
-                    SliderRow(
-                        label = "Auto-delete after",
-                        value = greet.deleteTime.toFloat(),
-                        onValueChange = { },
-                        onValueChangeFinished = { },
-                        valueRange = 0f..600f,
-                        valueLabel = if (greet.deleteTime == 0) "Never" else "${greet.deleteTime}s",
-                    )
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        listOf(0, 30, 60, 300).forEach { seconds ->
-                            TextButton(onClick = { viewModel.updateDeleteTime(greet.id, seconds) }) {
-                                Text(if (seconds == 0) "Never" else "${seconds}s")
+                key(greet.id) {
+                    SectionCard {
+                        SectionCardHeader(
+                            title = "@${state.roleName(greet.roleId)}",
+                            icon = Icons.Default.PersonAddAlt,
+                            trailing = {
+                                TagChip("#${state.channelName(greet.channelId)}", icon = Icons.Default.Tag)
+                            },
+                        )
+                        SwitchRow(
+                            title = "Enabled",
+                            checked = !greet.disabled,
+                            onCheckedChange = { viewModel.updateDisabled(greet.id, !it) },
+                        )
+                        SwitchRow(
+                            title = "Greet bots",
+                            subtitle = "Post this greeting for bot accounts too",
+                            checked = greet.greetBots,
+                            onCheckedChange = { viewModel.updateGreetBots(greet.id, it) },
+                        )
+                        SliderRow(
+                            label = "Auto-delete after",
+                            value = greet.deleteTime.toFloat(),
+                            onValueChange = { },
+                            onValueChangeFinished = { },
+                            valueRange = 0f..600f,
+                            valueLabel = if (greet.deleteTime == 0) "Never" else "${greet.deleteTime}s",
+                        )
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            listOf(0, 30, 60, 300).forEach { seconds ->
+                                TextButton(onClick = { viewModel.updateDeleteTime(greet.id, seconds) }) {
+                                    Text(if (seconds == 0) "Never" else "${seconds}s")
+                                }
                             }
                         }
-                    }
-                    EmbedMessageEditor(
-                        message = EmbedMessage.parse(greet.message),
-                        onMessageChange = { viewModel.updateMessage(greet.id, it) },
-                    )
-                    if (!greet.webhookUrl.isNullOrBlank()) {
-                        Text(
-                            text = "Posted through a webhook.",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        EmbedMessageEditor(
+                            message = EmbedMessage.parse(greet.message),
+                            onMessageChange = { viewModel.updateMessage(greet.id, it) },
                         )
+                        if (!greet.webhookUrl.isNullOrBlank()) {
+                            Text(
+                                text = "Posted through a webhook.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
                     }
                 }
             }

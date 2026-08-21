@@ -25,6 +25,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -102,83 +103,85 @@ fun RepeatersScreen(
             }
         } else {
             state.repeaters.forEach { repeater ->
-                SectionCard {
-                    SectionCardHeader(
-                        title = "#${state.channelName(repeater.channelId)}",
-                        icon = Icons.Default.Tag,
-                        trailing = {
-                            Row {
-                                IconButton(onClick = { viewModel.triggerNow(repeater.id) }) {
-                                    Icon(Icons.Default.PlayArrow, contentDescription = "Post now")
+                key(repeater.id) {
+                    SectionCard {
+                        SectionCardHeader(
+                            title = "#${state.channelName(repeater.channelId)}",
+                            icon = Icons.Default.Tag,
+                            trailing = {
+                                Row {
+                                    IconButton(onClick = { viewModel.triggerNow(repeater.id) }) {
+                                        Icon(Icons.Default.PlayArrow, contentDescription = "Post now")
+                                    }
+                                    IconButton(onClick = { pendingDelete = repeater }) {
+                                        Icon(
+                                            Icons.Default.Delete,
+                                            contentDescription = "Delete repeater",
+                                            tint = MaterialTheme.colorScheme.error,
+                                        )
+                                    }
                                 }
-                                IconButton(onClick = { pendingDelete = repeater }) {
-                                    Icon(
-                                        Icons.Default.Delete,
-                                        contentDescription = "Delete repeater",
-                                        tint = MaterialTheme.colorScheme.error,
-                                    )
-                                }
-                            }
-                        },
-                    )
-                    FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        TagChip(repeater.trigger.label)
-                        TagChip("Every ${repeater.interval}")
-                        TagChip("Priority ${repeater.priority}")
-                        TagChip("${repeater.displayCount} posts")
-                        repeater.nextExecution?.let { TagChip("Next ${it.relativeToNow()}") }
-                        repeater.lastDisplayed?.let { TagChip("Last ${it.relativeToNow()}") }
-                    }
-                    SwitchRow(
-                        title = "Enabled",
-                        checked = repeater.isEnabled,
-                        onCheckedChange = { viewModel.update(repeater.id, isEnabled = it) },
-                    )
-                    SwitchRow(
-                        title = "Skip if unchanged",
-                        subtitle = "Do not repost when the message is still the newest",
-                        checked = repeater.noRedundant,
-                        onCheckedChange = { viewModel.update(repeater.id, noRedundant = it) },
-                    )
-                    SwitchRow(
-                        title = "Silent",
-                        subtitle = "Post without triggering notifications",
-                        checked = repeater.suppressNotifications,
-                        onCheckedChange = {
-                            viewModel.update(repeater.id, suppressNotifications = it)
-                        },
-                    )
-                    SliderRow(
-                        label = "Priority",
-                        value = repeater.priority.toFloat(),
-                        onValueChange = { },
-                        onValueChangeFinished = { },
-                        valueRange = 0f..100f,
-                        valueLabel = "${repeater.priority}",
-                    )
-                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                        listOf(10, 50, 90).forEach { value ->
-                            TextButton(
-                                onClick = { viewModel.update(repeater.id, priority = value) },
-                            ) { Text("$value") }
+                            },
+                        )
+                        FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            TagChip(repeater.trigger.label)
+                            TagChip("Every ${repeater.interval}")
+                            TagChip("Priority ${repeater.priority}")
+                            TagChip("${repeater.displayCount} posts")
+                            repeater.nextExecution?.let { TagChip("Next ${it.relativeToNow()}") }
+                            repeater.lastDisplayed?.let { TagChip("Last ${it.relativeToNow()}") }
                         }
+                        SwitchRow(
+                            title = "Enabled",
+                            checked = repeater.isEnabled,
+                            onCheckedChange = { viewModel.update(repeater.id, isEnabled = it) },
+                        )
+                        SwitchRow(
+                            title = "Skip if unchanged",
+                            subtitle = "Do not repost when the message is still the newest",
+                            checked = repeater.noRedundant,
+                            onCheckedChange = { viewModel.update(repeater.id, noRedundant = it) },
+                        )
+                        SwitchRow(
+                            title = "Silent",
+                            subtitle = "Post without triggering notifications",
+                            checked = repeater.suppressNotifications,
+                            onCheckedChange = {
+                                viewModel.update(repeater.id, suppressNotifications = it)
+                            },
+                        )
+                        SliderRow(
+                            label = "Priority",
+                            value = repeater.priority.toFloat(),
+                            onValueChange = { },
+                            onValueChangeFinished = { },
+                            valueRange = 0f..100f,
+                            valueLabel = "${repeater.priority}",
+                        )
+                        Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                            listOf(10, 50, 90).forEach { value ->
+                                TextButton(
+                                    onClick = { viewModel.update(repeater.id, priority = value) },
+                                ) { Text("$value") }
+                            }
+                        }
+                        DiscordSelectorSingle(
+                            kind = SelectorKind.Custom(Icons.Default.Repeat),
+                            options = StickyTriggerMode.entries.map {
+                                SelectorOption(it.raw.toString(), it.label, it.blurb)
+                            },
+                            placeholder = "Interval",
+                            label = "Trigger mode",
+                            selectedId = repeater.triggerMode.toString(),
+                            onSelect = {
+                                viewModel.update(repeater.id, triggerMode = it?.toIntOrNull() ?: 0)
+                            },
+                        )
+                        EmbedMessageEditor(
+                            message = EmbedMessage.parse(repeater.message),
+                            onMessageChange = { viewModel.setMessage(repeater.id, it) },
+                        )
                     }
-                    DiscordSelectorSingle(
-                        kind = SelectorKind.Custom(Icons.Default.Repeat),
-                        options = StickyTriggerMode.entries.map {
-                            SelectorOption(it.raw.toString(), it.label, it.blurb)
-                        },
-                        placeholder = "Interval",
-                        label = "Trigger mode",
-                        selectedId = repeater.triggerMode.toString(),
-                        onSelect = {
-                            viewModel.update(repeater.id, triggerMode = it?.toIntOrNull() ?: 0)
-                        },
-                    )
-                    EmbedMessageEditor(
-                        message = EmbedMessage.parse(repeater.message),
-                        onMessageChange = { viewModel.setMessage(repeater.id, it) },
-                    )
                 }
             }
         }

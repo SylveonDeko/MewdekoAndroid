@@ -17,6 +17,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -106,62 +107,64 @@ fun StatusRolesScreen(
             }
         } else {
             state.configs.forEach { config ->
-                SectionCard {
-                    SectionCardHeader(
-                        title = config.status.orEmpty().ifBlank { "Rule #${config.id}" },
-                        icon = Icons.Default.SentimentSatisfied,
-                        trailing = {
-                            IconButton(onClick = { pendingDelete = config }) {
-                                Icon(
-                                    Icons.Default.Delete,
-                                    contentDescription = "Remove rule",
-                                    tint = MaterialTheme.colorScheme.error,
-                                )
-                            }
-                        },
-                    )
-                    DiscordSelector(
-                        kind = SelectorKind.Role,
-                        options = roleOptions,
-                        placeholder = "No roles granted",
-                        label = "Grant while matching",
-                        multiple = true,
-                        selection = config.addRoleIds,
-                        onSelectionChange = { viewModel.setAddRoles(config.id, it) },
-                    )
-                    DiscordSelector(
-                        kind = SelectorKind.Role,
-                        options = roleOptions,
-                        placeholder = "No roles revoked",
-                        label = "Revoke while matching",
-                        multiple = true,
-                        selection = config.removeRoleIds,
-                        onSelectionChange = { viewModel.setRemoveRoles(config.id, it) },
-                    )
-                    DiscordSelectorSingle(
-                        kind = SelectorKind.Channel,
-                        options = channelOptions,
-                        placeholder = "No announcement channel",
-                        label = "Announce in",
-                        selectedId = config.statusChannelId,
-                        onSelect = { it?.let { id -> viewModel.setChannel(config.id, id) } },
-                    )
-                    SwitchRow(
-                        title = "Revoke granted roles on change",
-                        subtitle = "Take the granted roles back when the status no longer matches",
-                        checked = config.removeAdded,
-                        onCheckedChange = { viewModel.toggleRemoveAdded(config.id) },
-                    )
-                    SwitchRow(
-                        title = "Restore revoked roles on change",
-                        subtitle = "Give the revoked roles back when the status no longer matches",
-                        checked = config.readdRemoved,
-                        onCheckedChange = { viewModel.toggleReaddRemoved(config.id) },
-                    )
-                    EmbedMessageEditor(
-                        message = EmbedMessage.parse(config.statusEmbed),
-                        onMessageChange = { viewModel.setEmbed(config.id, it) },
-                    )
+                key(config.id) {
+                    SectionCard {
+                        SectionCardHeader(
+                            title = config.status.orEmpty().ifBlank { "Rule #${config.id}" },
+                            icon = Icons.Default.SentimentSatisfied,
+                            trailing = {
+                                IconButton(onClick = { pendingDelete = config }) {
+                                    Icon(
+                                        Icons.Default.Delete,
+                                        contentDescription = "Remove rule",
+                                        tint = MaterialTheme.colorScheme.error,
+                                    )
+                                }
+                            },
+                        )
+                        DiscordSelector(
+                            kind = SelectorKind.Role,
+                            options = roleOptions,
+                            placeholder = "No roles granted",
+                            label = "Grant while matching",
+                            multiple = true,
+                            selection = config.addRoleIds,
+                            onSelectionChange = { viewModel.setAddRoles(config.id, it) },
+                        )
+                        DiscordSelector(
+                            kind = SelectorKind.Role,
+                            options = roleOptions,
+                            placeholder = "No roles revoked",
+                            label = "Revoke while matching",
+                            multiple = true,
+                            selection = config.removeRoleIds,
+                            onSelectionChange = { viewModel.setRemoveRoles(config.id, it) },
+                        )
+                        DiscordSelectorSingle(
+                            kind = SelectorKind.Channel,
+                            options = channelOptions,
+                            placeholder = "No announcement channel",
+                            label = "Announce in",
+                            selectedId = config.statusChannelId,
+                            onSelect = { it?.let { id -> viewModel.setChannel(config.id, id) } },
+                        )
+                        SwitchRow(
+                            title = "Revoke granted roles on change",
+                            subtitle = "Take the granted roles back when the status no longer matches",
+                            checked = config.removeAdded,
+                            onCheckedChange = { viewModel.toggleRemoveAdded(config.id) },
+                        )
+                        SwitchRow(
+                            title = "Restore revoked roles on change",
+                            subtitle = "Give the revoked roles back when the status no longer matches",
+                            checked = config.readdRemoved,
+                            onCheckedChange = { viewModel.toggleReaddRemoved(config.id) },
+                        )
+                        EmbedMessageEditor(
+                            message = EmbedMessage.parse(config.statusEmbed),
+                            onMessageChange = { viewModel.setEmbed(config.id, it) },
+                        )
+                    }
                 }
             }
         }
