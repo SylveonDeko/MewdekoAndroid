@@ -1,0 +1,20 @@
+
+# Release signing material, never committed
+keystore.properties
+*.jks
+*.keystore
+
+# Build outputs and caches
+*.iml
+.gradle/
+.kotlin/
+build/
+app/build/
+captures/
+.externalNativeBuild/
+.cxx/
+local.properties
+
+# Android Studio / IntelliJ
+.idea/
+*.hprof
