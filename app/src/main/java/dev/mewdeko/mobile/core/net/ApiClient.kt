@@ -17,7 +17,7 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.DeserializationStrategy
-import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.serializer
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import javax.inject.Inject
@@ -39,13 +39,7 @@ class ApiClient @Inject constructor(
     private val auth: AuthManager,
 ) {
     private val stateLock = Mutex()
-    private var baseUrl: String? = null
     private var instanceBotId: Snowflake? = null
-
-    /** Sets the dashboard endpoint that all subsequent requests are issued against. */
-    suspend fun configure(baseUrl: String) = stateLock.withLock {
-        this.baseUrl = baseUrl.trimEnd('/')
-    }
 
     /**
      * Records the bot instance to attach to authenticated requests via the
@@ -59,8 +53,14 @@ class ApiClient @Inject constructor(
     /** The bot instance currently pinned for requests, if any. */
     suspend fun currentInstance(): Snowflake? = stateLock.withLock { instanceBotId }
 
-    /** The dashboard this client is pointed at, if configured. */
-    suspend fun currentBaseUrl(): String? = stateLock.withLock { baseUrl }
+    /**
+     * The dashboard this client is pointed at, if configured.
+     *
+     * Delegates to [AuthManager] rather than keeping its own copy, so this
+     * can never point at a different server than the one [auth] is issuing
+     * tokens for.
+     */
+    suspend fun currentBaseUrl(): String? = auth.currentBaseUrl()
 
     /**
      * Issues a request and decodes the response with [strategy]. On a 401 the
@@ -104,7 +104,7 @@ class ApiClient @Inject constructor(
      */
     suspend fun sendArrayCount(path: String): Int {
         val element = sendRaw(Endpoint(path))
-        return (element as? JsonArray)?.size ?: 0
+        return element.firstArrayOrNull()?.size ?: 0
     }
 
     private suspend fun perform(endpoint: Endpoint, allowRetry: Boolean): String {
@@ -155,7 +155,7 @@ class ApiClient @Inject constructor(
 
 /** Reified convenience over [ApiClient.send]. */
 suspend inline fun <reified T> ApiClient.get(path: String): T =
-    send(Endpoint(path), MewdekoJson.serializersModule.let { kotlinx.serialization.serializer() })
+    send(Endpoint(path), MewdekoJson.serializersModule.serializer())
 
 /** Reified convenience for a request with an explicit method and body. */
 suspend inline fun <reified T> ApiClient.call(

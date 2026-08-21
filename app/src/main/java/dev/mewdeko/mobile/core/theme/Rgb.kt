@@ -1,10 +1,11 @@
 package dev.mewdeko.mobile.core.theme
 
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.toArgb
+import androidx.core.graphics.ColorUtils
 import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
-import kotlin.math.pow
 
 /** An RGB triple with components in `0..1`. */
 data class Rgb(val r: Double, val g: Double, val b: Double) {
@@ -13,11 +14,7 @@ data class Rgb(val r: Double, val g: Double, val b: Double) {
     val color: Color get() = Color(r.toFloat(), g.toFloat(), b.toFloat(), 1f)
 
     /** WCAG relative luminance. */
-    val luminance: Double
-        get() {
-            fun channel(c: Double) = if (c <= 0.03928) c / 12.92 else ((c + 0.055) / 1.055).pow(2.4)
-            return 0.2126 * channel(r) + 0.7152 * channel(g) + 0.0722 * channel(b)
-        }
+    val luminance: Double get() = ColorUtils.calculateLuminance(color.toArgb()).toDouble()
 
     /** Conversion to HSL with components in `0..1`. */
     val hsl: Triple<Double, Double, Double>

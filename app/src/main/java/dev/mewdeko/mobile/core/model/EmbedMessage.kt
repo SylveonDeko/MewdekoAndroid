@@ -45,11 +45,16 @@ data class EmbedField(
     val name: String = "",
     val value: String = "",
     val inline: Boolean = false,
-) {
-    /** Stable local identity for list keying; not part of the wire form. */
+    /**
+     * Stable local identity for list keying; not part of the wire form.
+     *
+     * Declared as a constructor property so `copy()` preserves it instead of
+     * minting a fresh id on every edit, which would reset Compose's list-item
+     * identity (focus, cursor position) on each keystroke.
+     */
     @kotlinx.serialization.Transient
-    val localId: String = UUID.randomUUID().toString()
-}
+    val localId: String = UUID.randomUUID().toString(),
+)
 
 /** A single embed within an [EmbedMessage]. */
 @Serializable
@@ -63,11 +68,10 @@ data class EmbedSpec(
     val thumbnail: UrlBox? = null,
     val image: UrlBox? = null,
     val fields: List<EmbedField> = emptyList(),
-) {
     /** Stable local identity for list keying; not part of the wire form. */
     @kotlinx.serialization.Transient
-    val localId: String = UUID.randomUUID().toString()
-
+    val localId: String = UUID.randomUUID().toString(),
+) {
     /** The thumbnail URL, flattened out of its wrapper. */
     val thumbnailUrl: String get() = thumbnail?.url.orEmpty()
 

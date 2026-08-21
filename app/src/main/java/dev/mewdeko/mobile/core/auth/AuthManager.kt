@@ -116,6 +116,15 @@ class AuthManager @Inject constructor(
         return store.loadUser(id)
     }
 
+    /**
+     * The dashboard base URL currently configured, if any.
+     *
+     * [ApiClient] reads this rather than keeping its own copy, so the base
+     * URL and the server id backing [currentAccessToken] can never fall out
+     * of sync with each other.
+     */
+    suspend fun currentBaseUrl(): String? = lock.withLock { baseUrl }
+
     /** Returns a valid access token, refreshing it when near expiry. */
     suspend fun currentAccessToken(): String {
         val id = lock.withLock { serverId } ?: throw AuthError.NotConfigured
@@ -130,11 +139,10 @@ class AuthManager @Inject constructor(
      * in-flight request.
      */
     suspend fun refresh(): StoredTokens {
-        val existing = lock.withLock { inflightRefresh }
-        if (existing != null && existing.isActive) return existing.await()
-
-        val task = scope.async { performRefresh() }
-        lock.withLock { inflightRefresh = task }
+        val task = lock.withLock {
+            inflightRefresh?.takeIf { it.isActive }
+                ?: scope.async { performRefresh() }.also { inflightRefresh = it }
+        }
         return try {
             task.await()
         } finally {

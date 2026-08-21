@@ -130,7 +130,6 @@ class AppViewModel @Inject constructor(
         val saved = configStore.upsert(serverConfig)
         _state.update { it.copy(serverConfig = saved) }
         refreshServerList()
-        api.configure(saved.baseUrl)
         auth.configure(saved.baseUrl, saved.id)
 
         return try {

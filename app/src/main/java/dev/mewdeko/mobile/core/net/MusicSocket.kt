@@ -37,13 +37,6 @@ sealed interface MusicSocketEvent {
     data class Failed(val cause: Throwable) : MusicSocketEvent
 }
 
-/** Frames whose payload is nested under `data` with an `event` discriminator. */
-@Serializable
-private data class MusicSocketEnvelope(
-    val event: String? = null,
-    val `data`: MusicStatus? = null,
-)
-
 /**
  * Live music event stream backed by the dashboard's WebSocket relay.
  *
@@ -77,7 +70,7 @@ class MusicSocket @Inject constructor(
         val wsUrl = buildString {
             append(baseUrl.replaceFirst("https://", "wss://").replaceFirst("http://", "ws://"))
             append("/api/mobile/music/ws")
-            append("?guildId=$guildId&userId=$userId&access_token=$token")
+            append("?guildId=$guildId&userId=$userId")
             if (instanceBotId != null) append("&instance=$instanceBotId")
         }
         Log.i(TAG, "connecting to ${wsUrl.substringBefore("?")}")
@@ -112,20 +105,21 @@ class MusicSocket @Inject constructor(
     /**
      * Decodes one frame, accepting either a bare status object or the
      * `{ event, data }` envelope the relay sometimes wraps it in.
+     *
+     * Every [MusicStatus] field is optional, so a decode attempt against the
+     * envelope's own top-level shape would succeed trivially instead of
+     * failing over. The `data` key is checked structurally first so the
+     * envelope is never mistaken for a status object.
      */
     private fun decode(text: String): MusicSocketEvent {
         val element = runCatching { MewdekoJson.parseToJsonElement(text).normalizeKeys() }
             .getOrNull() as? JsonObject
             ?: return MusicSocketEvent.Raw(text)
 
-        runCatching {
-            MewdekoJson.decodeFromJsonElement(MusicStatus.serializer(), element)
-        }.getOrNull()?.let { return MusicSocketEvent.Status(it) }
+        val statusElement = element["data"] as? JsonObject ?: element
 
-        runCatching {
-            MewdekoJson.decodeFromJsonElement(MusicSocketEnvelope.serializer(), element)
-        }.getOrNull()?.data?.let { return MusicSocketEvent.Status(it) }
-
-        return MusicSocketEvent.Raw(text)
+        return runCatching {
+            MewdekoJson.decodeFromJsonElement(MusicStatus.serializer(), statusElement)
+        }.getOrNull()?.let { MusicSocketEvent.Status(it) } ?: MusicSocketEvent.Raw(text)
     }
 }
