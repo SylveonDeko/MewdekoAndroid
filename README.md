@@ -14,7 +14,7 @@ Every dashboard feature is ported natively: moderation (including ban purge sett
 
 ## Requirements
 
-- Android Studio (or a JDK 17-26 + Android SDK toolchain; Gradle 9.5 and AGP 9.3 run on any of them)
+- Android Studio (or a JDK 17-26 + Android SDK toolchain; Gradle 9.5 and AGP 9.2 run on any of them)
 - A running Mewdeko bot instance behind a dashboard that exposes the mobile OAuth endpoints (see [MewdekoDash](https://github.com/SylveonDeko/MewdekoDash)), or the hosted dashboard at mewdeko.tech
 
 ## Building
@@ -45,7 +45,7 @@ Play uploads go through the [gradle-play-publisher](https://github.com/Triple-T/
 ./gradlew :app:publishReleaseBundle --track internal
 ```
 
-`.github/workflows/android-release.yml` does this automatically on every push to `main`: it bumps `versionCode`/`versionName`, builds a signed AAB from repo secrets, and publishes it to the `internal` track.
+`.github/workflows/android-release.yml` does this automatically on every push to `main`: it bumps `versionCode`/`versionName`, builds a signed AAB and APK from repo secrets, publishes the AAB to the `internal` track, and cuts a matching [GitHub release](https://github.com/SylveonDeko/MewdekoAndroid/releases) with the signed APK attached.
 
 ## Project structure
 

@@ -31,6 +31,7 @@ jobs:
         uses: gradle/actions/setup-gradle@v4
 
       - name: Bump version
+        id: bump
         run: |
           set -euo pipefail
           CURRENT_CODE=$(grep -oP '(?<=versionCode = )\d+' app/build.gradle.kts)
@@ -49,6 +50,8 @@ jobs:
 
           echo "versionCode: $CURRENT_CODE -> $NEW_CODE"
           echo "versionName: $CURRENT_NAME -> $NEW_NAME"
+          echo "version_name=$NEW_NAME" >> "$GITHUB_OUTPUT"
+          echo "version_code=$NEW_CODE" >> "$GITHUB_OUTPUT"
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add app/build.gradle.kts
@@ -86,9 +89,20 @@ jobs:
           echo "serviceAccountCredentials=$SERVICE_ACCOUNT_PATH" > app/play.properties
 
       - name: Build and publish to Play internal track
-        run: ./gradlew :app:publishReleaseBundle --track internal --release-status=completed
+        run: ./gradlew :app:assembleRelease :app:publishReleaseBundle --track internal --release-status=completed
 
       - name: Clean up secrets from workspace
         if: always()
         run: |
           rm -f upload-keystore.jks play-service-account.json keystore.properties app/play.properties
+
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION_NAME: ${{ steps.bump.outputs.version_name }}
+        run: |
+          set -euo pipefail
+          gh release create "v$VERSION_NAME" \
+            app/build/outputs/apk/release/*.apk \
+            --title "v$VERSION_NAME" \
+            --notes "$COMMIT_MSG"
