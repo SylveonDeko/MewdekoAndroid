@@ -10,11 +10,11 @@ Built with Kotlin, Jetpack Compose, and Material 3.
 
 ## Features
 
-Every dashboard feature is ported natively, including moderation, XP, music, tickets, forms, embed and component building, chat triggers, giveaways, starboard, suggestions, custom voice, Minecraft integration, and account/reputation/currency management. The bottom navigation and per-guild theming follow the dashboard's own mobile layout.
+Every dashboard feature is ported natively: moderation (including ban purge settings), XP, music, tickets, forms, embed and component building, chat triggers, giveaways, starboard, suggestions, custom voice, Minecraft integration, and account/reputation/currency management, plus AFK, birthdays, chat saving, confessions, counting, feeds, guild administration, highlights, invites, logging, message stats, multigreets, patreon integration, performance stats, repeaters, role greets, role states, server settings, status roles, stream notifications, and a todo list. The bottom navigation and per-guild theming follow the dashboard's own mobile layout.
 
 ## Requirements
 
-- Android Studio (or a JDK 21 + Android SDK toolchain)
+- Android Studio (or a JDK 17-26 + Android SDK toolchain; Gradle 9.5 and AGP 9.3 run on any of them)
 - A running Mewdeko bot instance behind a dashboard that exposes the mobile OAuth endpoints (see [MewdekoDash](https://github.com/SylveonDeko/MewdekoDash)), or the hosted dashboard at mewdeko.tech
 
 ## Building
@@ -37,11 +37,21 @@ Release builds are unsigned unless a keystore is configured. Copy `keystore.prop
 ./gradlew :app:assembleRelease
 ```
 
+### Play Store publishing
+
+Play uploads go through the [gradle-play-publisher](https://github.com/Triple-T/gradle-play-publisher) plugin. Copy `app/play.properties.example` to `app/play.properties` (gitignored) and point it at a Play Console service-account JSON, then:
+
+```bash
+./gradlew :app:publishReleaseBundle --track internal
+```
+
+`.github/workflows/android-release.yml` does this automatically on every push to `main`: it bumps `versionCode`/`versionName`, builds a signed AAB from repo secrets, and publishes it to the `internal` track.
+
 ## Project structure
 
-- `app/src/main/java/dev/mewdeko/mobile/core/` — networking, auth, theming, and shared UI components used across every feature
-- `app/src/main/java/dev/mewdeko/mobile/feature/` — one package per dashboard feature
-- `app/src/main/java/dev/mewdeko/mobile/navigation/` — the nav graph, route catalog, and bottom bars
+- `app/src/main/java/dev/mewdeko/mobile/core/` - networking, auth, theming, and shared UI components used across every feature
+- `app/src/main/java/dev/mewdeko/mobile/feature/` - one package per dashboard feature
+- `app/src/main/java/dev/mewdeko/mobile/navigation/` - the nav graph, route catalog, and bottom bars
 
 ## Support
 
