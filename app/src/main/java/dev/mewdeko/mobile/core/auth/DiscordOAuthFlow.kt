@@ -21,10 +21,10 @@ data class OAuthResult(
 /** Errors surfaced from [DiscordOAuthFlow]. */
 sealed class DiscordOAuthError(message: String) : Exception(message) {
     /** The user dismissed the browser without authorizing. */
-    data class UserCancelled : DiscordOAuthError("Sign-in cancelled")
+    class UserCancelled : DiscordOAuthError("Sign-in cancelled")
 
     /** The callback URL was missing a code, or its state did not match. */
-    data class MalformedCallback : DiscordOAuthError("Malformed OAuth callback")
+    class MalformedCallback : DiscordOAuthError("Malformed OAuth callback")
 
     /** Discord returned an explicit error in the callback. */
     data class DiscordRejected(val reason: String) : DiscordOAuthError("Discord error: $reason")

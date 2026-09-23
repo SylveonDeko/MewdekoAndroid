@@ -31,7 +31,7 @@ private const val TAG = "MewdekoAuth"
 /** Errors surfaced by [AuthManager]. */
 sealed class AuthError(message: String) : Exception(message) {
     /** No active server has been selected. */
-    data class NotConfigured : AuthError("No server configured")
+    class NotConfigured : AuthError("No server configured")
 
     /** The dashboard rejected the authorization code exchange. */
     data class LoginFailed(val status: Int, val body: String) : AuthError("Login failed ($status): $body")
@@ -40,7 +40,7 @@ sealed class AuthError(message: String) : Exception(message) {
     data class RefreshFailed(val status: Int) : AuthError("Refresh failed ($status)")
 
     /** No tokens are stored for the active server. */
-    data class MissingTokens : AuthError("No stored credentials")
+    class MissingTokens : AuthError("No stored credentials")
 }
 
 /** A freshly minted access/refresh token pair plus, on initial login, the user. */
