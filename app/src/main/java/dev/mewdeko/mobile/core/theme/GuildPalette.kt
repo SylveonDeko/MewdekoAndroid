@@ -7,6 +7,37 @@ import androidx.compose.runtime.Immutable
 import androidx.compose.ui.graphics.Color
 
 /**
+ * The web dashboard's alpha steps.
+ *
+ * The dashboard writes alpha as a two digit hex suffix on a six digit color
+ * (`{primary}20`), so each step is that hex byte over 255, not a percent:
+ * `20` is 12.5 percent and `30` is 18.8 percent. Every palette tint on
+ * Android uses these so the app matches the dashboard exactly.
+ */
+object DashAlpha {
+    /** `05`: the far edge of the page glow. */
+    const val Hex05 = 0x05 / 255f
+
+    /** `08`: list rows and quiet row surfaces. */
+    const val Hex08 = 0x08 / 255f
+
+    /** `10`: card wash edges, the page glow middle, setup chips, chart grid lines. */
+    const val Hex10 = 0x10 / 255f
+
+    /** `15`: card wash middle, the page glow center, selected rows. */
+    const val Hex15 = 0x15 / 255f
+
+    /** `20`: badges, chips, icon backgrounds, tonal buttons. */
+    const val Hex20 = 0x20 / 255f
+
+    /** `30`: card, badge and button borders. */
+    const val Hex30 = 0x30 / 255f
+
+    /** `40`: the dashed setup chip border. */
+    const val Hex40 = 0x40 / 255f
+}
+
+/**
  * A guild-derived seed palette.
  *
  * These nine slots seed a Material 3 [ColorScheme] via [toColorScheme] so
@@ -31,130 +62,152 @@ data class GuildPalette(
     /**
      * Projects this palette onto a full Material 3 color scheme.
      *
-     * Container and "on" roles are derived by lightness so that contrast holds
-     * in both themes rather than being hand-tuned per screen.
+     * Mirrors the web dashboard: in the dark theme the page and card base is
+     * the dashboard body's `#1a202c` ([SlatePage]), the lowest container is
+     * the sidebar's `#121828` ([SlateSidebar]), and the higher containers are
+     * lighter slate steps. None of these are tinted by the palette. The guild
+     * shows up as solid accent ink (primary, secondary, tertiary) and as the
+     * three container roles from [toneRole], which are the accent at the
+     * dashboard's `20` tint composited over the surface.
      */
     fun toColorScheme(dark: Boolean): ColorScheme {
         val base = if (dark) darkColorScheme() else lightColorScheme()
         val p = if (dark) primary.adjustedForDarkUi() else primary.adjustedForLightUi()
         val s = if (dark) secondary.adjustedForDarkUi() else secondary.adjustedForLightUi()
         val a = if (dark) accent.adjustedForDarkUi() else accent.adjustedForLightUi()
+        val primaryRole = toneRole(primary, dark)
+        val secondaryRole = toneRole(secondary, dark)
+        val tertiaryRole = toneRole(accent, dark)
 
         return if (dark) {
             base.copy(
-                primary = p.atLightness(0.72).color,
+                primary = primary.color,
                 onPrimary = p.toned(0.6, 0.14).color,
-                primaryContainer = p.toned(0.5, 0.26).color,
-                onPrimaryContainer = p.atLightness(0.9).color,
-                secondary = s.atLightness(0.7).color,
+                primaryContainer = primaryRole.container,
+                onPrimaryContainer = primaryRole.onContainer,
+                secondary = secondary.color,
                 onSecondary = s.toned(0.5, 0.14).color,
-                secondaryContainer = s.toned(0.4, 0.24).color,
-                onSecondaryContainer = s.atLightness(0.9).color,
-                tertiary = a.atLightness(0.72).color,
+                secondaryContainer = secondaryRole.container,
+                onSecondaryContainer = secondaryRole.onContainer,
+                tertiary = accent.color,
                 onTertiary = a.toned(0.6, 0.14).color,
-                tertiaryContainer = a.toned(0.5, 0.26).color,
-                onTertiaryContainer = a.atLightness(0.9).color,
-                background = p.toned(0.22, 0.07).color,
-                onBackground = p.toned(0.06, 0.95).color,
-                surface = p.toned(0.22, 0.08).color,
-                onSurface = p.toned(0.06, 0.95).color,
-                surfaceVariant = p.toned(0.18, 0.16).color,
+                tertiaryContainer = tertiaryRole.container,
+                onTertiaryContainer = tertiaryRole.onContainer,
                 onSurfaceVariant = muted.color,
-                surfaceContainerLowest = p.toned(0.24, 0.05).color,
-                surfaceContainerLow = p.toned(0.22, 0.09).color,
-                surfaceContainer = p.toned(0.2, 0.12).color,
-                surfaceContainerHigh = p.toned(0.19, 0.15).color,
-                surfaceContainerHighest = p.toned(0.18, 0.19).color,
-                outline = p.toned(0.15, 0.45).color,
-                outlineVariant = p.toned(0.15, 0.26).color,
-                inverseSurface = p.toned(0.1, 0.9).color,
-                inverseOnSurface = p.toned(0.2, 0.12).color,
                 inversePrimary = p.atLightness(0.4).color,
+                background = SlatePage,
+                onBackground = Color(0xFFF1F5F9),
+                surface = SlatePage,
+                onSurface = Color(0xFFF1F5F9),
+                surfaceVariant = Color(0xFF2C3446),
+                surfaceDim = SlateSidebar,
+                surfaceBright = Color(0xFF2C3446),
+                surfaceContainerLowest = SlateSidebar,
+                surfaceContainerLow = SlatePage,
+                surfaceContainer = Color(0xFF1E2534),
+                surfaceContainerHigh = Color(0xFF252D3D),
+                surfaceContainerHighest = Color(0xFF2C3446),
+                inverseSurface = Color(0xFFE2E8F0),
+                inverseOnSurface = Color(0xFF1A202C),
+                outline = Color(0xFF475569),
+                outlineVariant = Color(0xFF334155),
             )
         } else {
             base.copy(
                 primary = p.atLightness(0.42).color,
                 onPrimary = Color.White,
-                primaryContainer = p.toned(0.5, 0.88).color,
-                onPrimaryContainer = p.atLightness(0.18).color,
+                primaryContainer = primaryRole.container,
+                onPrimaryContainer = primaryRole.onContainer,
                 secondary = s.atLightness(0.42).color,
                 onSecondary = Color.White,
-                secondaryContainer = s.toned(0.4, 0.9).color,
-                onSecondaryContainer = s.atLightness(0.18).color,
+                secondaryContainer = secondaryRole.container,
+                onSecondaryContainer = secondaryRole.onContainer,
                 tertiary = a.atLightness(0.42).color,
                 onTertiary = Color.White,
-                tertiaryContainer = a.toned(0.5, 0.9).color,
-                onTertiaryContainer = a.atLightness(0.18).color,
-                background = p.toned(0.28, 0.985).color,
-                onBackground = p.toned(0.15, 0.1).color,
-                surface = p.toned(0.28, 0.985).color,
-                onSurface = p.toned(0.15, 0.1).color,
-                surfaceVariant = p.toned(0.22, 0.92).color,
-                onSurfaceVariant = p.toned(0.2, 0.35).color,
-                surfaceContainerLowest = Color.White,
-                surfaceContainerLow = p.toned(0.3, 0.97).color,
-                surfaceContainer = p.toned(0.3, 0.95).color,
-                surfaceContainerHigh = p.toned(0.28, 0.92).color,
-                surfaceContainerHighest = p.toned(0.26, 0.89).color,
-                outline = p.toned(0.14, 0.5).color,
-                outlineVariant = p.toned(0.18, 0.8).color,
-                inverseSurface = p.toned(0.15, 0.2).color,
-                inverseOnSurface = p.toned(0.2, 0.95).color,
+                tertiaryContainer = tertiaryRole.container,
+                onTertiaryContainer = tertiaryRole.onContainer,
                 inversePrimary = p.atLightness(0.75).color,
+                background = Color(0xFFF8FAFC),
+                onBackground = Color(0xFF0F172A),
+                surface = Color(0xFFFFFFFF),
+                onSurface = Color(0xFF0F172A),
+                surfaceVariant = Color(0xFFE2E8F0),
+                onSurfaceVariant = Color(0xFF475569),
+                surfaceDim = Color(0xFFE2E8F0),
+                surfaceBright = Color(0xFFFFFFFF),
+                surfaceContainerLowest = Color(0xFFFFFFFF),
+                surfaceContainerLow = Color(0xFFF1F5F9),
+                surfaceContainer = Color(0xFFE9EEF5),
+                surfaceContainerHigh = Color(0xFFE2E8F0),
+                surfaceContainerHighest = Color(0xFFD9E0EA),
+                inverseSurface = Color(0xFF1E293B),
+                inverseOnSurface = Color(0xFFF1F5F9),
+                outline = Color(0xFF94A3B8),
+                outlineVariant = Color(0xFFCBD5E1),
             )
         }
     }
 
     /**
-     * Builds a Material-style tone role for a palette slot, using the same
-     * lightness math as the secondary role so contrast holds by construction.
+     * Builds a Material-style tone role for a palette slot.
+     *
+     * The color is the solid accent ink. The container is that ink at the
+     * dashboard's `20` tint ([DashAlpha.Hex20]) composited over the neutral
+     * surface, the same fill as a dashboard badge or secondary button. The
+     * "on container" color is the solid ink again, walked by [readableInk]
+     * until it holds 4.5:1 on the container, so pale hues such as yellow get
+     * a darker variant in the light theme.
      */
     fun toneRole(rgb: Rgb, dark: Boolean): ToneRole {
-        val s = if (dark) rgb.adjustedForDarkUi() else rgb.adjustedForLightUi()
-        return if (dark) {
-            ToneRole(
-                color = s.atLightness(0.7).color,
-                onColor = s.toned(0.5, 0.14).color,
-                container = s.toned(0.4, 0.24).color,
-                onContainer = s.atLightness(0.9).color,
-            )
-        } else {
-            ToneRole(
-                color = s.atLightness(0.42).color,
-                onColor = Color.White,
-                container = s.toned(0.4, 0.9).color,
-                onContainer = s.atLightness(0.18).color,
-            )
+        val s = if (dark) rgb else rgb.adjustedForLightUi()
+        val inkLightness = if (dark) rgb.hsl.third else 0.42
+        val ink = if (dark) rgb else s.atLightness(inkLightness)
+        val surface = if (dark) NeutralDarkSurface else NeutralLightSurface
+        val container = surface.mixed(ink, DashAlpha.Hex20.toDouble())
+        return ToneRole(
+            color = ink.color,
+            onColor = if (dark) s.toned(0.5, 0.14).color else Color.White,
+            container = container.color,
+            onContainer = readableInk(s, inkLightness, container, dark).color,
+        )
+    }
+
+    /**
+     * The solid ink of [seed] that reads on [container].
+     *
+     * Starts at [lightness] and steps away from the container (lighter in the
+     * dark theme, darker in the light theme) until the WCAG contrast reaches
+     * 4.5:1.
+     */
+    private fun readableInk(seed: Rgb, lightness: Double, container: Rgb, dark: Boolean): Rgb {
+        val step = if (dark) 0.03 else -0.03
+        val background = container.luminance
+        var current = lightness
+        repeat(14) {
+            val candidate = seed.atLightness(current)
+            if (Rgb.contrastRatio(candidate.luminance, background) >= 4.5) return candidate
+            current = (current + step).coerceIn(0.05, 0.95)
         }
+        return seed.atLightness(current)
     }
 
     companion object {
-        /** The default palette used before any guild icon has been processed. */
-        val Default = GuildPalette(
-            primary = Rgb.fromHex("#3b82f6"),
-            secondary = Rgb.fromHex("#8b5cf6"),
-            accent = Rgb.fromHex("#ec4899"),
-            muted = Rgb.fromHex("#9ca3af"),
-            gradientStart = Rgb.fromHex("#3a86ff"),
-            gradientMid = Rgb.fromHex("#8338ec"),
-            gradientEnd = Rgb.fromHex("#ff006e"),
-        )
+        /**
+         * The dashboard's default palette (`DEFAULT_PALETTE` in `colorStore.ts`),
+         * used before an icon has been processed and whenever extraction fails.
+         */
+        val Default: GuildPalette = DashboardColorStore.Default.toGuildPalette()
 
-        /** The background the palette derivation measures contrast against. */
-        private val DerivationBackground = Rgb(0.07, 0.09, 0.16)
+        /** The dashboard body background (`app.css`), the dark page and card base. */
+        val SlatePage = Color(0xFF1A202C)
 
-        /** Builds the nine-slot palette around a single dominant color. */
-        fun deriveFrom(dominant: Rgb): GuildPalette {
-            val boosted = dominant.adjustedForDarkUi()
-            return GuildPalette(
-                primary = boosted,
-                secondary = boosted.rotated(30.0),
-                accent = boosted.rotated(-150.0).boostedSaturation(),
-                muted = boosted.softenedForReadability(DerivationBackground),
-                gradientStart = boosted,
-                gradientMid = boosted.rotated(-60.0),
-                gradientEnd = boosted.rotated(-120.0),
-            )
-        }
+        /** The dashboard sidebar background (`colorStore.background`), the lowest dark container. */
+        val SlateSidebar = Color(0xFF121828)
+
+        /** The dark surface every dark tint composites over. */
+        private val NeutralDarkSurface: Rgb = Rgb.fromHex("#1a202c")
+
+        /** The light surface every light tint composites over. */
+        private val NeutralLightSurface: Rgb = Rgb.fromHex("#ffffff")
     }
 }

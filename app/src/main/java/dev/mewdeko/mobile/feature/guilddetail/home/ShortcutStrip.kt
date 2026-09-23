@@ -22,8 +22,6 @@ import androidx.compose.material.icons.filled.AdminPanelSettings
 import androidx.compose.material.icons.filled.ConfirmationNumber
 import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material.icons.filled.ViewAgenda
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.ListItemDefaults
@@ -44,6 +42,8 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import dev.mewdeko.mobile.core.ui.GuildCard
+import dev.mewdeko.mobile.core.ui.guildBorder
 
 /** One shortcut destination. */
 private data class Shortcut(val featureId: String, val label: String, val icon: ImageVector)
@@ -71,9 +71,8 @@ private val Shortcuts = listOf(
 @Composable
 fun ShortcutStrip(onOpenFeature: (String) -> Unit, reduced: Boolean) {
     if (isLargeFont()) {
-        Card(
+        GuildCard(
             shape = MaterialTheme.shapes.large,
-            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
             modifier = Modifier.fillMaxWidth(),
         ) {
             Column {
@@ -120,8 +119,9 @@ fun ShortcutStrip(onOpenFeature: (String) -> Unit, reduced: Boolean) {
 
 /**
  * A tonal circle that morphs to a rounded square while pressed, with its
- * label underneath. The label is hidden from accessibility because the button
- * already carries it.
+ * label underneath. The circle is the dashboard icon background: secondary at
+ * the `20` tint with a `30` border and a solid secondary icon. The label is
+ * hidden from accessibility because the button already carries it.
  */
 @Composable
 fun ShortcutButton(
@@ -147,7 +147,8 @@ fun ShortcutButton(
             onClick = onClick,
             shape = RoundedCornerShape(corner),
             color = MaterialTheme.colorScheme.secondaryContainer,
-            contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+            contentColor = MaterialTheme.colorScheme.secondary,
+            border = guildBorder(MaterialTheme.colorScheme.secondary),
             interactionSource = interactionSource,
             modifier = Modifier
                 .widthIn(max = 64.dp)

@@ -1,56 +1,38 @@
 package dev.mewdeko.mobile.core.theme
 
 import android.graphics.Bitmap
-import androidx.palette.graphics.Palette as AndroidPalette
-import kotlin.math.abs
-import kotlin.math.max
 
 /**
- * Builds a [GuildPalette] from a decoded guild icon.
+ * Builds a [GuildPalette] from a decoded guild icon with the web dashboard's
+ * exact pipeline.
  *
- * Uses AndroidX [AndroidPalette] with a fixed selection score so a given icon
- * always lands on the same accent colour: saturation weighted 0.55,
- * proximity to mid lightness 0.25, and bucket frequency 0.20.
+ * Mirrors `colorThief.getPalette(img, 12)` followed by `colorStore.ts`: the
+ * icon is read at its natural size, every 10th pixel is sampled (skipping
+ * pixels with alpha below 125 and near-white pixels), [Mmcq] quantizes the
+ * samples to 12 colors, and [DashboardColorStore] turns those into the
+ * palette. Any failure lands on the dashboard's default palette.
  */
 object PaletteExtractor {
 
-    private const val SWATCH_COUNT = 24
-    private const val RESAMPLE_TARGET = 48
+    /** The color count the dashboard passes to `getPalette`. */
+    private const val COLOR_COUNT = 12
 
     /** Extracts a palette from [bitmap], falling back to the default on failure. */
-    fun extract(bitmap: Bitmap): GuildPalette {
-        val scaled = runCatching {
-            Bitmap.createScaledBitmap(bitmap, RESAMPLE_TARGET, RESAMPLE_TARGET, true)
-        }.getOrNull() ?: return GuildPalette.Default
+    fun extract(bitmap: Bitmap): GuildPalette = extractDashboardPalette(bitmap).toGuildPalette()
 
-        val swatches = runCatching {
-            AndroidPalette.from(scaled).maximumColorCount(SWATCH_COUNT).generate().swatches
-        }.getOrNull().orEmpty()
-
-        if (scaled !== bitmap) scaled.recycle()
-        if (swatches.isEmpty()) return GuildPalette.Default
-
-        val maxPopulation = swatches.maxOf { it.population }.takeIf { it > 0 }
-            ?: return GuildPalette.Default
-
-        val dominant = swatches
-            .map { Rgb.fromArgb(it.rgb) to it.population }
-            .filter { (rgb, _) ->
-                val (h, s, l) = rgb.hsl
-                @Suppress("UNUSED_EXPRESSION") h
-                s > 0.06 && l > 0.05 && l < 0.95
-            }
-            .maxByOrNull { (rgb, population) -> score(rgb, population, maxPopulation) }
-            ?.first
-            ?: return GuildPalette.Default
-
-        return GuildPalette.deriveFrom(dominant)
+    /** Extracts the palette as the dashboard's hex and `hsl()` strings. */
+    fun extractDashboardPalette(bitmap: Bitmap): DashboardPalette {
+        val colors = runCatching {
+            val width = bitmap.width
+            val height = bitmap.height
+            val argb = IntArray(width * height)
+            bitmap.getPixels(argb, 0, width, 0, 0, width, height)
+            quantizeArgb(argb, width * height)
+        }.getOrNull()
+        return DashboardColorStore.build(colors)
     }
 
-    private fun score(rgb: Rgb, population: Int, maxPopulation: Int): Double {
-        val (_, saturation, lightness) = rgb.hsl
-        val lightnessScore = 1 - abs(lightness - 0.55) / 0.55
-        val frequencyScore = population.toDouble() / maxPopulation.toDouble()
-        return saturation * 0.55 + max(0.0, lightnessScore) * 0.25 + frequencyScore * 0.20
-    }
+    /** ColorThief's sampling and quantization over an unpremultiplied ARGB buffer. */
+    fun quantizeArgb(argb: IntArray, pixelCount: Int): List<IntArray>? =
+        Mmcq.quantize(Mmcq.samplePixels(argb, pixelCount, Mmcq.DEFAULT_QUALITY), COLOR_COUNT)
 }

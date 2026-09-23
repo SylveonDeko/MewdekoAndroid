@@ -20,10 +20,7 @@ import androidx.compose.material.icons.filled.Repeat
 import androidx.compose.material.icons.filled.Sync
 import androidx.compose.material.icons.filled.TouchApp
 import androidx.compose.material.icons.filled.WavingHand
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
-import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -35,7 +32,10 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.mewdeko.mobile.core.model.RoleGreet
+import dev.mewdeko.mobile.core.theme.DashAlpha
+import dev.mewdeko.mobile.core.ui.GuildCard
 import dev.mewdeko.mobile.core.ui.ScallopShape
+import dev.mewdeko.mobile.core.ui.guildBorder
 import dev.mewdeko.mobile.feature.giveaways.GiveawayRecord
 import dev.mewdeko.mobile.feature.guilddetail.GuildOverviewState
 import dev.mewdeko.mobile.feature.guilddetail.formatted
@@ -115,31 +115,37 @@ fun EntertainmentBand(
     )
 }
 
-/** Up to three running giveaways, soonest ending first. */
+/**
+ * Up to three running giveaways, soonest ending first, on the standard card
+ * wash with a secondary hairline and solid secondary icons.
+ */
 @Composable
 fun GiveawayListCard(active: List<GiveawayRecord>, onOpen: () -> Unit, modifier: Modifier = Modifier) {
     val sorted = active.sortedBy { it.`when` ?: Instant.MAX }
     val now = Instant.now()
-    Card(
+    val secondary = MaterialTheme.colorScheme.secondary
+    GuildCard(
         onClick = onOpen,
         shape = MaterialTheme.shapes.large,
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.secondaryContainer,
-            contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
-        ),
+        border = guildBorder(secondary),
         modifier = modifier.fillMaxWidth(),
     ) {
         Column(
             modifier = Modifier.padding(HomeDimens.cardPadding),
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            val content = LocalContentColor.current
+            val muted = MaterialTheme.colorScheme.onSurfaceVariant
             sorted.take(3).forEach { giveaway ->
                 Row(
                     horizontalArrangement = Arrangement.spacedBy(12.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Icon(Icons.Default.CardGiftcard, contentDescription = null, modifier = Modifier.size(20.dp))
+                    Icon(
+                        Icons.Default.CardGiftcard,
+                        contentDescription = null,
+                        tint = secondary,
+                        modifier = Modifier.size(20.dp),
+                    )
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
                             text = giveaway.item?.takeIf { it.isNotBlank() } ?: "Giveaway",
@@ -158,7 +164,7 @@ fun GiveawayListCard(active: List<GiveawayRecord>, onOpen: () -> Unit, modifier:
                         Text(
                             text = detail,
                             style = MaterialTheme.typography.labelMedium,
-                            color = content.copy(alpha = 0.8f),
+                            color = muted,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                         )
@@ -273,7 +279,10 @@ fun AutomationBand(
     )
 }
 
-/** Up to three role greets, active first, with role names and a paused marker. */
+/**
+ * Up to three role greets, active first, with role names and a paused
+ * marker, on the standard card wash with an automation hairline.
+ */
 @Composable
 fun RoleGreetListCard(
     greets: List<RoleGreet>,
@@ -285,17 +294,17 @@ fun RoleGreetListCard(
     val role = roles.automation
     val ordered = greets.sortedBy { it.disabled == true }
     val outline = MaterialTheme.colorScheme.outline
-    Card(
+    val muted = MaterialTheme.colorScheme.onSurfaceVariant
+    GuildCard(
         onClick = onOpen,
         shape = MaterialTheme.shapes.large,
-        colors = CardDefaults.cardColors(containerColor = role.container, contentColor = role.onContainer),
+        border = guildBorder(role.color),
         modifier = modifier.fillMaxWidth(),
     ) {
         Column(
             modifier = Modifier.padding(HomeDimens.cardPadding),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            val content = LocalContentColor.current
             ordered.take(3).forEach { greet ->
                 val paused = greet.disabled == true
                 Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
@@ -316,7 +325,7 @@ fun RoleGreetListCard(
                         if (paused) {
                             Surface(
                                 shape = CircleShape,
-                                color = role.onContainer.copy(alpha = 0.12f),
+                                color = role.color.copy(alpha = DashAlpha.Hex20),
                                 contentColor = role.onContainer,
                             ) {
                                 Text(
@@ -331,7 +340,7 @@ fun RoleGreetListCard(
                         Text(
                             text = message,
                             style = MaterialTheme.typography.bodyMedium,
-                            color = content.copy(alpha = 0.8f),
+                            color = muted,
                             maxLines = 2,
                             overflow = TextOverflow.Ellipsis,
                         )

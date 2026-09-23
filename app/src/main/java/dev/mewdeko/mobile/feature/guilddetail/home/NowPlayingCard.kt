@@ -22,11 +22,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.PauseCircle
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
-import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -54,6 +51,10 @@ import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
 import dev.mewdeko.mobile.core.model.MusicStatus
 import dev.mewdeko.mobile.core.model.PlayerState
+import dev.mewdeko.mobile.core.theme.DashAlpha
+import dev.mewdeko.mobile.core.ui.GuildCard
+import dev.mewdeko.mobile.core.ui.guildBorder
+import dev.mewdeko.mobile.core.ui.readableInk
 import kotlinx.coroutines.delay
 import java.time.Duration
 import java.time.Instant
@@ -61,6 +62,9 @@ import java.time.Instant
 /**
  * The currently playing track, with artwork, a live progress bar, an
  * equalizer while playing, and the queue length. Opens the music player.
+ *
+ * Sits on the standard card wash with a secondary hairline; the progress,
+ * equalizer and queue chip read in the solid secondary color.
  */
 @Composable
 fun NowPlayingCard(music: MusicStatus, reduced: Boolean, onOpen: () -> Unit) {
@@ -78,14 +82,13 @@ fun NowPlayingCard(music: MusicStatus, reduced: Boolean, onOpen: () -> Unit) {
         if (channel != null) append(", in ").append(channel)
     }
     val clamp = fontScaleClamp()
+    val accent = MaterialTheme.colorScheme.secondary
+    val muted = MaterialTheme.colorScheme.onSurfaceVariant
 
-    Card(
+    GuildCard(
         onClick = onOpen,
         shape = MaterialTheme.shapes.extraLarge,
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.secondaryContainer,
-            contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
-        ),
+        border = guildBorder(accent),
         modifier = Modifier
             .fillMaxWidth()
             .semantics(mergeDescendants = true) { contentDescription = label },
@@ -112,7 +115,7 @@ fun NowPlayingCard(music: MusicStatus, reduced: Boolean, onOpen: () -> Unit) {
                     modifier = Modifier
                         .size(72.dp * clamp)
                         .clip(MaterialTheme.shapes.medium)
-                        .background(MaterialTheme.colorScheme.secondary.copy(alpha = 0.25f)),
+                        .background(accent.copy(alpha = DashAlpha.Hex20)),
                     contentAlignment = Alignment.Center,
                 ) {
                     if (artwork != null) {
@@ -126,6 +129,7 @@ fun NowPlayingCard(music: MusicStatus, reduced: Boolean, onOpen: () -> Unit) {
                         Icon(
                             Icons.Default.MusicNote,
                             contentDescription = null,
+                            tint = accent,
                             modifier = Modifier.size(28.dp),
                         )
                     }
@@ -135,7 +139,6 @@ fun NowPlayingCard(music: MusicStatus, reduced: Boolean, onOpen: () -> Unit) {
                     modifier = Modifier.weight(1f),
                     verticalArrangement = Arrangement.spacedBy(2.dp),
                 ) {
-                    val content = LocalContentColor.current
                     Text(
                         text = when {
                             playing -> "Now playing"
@@ -143,7 +146,7 @@ fun NowPlayingCard(music: MusicStatus, reduced: Boolean, onOpen: () -> Unit) {
                             else -> "Idle"
                         },
                         style = MaterialTheme.typography.labelMedium,
-                        color = content.copy(alpha = 0.8f),
+                        color = muted,
                     )
                     Text(
                         text = title,
@@ -155,7 +158,7 @@ fun NowPlayingCard(music: MusicStatus, reduced: Boolean, onOpen: () -> Unit) {
                         Text(
                             text = author,
                             style = MaterialTheme.typography.bodyMedium,
-                            color = content.copy(alpha = 0.8f),
+                            color = muted,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                         )
@@ -193,8 +196,8 @@ fun NowPlayingCard(music: MusicStatus, reduced: Boolean, onOpen: () -> Unit) {
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .height(6.dp),
-                                color = content,
-                                trackColor = content.copy(alpha = 0.15f),
+                                color = accent,
+                                trackColor = accent.copy(alpha = DashAlpha.Hex20),
                                 strokeCap = StrokeCap.Round,
                                 gapSize = 0.dp,
                                 drawStopIndicator = {},
@@ -208,12 +211,12 @@ fun NowPlayingCard(music: MusicStatus, reduced: Boolean, onOpen: () -> Unit) {
                                 Text(
                                     text = HomeSeries.clock(elapsed),
                                     style = MaterialTheme.typography.labelSmall.tabular(),
-                                    color = content.copy(alpha = 0.8f),
+                                    color = muted,
                                 )
                                 Text(
                                     text = HomeSeries.clock(total),
                                     style = MaterialTheme.typography.labelSmall.tabular(),
-                                    color = content.copy(alpha = 0.8f),
+                                    color = muted,
                                 )
                             }
                         }
@@ -224,13 +227,13 @@ fun NowPlayingCard(music: MusicStatus, reduced: Boolean, onOpen: () -> Unit) {
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
-                    val content = LocalContentColor.current
                     if (playing) {
-                        EqualizerBars(color = content, reduced = reduced)
+                        EqualizerBars(color = accent, reduced = reduced)
                     } else if (paused) {
                         Icon(
                             Icons.Default.PauseCircle,
                             contentDescription = null,
+                            tint = accent,
                             modifier = Modifier.size(28.dp),
                         )
                     }
@@ -238,8 +241,8 @@ fun NowPlayingCard(music: MusicStatus, reduced: Boolean, onOpen: () -> Unit) {
                     if (queueSize > 0) {
                         Surface(
                             shape = CircleShape,
-                            color = content.copy(alpha = 0.12f),
-                            contentColor = content,
+                            color = accent.copy(alpha = DashAlpha.Hex20),
+                            contentColor = readableInk(accent, MaterialTheme.colorScheme.surfaceContainerLow),
                         ) {
                             Text(
                                 text = "+$queueSize queued",

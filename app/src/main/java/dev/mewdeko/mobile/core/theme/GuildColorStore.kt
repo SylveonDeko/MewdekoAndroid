@@ -5,6 +5,7 @@ import androidx.collection.LruCache
 import coil.ImageLoader
 import coil.request.ImageRequest
 import coil.request.SuccessResult
+import coil.size.Size
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -55,7 +56,8 @@ class GuildColorStore @Inject constructor(
         loadJob = scope.launch {
             val result = runCatching {
                 val request = ImageRequest.Builder(context)
-                    .data(iconUrl)
+                    .data(dashboardSourceUrl(iconUrl))
+                    .size(Size.ORIGINAL)
                     .allowHardware(false)
                     .build()
                 val drawable = (imageLoader.execute(request) as? SuccessResult)?.drawable
@@ -68,6 +70,17 @@ class GuildColorStore @Inject constructor(
             apply(result, iconUrl)
         }
     }
+
+    /**
+     * The icon URL the dashboard would sample.
+     *
+     * The dashboard loads the bot's `iconUrl`, a Discord CDN URL with no
+     * `size` parameter, and quantizes it at its natural size. The app's
+     * guild list asks the CDN for `?size=128`, which is a different set of
+     * pixels, so the query is dropped here to quantize the same image.
+     */
+    private fun dashboardSourceUrl(iconUrl: String): String =
+        if (iconUrl.startsWith("https://cdn.discordapp.com/")) iconUrl.substringBefore('?') else iconUrl
 
     private fun apply(palette: GuildPalette, url: String?) {
         _palette.value = palette

@@ -12,8 +12,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.SmartToy
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -26,6 +24,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.mewdeko.mobile.core.model.BotStatus
 import dev.mewdeko.mobile.core.ui.Avatar
+import dev.mewdeko.mobile.core.ui.GuildCard
 import dev.mewdeko.mobile.feature.guilddetail.formatted
 import dev.mewdeko.mobile.util.relativeToNow
 import kotlinx.coroutines.delay
@@ -55,9 +54,8 @@ fun BotCard(
     }
     val name = profile?.nickname?.takeIf { it.isNotBlank() } ?: bot?.botName.orEmpty()
 
-    Card(
+    GuildCard(
         shape = MaterialTheme.shapes.large,
-        colors = CardDefaults.cardColors(containerColor = scheme.surfaceContainerLow),
         modifier = Modifier
             .fillMaxWidth()
             .semantics(mergeDescendants = true) {},
@@ -100,7 +98,7 @@ fun BotCard(
                             "v${bot.botVersion} · Discord.Net ${bot.dNetVersion}"
                         },
                         style = MaterialTheme.typography.labelMedium,
-                        color = scheme.onSurfaceVariant,
+                        color = scheme.secondary,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.skeleton(loading),
@@ -115,6 +113,7 @@ fun BotCard(
                             Text(
                                 text = latency.toString(),
                                 style = MaterialTheme.typography.headlineSmall.tabular(),
+                                color = if (healthy) scheme.primary else scheme.tertiary,
                             )
                             Text(
                                 text = " ms",

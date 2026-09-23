@@ -12,6 +12,16 @@ Built with Kotlin, Jetpack Compose, and Material 3.
 
 Every dashboard feature is ported natively: moderation (including ban purge settings), XP, music, tickets, forms, embed and component building, chat triggers, giveaways, starboard, suggestions, custom voice, Minecraft integration, and account/reputation/currency management, plus AFK, birthdays, chat saving, confessions, counting, feeds, guild administration, highlights, invites, logging, message stats, multigreets, patreon integration, performance stats, repeaters, role greets, role states, server settings, status roles, stream notifications, and a todo list. The bottom navigation and per-guild theming follow the dashboard's own mobile layout.
 
+## Installing
+
+Signed APKs are attached to every [GitHub release](https://github.com/SylveonDeko/MewdekoAndroid/releases). Download `app-release.apk` from the latest release and open it on your phone, or use [Obtainium](https://github.com/ImranR98/Obtainium) to keep it updated automatically: add `https://github.com/SylveonDeko/MewdekoAndroid` as a source, or open this link on the device:
+
+```
+obtainium://add/https://github.com/SylveonDeko/MewdekoAndroid
+```
+
+Releases are signed with the same key as the Play Store build, so Obtainium and Play installs upgrade over each other.
+
 ## Requirements
 
 - Android Studio (or a JDK 17-26 + Android SDK toolchain; Gradle 9.5 and AGP 9.2 run on any of them)

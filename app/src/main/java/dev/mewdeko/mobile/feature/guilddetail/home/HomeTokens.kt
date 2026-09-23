@@ -48,6 +48,7 @@ import dev.mewdeko.mobile.core.theme.LocalGuildPalette
 import dev.mewdeko.mobile.core.theme.ToneRole
 import dev.mewdeko.mobile.core.ui.EmphasizedDecelerateEasing
 import kotlinx.coroutines.delay
+import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.roundToLong
 
@@ -152,6 +153,28 @@ fun rememberHomeRoles(): HomeRoles {
             scheme.onTertiaryContainer,
         ),
     )
+}
+
+/**
+ * The role's own color when it holds 3:1 (WCAG large text) on the role's
+ * container, otherwise the on-container color.
+ *
+ * Headline numbers, icons and sparklines on a tonal tile use this so they
+ * read in the guild hue, while very light hues such as yellow on a pastel
+ * container in the light theme fall back to the darker content color.
+ */
+fun ToneRole.emphasis(): Color = readableOn(container)
+
+/**
+ * The role's own color when it holds 3:1 against [surface], otherwise the
+ * on-container color, which is always the high-contrast end of the role in
+ * the current theme.
+ */
+fun ToneRole.readableOn(surface: Color): Color {
+    val fg = color.luminance()
+    val bg = surface.luminance()
+    val ratio = (max(fg, bg) + 0.05f) / (min(fg, bg) + 0.05f)
+    return if (ratio >= 3f) color else onContainer
 }
 
 /**

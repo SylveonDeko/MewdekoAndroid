@@ -21,6 +21,12 @@ import kotlin.math.sin
  * gives a clover.
  *
  * material3 1.3 ships no `MaterialShapes`, so this is hand built.
+ *
+ * Never pass this shape to `Modifier.shadow` or as a card shape with
+ * elevation. Its outline is a concave generic path, and Skia's concave
+ * shadow tessellator can spin for seconds on the Vulkan HWUI pipeline that
+ * Pixel and GrapheneOS devices use, which surfaces as an ANR. Cast the
+ * shadow with `CircleShape` and clip to this shape afterwards.
  */
 data class ScallopShape(val lobes: Int, val depth: Float) : Shape {
 

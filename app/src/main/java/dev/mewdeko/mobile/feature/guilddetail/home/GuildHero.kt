@@ -50,6 +50,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.blur
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.Offset
@@ -324,7 +325,8 @@ private fun HeroIcon(
                     transformOrigin = TransformOrigin(0f, 1f)
                 }
             }
-            .shadow(8.dp, cookie, ambientColor = primary, spotColor = primary)
+            .shadow(8.dp, CircleShape, ambientColor = primary, spotColor = primary)
+            .clip(cookie)
             .background(MaterialTheme.colorScheme.background, cookie),
         contentAlignment = Alignment.Center,
     ) {

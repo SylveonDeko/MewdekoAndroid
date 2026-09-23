@@ -46,12 +46,15 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
+import dev.mewdeko.mobile.core.theme.DashAlpha
 
 /**
  * A labelled switch row.
  *
  * Uses the Material 3 [ListItem] so padding and typography match every
- * other row on the screen.
+ * other row on the screen. The row sits on the dashboard's row surface, the
+ * primary at the `08` tint, which deepens to the `15` selected tint while
+ * the switch is on.
  */
 @Composable
 fun SwitchRow(
@@ -62,15 +65,19 @@ fun SwitchRow(
     subtitle: String? = null,
     enabled: Boolean = true,
 ) {
+    val primary = MaterialTheme.colorScheme.primary
     ListItem(
         headlineContent = { Text(title) },
         supportingContent = subtitle?.let { { Text(it) } },
         trailingContent = {
             Switch(checked = checked, onCheckedChange = onCheckedChange, enabled = enabled)
         },
-        colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+        colors = ListItemDefaults.colors(
+            containerColor = primary.copy(alpha = if (checked && enabled) DashAlpha.Hex15 else DashAlpha.Hex08),
+        ),
         modifier = modifier
             .fillMaxWidth()
+            .clip(MaterialTheme.shapes.medium)
             .clickableRow { if (enabled) onCheckedChange(!checked) },
     )
 }

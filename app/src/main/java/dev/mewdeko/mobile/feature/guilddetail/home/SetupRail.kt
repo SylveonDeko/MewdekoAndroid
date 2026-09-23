@@ -25,7 +25,9 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import dev.mewdeko.mobile.core.theme.DashAlpha
 import dev.mewdeko.mobile.core.ui.dashedBorder
+import dev.mewdeko.mobile.core.ui.readableInk
 import dev.mewdeko.mobile.feature.guilddetail.GuildOverviewState
 import dev.mewdeko.mobile.navigation.NavigationCatalog
 
@@ -119,7 +121,11 @@ fun SetupRail(entries: List<SetupEntry>, onOpenFeature: (String) -> Unit) {
     }
 }
 
-/** One dashed "set up" chip for a feature. */
+/**
+ * One dashed "set up" chip for a feature, the dashboard's exact setup chip:
+ * primary at the `10` tint, a dashed primary border at the `40` tint, and the
+ * label and icon in solid primary.
+ */
 @Composable
 fun SetupChip(
     entry: SetupEntry,
@@ -129,12 +135,14 @@ fun SetupChip(
 ) {
     val item = NavigationCatalog.byId[entry.featureId] ?: return
     val primary = MaterialTheme.colorScheme.primary
+    val shape = MaterialTheme.shapes.medium
     Surface(
         onClick = { onOpenFeature(entry.featureId) },
-        shape = MaterialTheme.shapes.medium,
-        color = primary.copy(alpha = 0.04f),
+        shape = shape,
+        color = primary.copy(alpha = DashAlpha.Hex10),
+        contentColor = MaterialTheme.colorScheme.onSurface,
         modifier = modifier
-            .dashedBorder(width = 1.dp, color = primary.copy(alpha = 0.4f), cornerRadius = 16.dp)
+            .dashedBorder(width = 1.dp, color = primary.copy(alpha = DashAlpha.Hex40), cornerRadius = 16.dp)
             .semantics(mergeDescendants = true) {
                 contentDescription = "${item.label}, ${entry.reason}. Set up"
             },
@@ -150,7 +158,7 @@ fun SetupChip(
                     text = item.label,
                     style = MaterialTheme.typography.bodyLarge,
                     fontWeight = FontWeight.SemiBold,
-                    color = MaterialTheme.colorScheme.onSurface,
+                    color = readableInk(primary, MaterialTheme.colorScheme.background),
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )

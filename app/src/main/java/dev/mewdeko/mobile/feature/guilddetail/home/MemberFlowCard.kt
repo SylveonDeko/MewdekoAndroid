@@ -28,8 +28,6 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.filled.BarChart
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
@@ -71,6 +69,8 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import dev.mewdeko.mobile.core.model.GraphStats
+import dev.mewdeko.mobile.core.theme.DashAlpha
+import dev.mewdeko.mobile.core.ui.GuildCard
 import java.time.Instant
 import java.time.ZoneOffset
 import java.time.format.DateTimeFormatter
@@ -108,9 +108,9 @@ fun MemberFlowCard(
     val stacked = LocalDensity.current.fontScale >= 1.3f
     val clamp = fontScaleClamp()
 
-    Card(
+    val canvas = MaterialTheme.colorScheme.surfaceContainerLow
+    GuildCard(
         shape = MaterialTheme.shapes.extraLarge,
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
         modifier = Modifier.fillMaxWidth(),
     ) {
         Column(
@@ -156,16 +156,16 @@ fun MemberFlowCard(
 
             val stats: @Composable () -> Unit = {
                 FlowStat(label = "Joined", swatch = roles.community.color) {
-                    FlowValue(if (loading) null else joined.toLong())
+                    FlowValue(if (loading) null else joined.toLong(), roles.community.readableOn(canvas))
                 }
                 FlowStat(label = "Left", swatch = roles.safety.color) {
-                    FlowValue(if (loading) null else left.toLong())
+                    FlowValue(if (loading) null else left.toLong(), roles.safety.readableOn(canvas))
                 }
                 FlowStat(label = "Net", swatch = roles.entertainment.color) {
                     Text(
                         text = if (loading) "+123" else HomeSeries.signed(net),
                         style = MaterialTheme.typography.headlineMedium.tabular(),
-                        color = MaterialTheme.colorScheme.onSurface,
+                        color = roles.entertainment.readableOn(canvas),
                         modifier = Modifier.skeleton(loading),
                     )
                 }
@@ -242,13 +242,13 @@ fun FlowStat(label: String, swatch: Color, value: @Composable () -> Unit) {
     }
 }
 
-/** The number slot of a [FlowStat]. */
+/** The number slot of a [FlowStat], drawn in its series color. */
 @Composable
-private fun FlowValue(value: Long?) {
+private fun FlowValue(value: Long?, color: Color) {
     AnimatedCount(
         value = value,
         style = MaterialTheme.typography.headlineMedium,
-        color = MaterialTheme.colorScheme.onSurface,
+        color = color,
         compact = false,
         placeholder = "1,234",
     )
@@ -435,7 +435,8 @@ private fun FlowChartArea(
             geometry = geometry,
             joinColor = roles.community.color,
             leaveColor = roles.safety.color,
-            baseline = MaterialTheme.colorScheme.outlineVariant,
+            baseline = MaterialTheme.colorScheme.primary.copy(alpha = DashAlpha.Hex30),
+            grid = MaterialTheme.colorScheme.primary.copy(alpha = DashAlpha.Hex10),
             labelColor = MaterialTheme.colorScheme.onSurfaceVariant,
             selected = selected,
             onSelect = { selected = it },
@@ -465,6 +466,8 @@ private fun FlowChartArea(
 /**
  * Diverging daily bars: joins rise above the baseline, leaves hang below it.
  *
+ * Bars draw in the solid role colors, the zero axis in [baseline] and the
+ * extreme guide lines in [grid], the dashboard's `10` primary grid tint.
  * A tap selects a day and a long press scrubs across days with haptic ticks;
  * neither captures vertical scrolling. Bars grow in once with a short
  * per-bar stagger unless motion is reduced.
@@ -476,6 +479,7 @@ private fun MemberFlowChart(
     joinColor: Color,
     leaveColor: Color,
     baseline: Color,
+    grid: Color,
     labelColor: Color,
     selected: Int?,
     onSelect: (Int?) -> Unit,
@@ -535,7 +539,7 @@ private fun MemberFlowChart(
         if (g.maxJoins > 0) {
             val y = g.baselineY - g.maxJoins * g.unit
             drawLine(
-                color = baseline.copy(alpha = 0.5f),
+                color = grid,
                 start = Offset(g.plotLeft, y),
                 end = Offset(g.plotRight, y),
                 strokeWidth = 0.5.dp.toPx(),
@@ -544,7 +548,7 @@ private fun MemberFlowChart(
         if (g.maxLeaves > 0) {
             val y = g.baselineY + g.maxLeaves * g.unit
             drawLine(
-                color = baseline.copy(alpha = 0.5f),
+                color = grid,
                 start = Offset(g.plotLeft, y),
                 end = Offset(g.plotRight, y),
                 strokeWidth = 0.5.dp.toPx(),
@@ -589,7 +593,7 @@ private fun MemberFlowChart(
                         ),
                     )
                 }
-                drawPath(path, leaveColor, alpha = if (dim) 0.35f else 0.85f)
+                drawPath(path, leaveColor, alpha = if (dim) 0.35f else 1f)
             }
         }
 

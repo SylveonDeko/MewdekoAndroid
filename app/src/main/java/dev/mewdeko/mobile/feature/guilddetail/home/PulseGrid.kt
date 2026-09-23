@@ -47,9 +47,13 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.mewdeko.mobile.core.model.GuildInfo
+import dev.mewdeko.mobile.core.theme.DashAlpha
 import dev.mewdeko.mobile.core.ui.RingGauge
 import dev.mewdeko.mobile.core.ui.Sparkbars
 import dev.mewdeko.mobile.core.ui.Sparkline
+import dev.mewdeko.mobile.core.ui.guildBorder
+import dev.mewdeko.mobile.core.ui.toneWash
+import dev.mewdeko.mobile.core.ui.washed
 import dev.mewdeko.mobile.feature.guilddetail.GuildMemberStats
 import dev.mewdeko.mobile.feature.guilddetail.GuildRoleStats
 import dev.mewdeko.mobile.feature.guilddetail.formatted
@@ -159,8 +163,13 @@ fun PulseGrid(
 }
 
 /**
- * A tappable tonal tile: icon and title, a large value, an optional trend
- * pill and caption, and a small visual pinned to the bottom.
+ * A tappable tile: icon and title, a large value, an optional trend pill and
+ * caption, and a small visual pinned to the bottom.
+ *
+ * The neutral card surface carries the dashboard's single hue wash of
+ * [accent] (the `20` tint fading to `10`) with a `30` hairline of the same
+ * hue. The icon, value and visual read in the solid [accent]; labels stay on
+ * the neutral muted text color.
  */
 @Composable
 fun PulseTile(
@@ -169,21 +178,26 @@ fun PulseTile(
     value: @Composable () -> Unit,
     delta: DeltaSpec?,
     subline: String?,
-    container: Color,
     content: Color,
     shape: Shape,
     onClick: () -> Unit,
     a11y: String,
     modifier: Modifier = Modifier,
+    accent: Color? = null,
     visual: (@Composable () -> Unit)? = null,
 ) {
     val large = isLargeFont()
     val clamp = fontScaleClamp()
+    val hue = accent ?: content
+    val label = MaterialTheme.colorScheme.onSurfaceVariant
     Card(
         onClick = onClick,
         shape = shape,
-        colors = CardDefaults.cardColors(containerColor = container, contentColor = content),
-        modifier = modifier.semantics(mergeDescendants = true) { contentDescription = a11y },
+        colors = CardDefaults.cardColors(containerColor = Color.Transparent, contentColor = content),
+        border = guildBorder(hue),
+        modifier = modifier
+            .washed(MaterialTheme.colorScheme.surfaceContainerLow, toneWash(hue), shape)
+            .semantics(mergeDescendants = true) { contentDescription = a11y },
     ) {
         Column(
             modifier = Modifier
@@ -196,11 +210,11 @@ fun PulseTile(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                Icon(icon, contentDescription = null, modifier = Modifier.size(20.dp))
+                Icon(icon, contentDescription = null, tint = hue, modifier = Modifier.size(20.dp))
                 Text(
                     text = title,
                     style = MaterialTheme.typography.labelLarge,
-                    color = content.copy(alpha = 0.8f),
+                    color = label,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f),
@@ -208,17 +222,17 @@ fun PulseTile(
                 Icon(
                     Icons.AutoMirrored.Filled.ArrowForward,
                     contentDescription = null,
-                    tint = content.copy(alpha = 0.7f),
+                    tint = hue.copy(alpha = 0.8f),
                     modifier = Modifier.size(16.dp),
                 )
             }
             value()
-            if (delta != null) DeltaChip(delta, content)
+            if (delta != null) DeltaChip(delta, content, hue)
             if (subline != null) {
                 Text(
                     text = subline,
                     style = MaterialTheme.typography.bodySmall,
-                    color = content.copy(alpha = 0.8f),
+                    color = label,
                     maxLines = if (large) 2 else 1,
                     overflow = TextOverflow.Ellipsis,
                 )
@@ -235,10 +249,13 @@ fun PulseTile(
     }
 }
 
-/** A small translucent pill with a trend arrow and a short phrase. */
+/**
+ * A small pill with a trend arrow and a short phrase: the dashboard chip,
+ * [tint] at the `20` tint behind solid [content] text.
+ */
 @Composable
-fun DeltaChip(spec: DeltaSpec, content: Color) {
-    Surface(shape = CircleShape, color = content.copy(alpha = 0.12f), contentColor = content) {
+fun DeltaChip(spec: DeltaSpec, content: Color, tint: Color = content) {
+    Surface(shape = CircleShape, color = tint.copy(alpha = DashAlpha.Hex20), contentColor = content) {
         Row(
             modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
             horizontalArrangement = Arrangement.spacedBy(4.dp),
@@ -310,25 +327,26 @@ private fun MembersTile(
         append(".")
         if (estimate.isNotEmpty()) append(" Trend estimated from joins and leaves.")
     }
+    val hue = role.emphasis()
     PulseTile(
         icon = Icons.Default.Groups,
         title = "Members",
-        value = { TileValue(total?.toLong(), role.onContainer) },
+        value = { TileValue(total?.toLong(), hue) },
         delta = if (flow.isEmpty()) null else DeltaSpec("${HomeSeries.signed(net)} in ${flow.size}d", trendIcon(net)),
         subline = memberStats?.let { "${it.humans.formatted()} people · ${it.bots.formatted()} bots" } ?: "members",
-        container = role.container,
         content = role.onContainer,
         shape = LeafShapes.members,
         onClick = { onOpenFeature("serverstats") },
         a11y = a11y,
         modifier = modifier,
+        accent = hue,
         visual = if (estimate.isEmpty()) {
             null
         } else {
             {
                 Sparkline(
                     values = estimate,
-                    color = role.onContainer,
+                    color = hue,
                     animate = !reduced,
                     modifier = Modifier.matchParentSizeInBox(),
                 )
@@ -363,17 +381,18 @@ private fun MessagesTile(
             value = { TileText("Off", content) },
             delta = null,
             subline = "Tracking disabled",
-            container = MaterialTheme.colorScheme.surfaceContainerHigh,
             content = content,
             shape = LeafShapes.messages,
             onClick = { onOpenFeature("messagestats") },
             a11y = "Messages today, tracking disabled",
             modifier = modifier,
+            accent = MaterialTheme.colorScheme.primary,
         )
         return
     }
 
     val role = roles.automation
+    val hue = role.emphasis()
     val today = if (loaded) messages?.dailyMessages else null
     val a11y = buildString {
         append("Messages today, ")
@@ -384,22 +403,22 @@ private fun MessagesTile(
     PulseTile(
         icon = Icons.Default.Forum,
         title = "Messages today",
-        value = { TileValue(today, role.onContainer) },
+        value = { TileValue(today, hue) },
         delta = peak?.let { DeltaSpec("Busiest ${HomeSeries.hourLabel(it, is24h)}", Icons.Default.Schedule) },
         subline = messages?.let { "${HomeSeries.compact(it.totalMessages)} all time" },
-        container = role.container,
         content = role.onContainer,
         shape = LeafShapes.messages,
         onClick = { onOpenFeature("messagestats") },
         a11y = a11y,
         modifier = modifier,
+        accent = hue,
         visual = if (buckets.isEmpty() || peak == null) {
             null
         } else {
             {
                 Sparkbars(
                     values = buckets,
-                    color = role.onContainer,
+                    color = hue,
                     highlight = peak,
                     dimAlpha = 0.45f,
                     modifier = Modifier.matchParentSizeInBox(),
@@ -421,21 +440,22 @@ private fun TicketsTile(
     modifier: Modifier,
 ) {
     val role = roles.entertainment
+    val hue = role.emphasis()
     val tickets = community.tickets
 
     if (!loaded) {
         PulseTile(
             icon = Icons.Default.ConfirmationNumber,
             title = "Open tickets",
-            value = { TileValue(null, role.onContainer) },
+            value = { TileValue(null, hue) },
             delta = null,
             subline = null,
-            container = role.container,
             content = role.onContainer,
             shape = LeafShapes.tickets,
             onClick = { onOpenFeature("tickets") },
             a11y = "Open tickets, loading",
             modifier = modifier,
+            accent = hue,
         )
         return
     }
@@ -445,10 +465,9 @@ private fun TicketsTile(
         PulseTile(
             icon = Icons.Default.Shield,
             title = "Roles",
-            value = { TileValue(roleStats?.totalRoles?.toLong(), role.onContainer) },
+            value = { TileValue(roleStats?.totalRoles?.toLong(), hue) },
             delta = null,
             subline = subline,
-            container = role.container,
             content = role.onContainer,
             shape = LeafShapes.tickets,
             onClick = { onOpenFeature("rolestates") },
@@ -457,6 +476,7 @@ private fun TicketsTile(
                 if (subline != null) append(", ").append(subline.replace(" · ", ", "))
             },
             modifier = modifier,
+            accent = hue,
         )
         return
     }
@@ -473,15 +493,15 @@ private fun TicketsTile(
     PulseTile(
         icon = Icons.Default.ConfirmationNumber,
         title = "Open tickets",
-        value = { TileValue(open.toLong(), role.onContainer) },
+        value = { TileValue(open.toLong(), hue) },
         delta = null,
         subline = subline,
-        container = role.container,
         content = role.onContainer,
         shape = LeafShapes.tickets,
         onClick = { onOpenFeature("tickets") },
         a11y = "Open tickets, ${open.formatted()}, ${subline.replace(" · ", ", ")}, $pct percent open",
         modifier = modifier,
+        accent = hue,
         visual = {
             Row(
                 modifier = Modifier.fillMaxHeight(),
@@ -490,8 +510,8 @@ private fun TicketsTile(
             ) {
                 RingGauge(
                     fraction = fraction,
-                    color = role.onContainer,
-                    track = role.onContainer.copy(alpha = 0.15f),
+                    color = hue,
+                    track = hue.copy(alpha = DashAlpha.Hex20),
                     size = 36.dp,
                     stroke = 5.dp,
                     animate = !reduced,
@@ -526,6 +546,7 @@ private fun ModerationTile(
     modifier: Modifier,
 ) {
     val role = roles.safety
+    val hue = role.emphasis()
     val warnings = security.warnings
 
     if (!loaded || warnings == null) {
@@ -533,16 +554,16 @@ private fun ModerationTile(
             icon = Icons.Default.Gavel,
             title = "Mod actions",
             value = {
-                if (loaded) TileText("-", role.onContainer) else TileValue(null, role.onContainer)
+                if (loaded) TileText("-", hue) else TileValue(null, hue)
             },
             delta = null,
             subline = if (loaded) "Unavailable" else null,
-            container = role.container,
             content = role.onContainer,
             shape = LeafShapes.moderation,
             onClick = { onOpenFeature("moderation") },
             a11y = if (loaded) "Mod actions, unavailable" else "Mod actions, loading",
             modifier = modifier,
+            accent = hue,
         )
         return
     }
@@ -564,19 +585,19 @@ private fun ModerationTile(
     PulseTile(
         icon = Icons.Default.Gavel,
         title = "Mod actions",
-        value = { TileValue(current.toLong(), role.onContainer) },
+        value = { TileValue(current.toLong(), hue) },
         delta = delta,
         subline = "this week · ${warnings.size.formatted()} warnings total",
-        container = role.container,
         content = role.onContainer,
         shape = LeafShapes.moderation,
         onClick = { onOpenFeature("moderation") },
         a11y = "Mod actions this week, ${current.formatted()}, $trend, ${warnings.size.formatted()} warnings total",
         modifier = modifier,
+        accent = hue,
         visual = {
             Sparkbars(
                 values = daily,
-                color = role.onContainer,
+                color = hue,
                 highlight = daily.lastIndex,
                 dimAlpha = 0.5f,
                 modifier = Modifier.matchParentSizeInBox(),

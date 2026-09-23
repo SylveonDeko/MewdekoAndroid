@@ -1,6 +1,7 @@
 package dev.mewdeko.mobile.feature.guilddetail.home
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -19,8 +20,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
@@ -38,8 +37,12 @@ import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import dev.mewdeko.mobile.core.theme.DashAlpha
 import dev.mewdeko.mobile.core.theme.ToneRole
+import dev.mewdeko.mobile.core.ui.GuildCard
 import dev.mewdeko.mobile.core.ui.ScallopShape
+import dev.mewdeko.mobile.core.ui.guildBorder
+import dev.mewdeko.mobile.core.ui.toneWash
 
 /** One configured feature shown as a compact tappable chip under a band. */
 @Immutable
@@ -86,6 +89,7 @@ fun CategoryBand(
             headlineText = headlineText,
             descriptor = descriptor,
             loading = headlineLoading,
+            role = role,
             trailing = headlineTrailing,
         )
         previews()
@@ -129,7 +133,7 @@ private fun BandHeader(
         )
         TextButton(
             onClick = { onOpenFeature(seeAllId) },
-            colors = ButtonDefaults.textButtonColors(contentColor = role.color),
+            colors = ButtonDefaults.textButtonColors(contentColor = role.onContainer),
         ) {
             Text("See all", style = MaterialTheme.typography.labelLarge)
             Icon(
@@ -143,31 +147,41 @@ private fun BandHeader(
     }
 }
 
-/** The band's expressive-shape icon badge. */
+/**
+ * The band's expressive-shape icon badge: the dashboard icon background, the
+ * role color at the `20` tint with a `30` border, and the icon in the solid
+ * role color. Never a full-strength fill.
+ */
 @Composable
 fun BandBadge(icon: ImageVector, role: ToneRole, shape: Shape) {
     Box(
         modifier = Modifier
             .size(40.dp)
             .clip(shape)
-            .background(role.container),
+            .background(role.color.copy(alpha = DashAlpha.Hex20))
+            .border(1.dp, role.color.copy(alpha = DashAlpha.Hex30), shape),
         contentAlignment = Alignment.Center,
     ) {
-        Icon(icon, contentDescription = null, tint = role.onContainer, modifier = Modifier.size(22.dp))
+        Icon(icon, contentDescription = null, tint = role.color, modifier = Modifier.size(22.dp))
     }
 }
 
-/** The big number and its descriptor, stacked at large font scales. */
+/**
+ * The big number and its descriptor, stacked at large font scales. The
+ * number reads in the band's role color whenever that holds contrast on
+ * the canvas.
+ */
 @Composable
 private fun BandHeadline(
     headline: Long?,
     headlineText: String?,
     descriptor: String,
     loading: Boolean,
+    role: ToneRole,
     trailing: (@Composable () -> Unit)?,
 ) {
     val numberStyle = MaterialTheme.typography.displayMedium
-    val onSurface = MaterialTheme.colorScheme.onSurface
+    val onSurface = role.readableOn(MaterialTheme.colorScheme.background)
     if (isLargeFont()) {
         Column(
             modifier = Modifier
@@ -303,7 +317,13 @@ private fun ChipRows(
     }
 }
 
-/** A tappable metric chip: scalloped icon badge, value, label, optional progress. */
+/**
+ * A tappable metric chip: scalloped icon badge, value, label, optional
+ * progress. The chip carries the dashboard's single hue wash of its band's
+ * role (the `20` tint fading to `10`) with a `30` hairline; the value reads
+ * in the solid role ink and the badge is the role at the `20` tint behind a
+ * solid role icon.
+ */
 @Composable
 fun BandMetricChip(
     chip: BandChip,
@@ -312,10 +332,12 @@ fun BandMetricChip(
     modifier: Modifier = Modifier,
 ) {
     val label = listOfNotNull(chip.label, chip.value, chip.subtitle).joinToString(", ")
-    Card(
+    val hue = role.onContainer
+    GuildCard(
         onClick = { onOpenFeature(chip.featureId) },
         shape = MaterialTheme.shapes.medium,
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
+        wash = toneWash(role.color),
+        border = guildBorder(role.color),
         modifier = modifier
             .heightIn(min = HomeDimens.chipMinHeight)
             .semantics(mergeDescendants = true) { contentDescription = label },
@@ -331,10 +353,10 @@ fun BandMetricChip(
                 modifier = Modifier
                     .size(36.dp)
                     .clip(ScallopShape(8, 0.08f))
-                    .background(role.container),
+                    .background(role.color.copy(alpha = DashAlpha.Hex20)),
                 contentAlignment = Alignment.Center,
             ) {
-                Icon(chip.icon, contentDescription = null, tint = role.onContainer, modifier = Modifier.size(20.dp))
+                Icon(chip.icon, contentDescription = null, tint = role.color, modifier = Modifier.size(20.dp))
             }
             Column(
                 modifier = Modifier.weight(1f),
@@ -343,7 +365,7 @@ fun BandMetricChip(
                 Text(
                     text = chip.value,
                     style = MaterialTheme.typography.titleLarge.tabular(),
-                    color = MaterialTheme.colorScheme.onSurface,
+                    color = hue,
                     maxLines = 1,
                 )
                 Text(
@@ -370,7 +392,7 @@ fun BandMetricChip(
                             .padding(top = 3.dp)
                             .height(3.dp),
                         color = role.color,
-                        trackColor = role.container,
+                        trackColor = role.color.copy(alpha = DashAlpha.Hex20),
                         gapSize = 0.dp,
                         drawStopIndicator = {},
                     )
@@ -379,7 +401,7 @@ fun BandMetricChip(
             Icon(
                 Icons.AutoMirrored.Filled.KeyboardArrowRight,
                 contentDescription = null,
-                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                tint = role.color.copy(alpha = 0.8f),
                 modifier = Modifier.size(20.dp),
             )
         }
@@ -406,6 +428,7 @@ fun SkeletonBand(
             headlineText = null,
             descriptor = "",
             loading = true,
+            role = role,
             trailing = null,
         )
         Box(

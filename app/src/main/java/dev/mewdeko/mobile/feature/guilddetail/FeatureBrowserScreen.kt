@@ -33,6 +33,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.rememberScrollState
 import dev.mewdeko.mobile.core.ui.EmptyState
 import dev.mewdeko.mobile.core.ui.FeatureLinkCard
+import dev.mewdeko.mobile.core.ui.guildGlow
 import dev.mewdeko.mobile.navigation.FeatureCategory
 import dev.mewdeko.mobile.navigation.GuildRouteArgs
 import dev.mewdeko.mobile.navigation.NavigationCatalog
@@ -70,7 +71,7 @@ fun FeatureBrowserScreen(
         },
         containerColor = MaterialTheme.colorScheme.background,
     ) { padding ->
-        Box(modifier = Modifier.padding(padding)) {
+        Box(modifier = Modifier.padding(padding).guildGlow()) {
             LazyColumn(
                 modifier = Modifier.fillMaxSize().imePadding(),
                 contentPadding = androidx.compose.foundation.layout.PaddingValues(

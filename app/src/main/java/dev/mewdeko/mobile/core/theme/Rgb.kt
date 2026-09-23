@@ -90,6 +90,22 @@ data class Rgb(val r: Double, val g: Double, val b: Double) {
         return fromHsl(h, saturation, lightness)
     }
 
+    /**
+     * Linearly mixes [amount] of [other] into this color, per channel.
+     *
+     * Equivalent to painting [other] at alpha [amount] over this color, which
+     * is how the tonal containers composite a dashboard tint over the neutral
+     * surface.
+     */
+    fun mixed(other: Rgb, amount: Double): Rgb {
+        val t = amount.coerceIn(0.0, 1.0)
+        return Rgb(
+            r = r + (other.r - r) * t,
+            g = g + (other.g - g) * t,
+            b = b + (other.b - b) * t,
+        )
+    }
+
     companion object {
         /** Builds an [Rgb] from HSL components (each `0..1`). */
         fun fromHsl(h: Double, s: Double, l: Double): Rgb {

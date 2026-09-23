@@ -150,7 +150,6 @@ dependencies {
     implementation(libs.androidx.navigation.compose)
     implementation(libs.androidx.datastore.preferences)
     implementation(libs.androidx.security.crypto)
-    implementation(libs.androidx.palette)
     implementation(libs.androidx.browser)
 
     implementation(libs.hilt.android)
@@ -167,4 +166,6 @@ dependencies {
 
     implementation(libs.coil.compose)
     implementation(libs.vico.compose.m3)
+
+    testImplementation(libs.junit)
 }

@@ -35,13 +35,10 @@ import androidx.compose.material.icons.filled.Groups
 import androidx.compose.material.icons.filled.Numbers
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
-import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -74,10 +71,14 @@ import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
 import dev.mewdeko.mobile.core.model.BirthdayUser
 import dev.mewdeko.mobile.core.model.XpLeaderboardEntry
+import dev.mewdeko.mobile.core.theme.DashAlpha
 import dev.mewdeko.mobile.core.theme.LocalGuildPalette
 import dev.mewdeko.mobile.core.ui.Avatar
+import dev.mewdeko.mobile.core.ui.GuildCard
 import dev.mewdeko.mobile.core.ui.RankedBar
 import dev.mewdeko.mobile.core.ui.ScallopShape
+import dev.mewdeko.mobile.core.ui.guildBorder
+import dev.mewdeko.mobile.core.ui.readableInk
 import dev.mewdeko.mobile.feature.guilddetail.GuildOverviewState
 import dev.mewdeko.mobile.feature.guilddetail.MemberSummary
 import dev.mewdeko.mobile.feature.guilddetail.formatted
@@ -238,10 +239,9 @@ fun XpPodium(
         }
     }
 
-    Card(
+    GuildCard(
         onClick = onOpen,
         shape = MaterialTheme.shapes.extraLarge,
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
         modifier = modifier
             .fillMaxWidth()
             .semantics(mergeDescendants = true) { contentDescription = summary },
@@ -374,7 +374,10 @@ private fun PodiumColumn(
                 .clip(RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp))
                 .background(
                     Brush.verticalGradient(
-                        listOf(scheme.primaryContainer, scheme.primaryContainer.copy(alpha = 0.3f)),
+                        listOf(
+                            scheme.primary.copy(alpha = DashAlpha.Hex20),
+                            scheme.primary.copy(alpha = DashAlpha.Hex08),
+                        ),
                     ),
                 ),
             contentAlignment = Alignment.TopCenter,
@@ -460,10 +463,9 @@ fun ChatterCard(
         .take(3)
     if (channels.isEmpty() && users.isEmpty()) return
 
-    Card(
+    GuildCard(
         onClick = onOpen,
         shape = MaterialTheme.shapes.large,
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
         modifier = modifier.fillMaxWidth(),
     ) {
         Column(
@@ -542,20 +544,17 @@ fun BirthdayCard(
 ) {
     val scheme = MaterialTheme.colorScheme
     val clamp = fontScaleClamp()
-    Card(
+    GuildCard(
         onClick = onOpen,
         shape = MaterialTheme.shapes.large,
-        colors = CardDefaults.cardColors(
-            containerColor = scheme.secondaryContainer,
-            contentColor = scheme.onSecondaryContainer,
-        ),
+        border = guildBorder(scheme.secondary),
         modifier = modifier.fillMaxWidth(),
     ) {
         Column(
             modifier = Modifier.padding(HomeDimens.cardPadding),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            val content = LocalContentColor.current
+            val muted = scheme.onSurfaceVariant
             if (today.isNotEmpty()) {
                 Row(
                     horizontalArrangement = Arrangement.spacedBy(12.dp),
@@ -566,7 +565,7 @@ fun BirthdayCard(
                         size = 36,
                         overlap = 12,
                         max = 5,
-                        ringColor = scheme.secondaryContainer,
+                        ringColor = scheme.surfaceContainerLow,
                         bubbleColor = scheme.secondary,
                         bubbleContent = scheme.onSecondary,
                     )
@@ -580,7 +579,7 @@ fun BirthdayCard(
                         Text(
                             text = "Today",
                             style = MaterialTheme.typography.labelMedium,
-                            color = content.copy(alpha = 0.8f),
+                            color = muted,
                         )
                     }
                     BouncingCake(reduced = reduced, tint = scheme.secondary)
@@ -598,7 +597,7 @@ fun BirthdayCard(
                 Text(
                     text = "${withBirthdays.formatted()} members have a birthday set",
                     style = MaterialTheme.typography.labelMedium,
-                    color = content.copy(alpha = 0.8f),
+                    color = muted,
                 )
             }
         }
@@ -682,10 +681,13 @@ fun AvatarStack(
     }
 }
 
-/** One upcoming birthday: avatar, name and how many days away. */
+/**
+ * One upcoming birthday: avatar, name and how many days away, the last as a
+ * dashboard chip (secondary at the `20` tint behind solid secondary text).
+ */
 @Composable
 fun UpcomingChip(user: BirthdayUser, width: Dp) {
-    val content = LocalContentColor.current
+    val secondary = MaterialTheme.colorScheme.secondary
     Column(
         modifier = Modifier.width(width),
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -699,7 +701,11 @@ fun UpcomingChip(user: BirthdayUser, width: Dp) {
             overflow = TextOverflow.Ellipsis,
             textAlign = TextAlign.Center,
         )
-        Surface(shape = CircleShape, color = content.copy(alpha = 0.12f), contentColor = content) {
+        Surface(
+            shape = CircleShape,
+            color = secondary.copy(alpha = DashAlpha.Hex20),
+            contentColor = readableInk(secondary, MaterialTheme.colorScheme.surfaceContainerLow),
+        ) {
             Text(
                 text = if (user.daysUntil == 1) "Tomorrow" else "in ${user.daysUntil}d",
                 style = MaterialTheme.typography.labelMedium,
@@ -814,7 +820,7 @@ fun StarItem(
     val image = highlight.imageUrl?.takeIf { it.isNotBlank() }
     val author = highlight.authorName.ifBlank { "Unknown" }
     val text = highlight.content?.takeIf { it.isNotBlank() }
-    val content = if (image != null) scheme.onSurface else scheme.onTertiaryContainer
+    val content = scheme.onSurface
 
     Box(
         modifier = modifier

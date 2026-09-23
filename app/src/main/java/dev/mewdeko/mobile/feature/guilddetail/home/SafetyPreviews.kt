@@ -23,8 +23,6 @@ import androidx.compose.material.icons.filled.RemoveModerator
 import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material.icons.filled.VerifiedUser
 import androidx.compose.material.icons.filled.Warning
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
@@ -46,7 +44,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.mewdeko.mobile.core.theme.ToneRole
+import dev.mewdeko.mobile.core.ui.GuildCard
 import dev.mewdeko.mobile.core.ui.ScallopShape
+import dev.mewdeko.mobile.core.ui.guildBorder
 import dev.mewdeko.mobile.feature.guilddetail.formatted
 import dev.mewdeko.mobile.util.relativeToNow
 import java.time.Instant
@@ -173,10 +173,10 @@ fun ProtectionGrid(
         "Mass post" to flags.antiMassPost.enabled,
     )
     val cols = if (isLargeFont()) 1 else 2
-    Card(
+    GuildCard(
         onClick = onOpen,
         shape = MaterialTheme.shapes.large,
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
+        border = guildBorder(role.color),
         modifier = modifier.fillMaxWidth(),
     ) {
         Column(
@@ -257,10 +257,10 @@ fun RecentWarningsCard(
     modifier: Modifier = Modifier,
 ) {
     val latest = warnings.sortedByDescending { it.dateAdded ?: Instant.EPOCH }.take(2)
-    Card(
+    GuildCard(
         onClick = onOpen,
         shape = MaterialTheme.shapes.large,
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
+        border = guildBorder(role.color),
         modifier = modifier.fillMaxWidth(),
     ) {
         Column(

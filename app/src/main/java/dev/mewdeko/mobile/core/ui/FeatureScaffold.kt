@@ -36,8 +36,13 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.draw.drawWithCache
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import dev.mewdeko.mobile.core.theme.DashAlpha
+import dev.mewdeko.mobile.core.theme.LocalGuildPalette
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.text.style.TextOverflow
@@ -138,6 +143,7 @@ fun FeatureScaffold(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
+                .guildGlow()
                 .imePadding(),
         ) {
             when {
@@ -200,10 +206,11 @@ class ImmersiveBar(
 /**
  * The immersive variant of [FeatureScaffold].
  *
- * The bar is pinned and transparent, filling to `surfaceContainer` as
- * [ImmersiveBar.containerFraction] rises, and the content draws under both the
- * status bar and the bar. At a fraction of one it is exactly the standard
- * scrolled small top app bar. The caller owns loading and error rendering.
+ * The bar is pinned and transparent, filling to the neutral
+ * `surfaceContainer` as [ImmersiveBar.containerFraction] rises, and the
+ * content draws under both the status bar and the bar over the page's
+ * [guildGlow]. At a fraction of one it is exactly the standard scrolled small
+ * top app bar. The caller owns loading and error rendering.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -229,7 +236,9 @@ private fun ImmersiveScaffold(
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .drawBehind { drawRect(barColor, alpha = immersive.containerFraction()) },
+                    .drawBehind {
+                        drawRect(barColor, alpha = immersive.containerFraction())
+                    },
             ) {
                 TopAppBar(
                     title = {
@@ -279,6 +288,7 @@ private fun ImmersiveScaffold(
         Box(
             modifier = Modifier
                 .fillMaxSize()
+                .guildGlow()
                 .padding(bottom = padding.calculateBottomPadding())
                 .imePadding(),
         ) {
@@ -337,6 +347,37 @@ fun ImmersiveIconButton(
  * pages here have one.
  */
 private val FloatingActionClearance = 80.dp
+
+/**
+ * The dashboard's page glow, drawn once behind a screen's content.
+ *
+ * Mirrors the web `radial-gradient(circle at top, start15 0%, mid10 50%,
+ * end05 100%)`: a circle anchored at the top center running from the
+ * gradient start at the `15` tint through the middle stop at `10` to the end
+ * stop at `05`, which then holds for the rest of the page. It is the only
+ * palette color on the neutral canvas. The light theme uses half the alpha.
+ */
+@Composable
+fun Modifier.guildGlow(): Modifier {
+    val palette = LocalGuildPalette.current
+    val scale = if (isDarkScheme()) 1f else 0.5f
+    val start = palette.gradientStart.color.copy(alpha = DashAlpha.Hex15 * scale)
+    val middle = palette.gradientMid.color.copy(alpha = DashAlpha.Hex10 * scale)
+    val end = palette.gradientEnd.color.copy(alpha = DashAlpha.Hex05 * scale)
+    return drawWithCache {
+        val glow = Brush.radialGradient(
+            0f to start,
+            0.5f to middle,
+            1f to end,
+            center = Offset(size.width / 2f, 0f),
+            radius = GlowRadius.toPx(),
+        )
+        onDrawBehind { drawRect(glow) }
+    }
+}
+
+/** How far the page glow reaches from the top center before it holds its edge tint. */
+private val GlowRadius = 480.dp
 
 /** The standard horizontal and vertical inset for feature content. */
 val FeatureContentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp)
