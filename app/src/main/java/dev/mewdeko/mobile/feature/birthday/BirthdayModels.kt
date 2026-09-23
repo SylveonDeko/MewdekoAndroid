@@ -69,6 +69,18 @@ data class BirthdayUserDetail(
     val displayName: String get() = nickname?.takeIf { it.isNotBlank() } ?: username
 }
 
+/**
+ * A guild role as returned by `GET api/ClientOperations/roles/{guildId}`, with the `managed`
+ * flag the shared `GuildRole` model does not carry. Kept local to this feature so the shared
+ * model is untouched; defaults to `false` when the field is absent from the payload.
+ */
+@Serializable
+data class BirthdayRole(
+    @Serializable(with = SnowflakeSerializer::class) val id: Snowflake = "",
+    val name: String = "",
+    val managed: Boolean = false,
+)
+
 /** Common timezone presets offered in the picker. */
 data class BirthdayTimezone(val id: String, val label: String) {
     companion object {

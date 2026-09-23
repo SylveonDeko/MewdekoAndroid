@@ -13,8 +13,10 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.QueueMusic
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Block
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.DeleteSweep
+import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
@@ -42,12 +44,14 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.style.TextOverflow
@@ -56,10 +60,12 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil.compose.AsyncImage
 import dev.mewdeko.mobile.core.model.PlayerState
+import dev.mewdeko.mobile.core.model.Snowflake
 import dev.mewdeko.mobile.core.ui.ConfirmDialog
 import dev.mewdeko.mobile.core.ui.DiscordSelectorSingle
 import dev.mewdeko.mobile.core.ui.EmptyState
 import dev.mewdeko.mobile.core.ui.FeatureScaffold
+import dev.mewdeko.mobile.core.ui.MewdekoTextField
 import dev.mewdeko.mobile.core.ui.SearchField
 import dev.mewdeko.mobile.core.ui.SectionCard
 import dev.mewdeko.mobile.core.ui.SectionCardHeader
@@ -69,7 +75,6 @@ import dev.mewdeko.mobile.core.ui.SelectorKind
 import dev.mewdeko.mobile.core.ui.SelectorOption
 import dev.mewdeko.mobile.core.ui.SliderRow
 import dev.mewdeko.mobile.core.ui.SwitchRow
-import dev.mewdeko.mobile.core.ui.TagChip
 import dev.mewdeko.mobile.navigation.GuildRouteArgs
 
 private val Tabs = listOf(
@@ -79,7 +84,33 @@ private val Tabs = listOf(
     SectionTab("tts", "TTS", Icons.Default.RecordVoiceOver),
 )
 
-private val Filters = listOf("nightcore", "bassboost", "vaporwave", "karaoke", "8d", "tremolo")
+/** The eight Lavalink audio filters, keyed by their API name. */
+private val Filters = listOf(
+    "bassboost" to "Bass boost",
+    "nightcore" to "Nightcore",
+    "vaporwave" to "Vaporwave",
+    "karaoke" to "Karaoke",
+    "tremolo" to "Tremolo",
+    "vibrato" to "Vibrato",
+    "rotation" to "8D rotation",
+    "distortion" to "Distortion",
+)
+
+/** The synthetic option id used to clear a channel or role selection. */
+private const val NoneId = "0"
+
+private val RepeatModeOptions = listOf(
+    SelectorOption("0", "Off"),
+    SelectorOption("1", "Single track"),
+    SelectorOption("2", "Queue"),
+)
+
+private val AutoDisconnectOptions = listOf(
+    SelectorOption("0", "Never"),
+    SelectorOption("1", "When voice empty"),
+    SelectorOption("2", "When queue empty"),
+    SelectorOption("3", "Either"),
+)
 
 /** The Lavalink-backed music player. */
 @Composable
@@ -94,6 +125,9 @@ fun MusicScreen(
 
     var showAddTtsChannel by remember { mutableStateOf(false) }
     var pendingClearQueue by remember { mutableStateOf(false) }
+    var showAddLinkChannel by remember { mutableStateOf(false) }
+    var pendingRemoveTtsChannel by remember { mutableStateOf<Snowflake?>(null) }
+    var pendingRemoveLinkChannel by remember { mutableStateOf<Snowflake?>(null) }
 
     FeatureScaffold(
         title = "Music",
@@ -254,64 +288,57 @@ fun MusicScreen(
             }
 
             "tts" -> {
+                var voiceQuery by remember { mutableStateOf("") }
+
                 SectionCard {
                     SectionCardHeader("Text to speech", Icons.Default.RecordVoiceOver)
-                    SliderRow(
+                    CommittingSliderRow(
                         label = "Volume",
                         value = state.tts.ttsVolume.toFloat(),
-                        onValueChange = { },
-                        onValueChangeFinished = { },
                         valueRange = 0f..100f,
-                        valueLabel = "${state.tts.ttsVolume}%",
+                        valueLabel = { "${it.toInt()}%" },
+                        onCommit = {
+                            viewModel.saveTtsSettings(state.tts.copy(ttsVolume = it.toInt()))
+                        },
                     )
-                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                        listOf(25, 50, 75, 100).forEach { volume ->
-                            TextButton(
-                                onClick = {
-                                    viewModel.saveTtsSettings(state.tts.copy(ttsVolume = volume))
-                                },
-                            ) { Text("$volume%") }
-                        }
-                    }
-                    SliderRow(
+                    CommittingSliderRow(
                         label = "Speed",
                         value = state.tts.ttsSpeed.toFloat(),
-                        onValueChange = { },
-                        onValueChangeFinished = { },
-                        valueRange = 0.5f..2f,
-                        valueLabel = "%.1fx".format(state.tts.ttsSpeed),
-                    )
-                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                        listOf(0.75, 1.0, 1.25, 1.5).forEach { speed ->
-                            TextButton(
-                                onClick = {
-                                    viewModel.saveTtsSettings(state.tts.copy(ttsSpeed = speed))
-                                },
-                            ) { Text("%.2fx".format(speed)) }
-                        }
-                    }
-                    DiscordSelectorSingle(
-                        kind = SelectorKind.Custom(Icons.Default.RecordVoiceOver),
-                        options = state.ttsVoices.map {
-                            SelectorOption(it.name, it.name, it.language)
+                        valueRange = 0.5f..3f,
+                        valueLabel = { "%.1fx".format(it) },
+                        onCommit = {
+                            viewModel.saveTtsSettings(state.tts.copy(ttsSpeed = it.toDouble()))
                         },
-                        placeholder = "Default voice",
+                    )
+                    CommittingSliderRow(
+                        label = "Max queue size",
+                        value = state.tts.ttsMaxQueueSize.toFloat(),
+                        valueRange = 1f..50f,
+                        valueLabel = { "${it.toInt()}" },
+                        onCommit = {
+                            viewModel.saveTtsSettings(state.tts.copy(ttsMaxQueueSize = it.toInt()))
+                        },
+                    )
+                    BlurCommitTextField(
+                        value = state.tts.ttsDefaultVoice,
                         label = "Default voice",
-                        selectedId = state.tts.ttsDefaultVoice.takeIf { it.isNotBlank() },
-                        onSelect = { voice ->
-                            viewModel.saveTtsSettings(
-                                state.tts.copy(ttsDefaultVoice = voice.orEmpty())
-                            )
+                        placeholder = "e.g. Brian (leave empty for default)",
+                        supportingText = "Use the voice search below to find available voices.",
+                        onCommit = {
+                            viewModel.saveTtsSettings(state.tts.copy(ttsDefaultVoice = it))
                         },
                     )
                     DiscordSelectorSingle(
                         kind = SelectorKind.Role,
-                        options = state.availableRoles.map { SelectorOption(it.id, it.name) },
+                        options = listOf(SelectorOption(NoneId, "Anyone can use TTS")) +
+                            state.availableRoles.map { SelectorOption(it.id, it.name) },
                         placeholder = "Anyone can use TTS",
                         label = "Required role",
-                        selectedId = state.tts.ttsRoleId,
+                        selectedId = state.tts.ttsRoleId ?: NoneId,
                         onSelect = { role ->
-                            viewModel.saveTtsSettings(state.tts.copy(ttsRoleId = role))
+                            viewModel.saveTtsSettings(
+                                state.tts.copy(ttsRoleId = role?.takeIf { it != NoneId })
+                            )
                         },
                     )
                     SwitchRow(
@@ -339,23 +366,42 @@ fun MusicScreen(
                             )
                         },
                     )
-                    SliderRow(
-                        label = "Max queue size",
-                        value = state.tts.ttsMaxQueueSize.toFloat(),
-                        onValueChange = { },
-                        onValueChangeFinished = { },
-                        valueRange = 1f..50f,
-                        valueLabel = "${state.tts.ttsMaxQueueSize}",
+                }
+
+                SectionCard {
+                    SectionCardHeader("Voice search", Icons.Default.Search)
+                    SearchField(
+                        value = voiceQuery,
+                        onValueChange = { voiceQuery = it },
+                        placeholder = "Search voices (e.g. Brian, English)",
                     )
-                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                        listOf(5, 10, 25, 50).forEach { size ->
-                            TextButton(
-                                onClick = {
-                                    viewModel.saveTtsSettings(
-                                        state.tts.copy(ttsMaxQueueSize = size)
+                    if (voiceQuery.isNotBlank()) {
+                        OutlinedButton(
+                            onClick = { viewModel.searchTtsVoices(voiceQuery) },
+                            modifier = Modifier.fillMaxWidth(),
+                        ) { Text(if (state.isSearchingVoices) "Searching…" else "Search") }
+                    }
+                    if (state.ttsVoiceResults.isNotEmpty()) {
+                        state.ttsVoiceResults.forEach { voice ->
+                            ListItem(
+                                headlineContent = { Text(voice.name) },
+                                supportingContent = {
+                                    Text(
+                                        listOfNotNull(voice.source, voice.language)
+                                            .joinToString(" · "),
                                     )
                                 },
-                            ) { Text("$size") }
+                                trailingContent = {
+                                    TextButton(
+                                        onClick = {
+                                            viewModel.saveTtsSettings(
+                                                state.tts.copy(ttsDefaultVoice = voice.name)
+                                            )
+                                        },
+                                    ) { Text("Use") }
+                                },
+                                colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+                            )
                         }
                     }
                 }
@@ -374,42 +420,47 @@ fun MusicScreen(
                         EmptyState("No voice channels wired up for TTS.")
                     } else {
                         state.tts.voiceChannels.forEach { entry ->
-                            val name = state.voiceChannels
-                                .firstOrNull { it.id == entry.voiceChannelId }
-                                ?.name
-                                ?: entry.voiceChannelId.orEmpty()
-                            ListItem(
-                                headlineContent = { Text(name) },
-                                supportingContent = {
-                                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                        TagChip(if (entry.enabled) "Enabled" else "Disabled")
-                                        if (entry.announceJoinLeave) TagChip("Announces joins")
-                                    }
-                                },
-                                trailingContent = {
-                                    IconButton(
-                                        onClick = {
-                                            entry.voiceChannelId?.let {
-                                                viewModel.removeTtsChannel(it)
-                                            }
-                                        },
-                                    ) {
-                                        Icon(
-                                            Icons.Default.Delete,
-                                            contentDescription = "Remove",
-                                            tint = MaterialTheme.colorScheme.error,
-                                        )
-                                    }
-                                },
-                                colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+                            TtsChannelRow(
+                                entry = entry,
+                                voiceChannelName = state.voiceChannels
+                                    .firstOrNull { it.id == entry.voiceChannelId }
+                                    ?.name
+                                    ?: entry.voiceChannelId.orEmpty(),
+                                textChannels = state.textChannels,
+                                onChange = { updated -> viewModel.upsertTtsChannel(updated) },
+                                onRemove = { pendingRemoveTtsChannel = entry.voiceChannelId },
                             )
                         }
                     }
                 }
 
-                if (state.ttsBlocked.isNotEmpty()) {
-                    SectionCard {
-                        SectionCardHeader("Blocked members", Icons.Default.RecordVoiceOver)
+                SectionCard {
+                    SectionCardHeader("Blocked TTS users", Icons.Default.Block)
+                    var blockUserId by remember { mutableStateOf("") }
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.Bottom,
+                    ) {
+                        Box(modifier = Modifier.weight(1f)) {
+                            MewdekoTextField(
+                                value = blockUserId,
+                                onValueChange = { blockUserId = it },
+                                label = "User ID",
+                                placeholder = "Enter a Discord user ID",
+                                numeric = true,
+                            )
+                        }
+                        Button(
+                            onClick = {
+                                viewModel.setTtsBlocked(blockUserId.trim(), true)
+                                blockUserId = ""
+                            },
+                            enabled = blockUserId.isNotBlank(),
+                        ) { Text("Block") }
+                    }
+                    if (state.ttsBlocked.isEmpty()) {
+                        EmptyState("No members are blocked from TTS.")
+                    } else {
                         state.ttsBlocked.forEach { blocked ->
                             ListItem(
                                 headlineContent = { Text(blocked.userId.orEmpty()) },
@@ -521,17 +572,17 @@ fun MusicScreen(
                         }
                         IconButton(
                             onClick = {
-                                viewModel.setRepeat((state.settings.playerRepeat + 1) % 3)
+                                viewModel.setRepeat((state.effectiveRepeatMode + 1) % 3)
                             },
                         ) {
                             Icon(
-                                imageVector = if (state.settings.playerRepeat == 1) {
+                                imageVector = if (state.effectiveRepeatMode == 1) {
                                     Icons.Default.RepeatOne
                                 } else {
                                     Icons.Default.Repeat
                                 },
                                 contentDescription = "Repeat mode",
-                                tint = if (state.settings.playerRepeat == 0) {
+                                tint = if (state.effectiveRepeatMode == 0) {
                                     MaterialTheme.colorScheme.onSurfaceVariant
                                 } else {
                                     MaterialTheme.colorScheme.primary
@@ -558,21 +609,13 @@ fun MusicScreen(
 
                 SectionCard {
                     SectionCardHeader("Volume", Icons.Default.VolumeUp)
-                    SliderRow(
+                    CommittingSliderRow(
                         label = "Player volume",
-                        value = (player?.volume?.toFloat() ?: state.settings.volume.toFloat()),
-                        onValueChange = { },
-                        onValueChangeFinished = { },
+                        value = player?.volume?.toFloat() ?: state.settings.volume.toFloat(),
                         valueRange = 0f..100f,
-                        valueLabel = "${player?.volume?.toInt() ?: state.settings.volume}%",
+                        valueLabel = { "${it.toInt()}%" },
+                        onCommit = { viewModel.setVolume(it.toInt()) },
                     )
-                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                        listOf(10, 25, 50, 75, 100).forEach { volume ->
-                            TextButton(onClick = { viewModel.setVolume(volume) }) {
-                                Text("$volume%")
-                            }
-                        }
-                    }
                 }
 
                 SectionCard {
@@ -583,13 +626,14 @@ fun MusicScreen(
                     ) {
                         Box(modifier = Modifier.weight(1f)) {
                             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                                Filters.chunked(3).forEach { row ->
+                                Filters.chunked(2).forEach { row ->
                                     Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                        row.forEach { name ->
+                                        row.forEach { (key, label) ->
+                                            val active = state.filters.isActive(key)
                                             FilterChip(
-                                                selected = false,
-                                                onClick = { viewModel.setFilter(name, true) },
-                                                label = { Text(name) },
+                                                selected = active,
+                                                onClick = { viewModel.setFilter(key, !active) },
+                                                label = { Text(label) },
                                             )
                                         }
                                     }
@@ -598,42 +642,76 @@ fun MusicScreen(
                         }
                     }
                     OutlinedButton(
-                        onClick = { Filters.forEach { viewModel.setFilter(it, false) } },
+                        onClick = { Filters.forEach { (key, _) -> viewModel.setFilter(key, false) } },
                         modifier = Modifier.fillMaxWidth(),
                     ) { Text("Clear all filters") }
                 }
 
                 SectionCard {
-                    SectionCardHeader("Player defaults", Icons.Default.Tune)
-                    SliderRow(
-                        label = "Auto-disconnect after",
-                        value = state.settings.autoDisconnect.toFloat(),
-                        onValueChange = { },
-                        onValueChangeFinished = { },
-                        valueRange = 0f..3f,
-                        valueLabel = when (state.settings.autoDisconnect) {
-                            0 -> "Never"
-                            1 -> "Queue end"
-                            2 -> "Voice empty"
-                            else -> "Either"
+                    SectionCardHeader("General settings", Icons.Default.Tune)
+                    CommittingSliderRow(
+                        label = "Default volume",
+                        value = state.settings.volume.toFloat(),
+                        valueRange = 0f..100f,
+                        valueLabel = { "${it.toInt()}%" },
+                        onCommit = {
+                            viewModel.saveSettings(state.settings.copy(volume = it.toInt()))
                         },
                     )
-                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                        listOf(
-                            0 to "Never",
-                            1 to "Queue end",
-                            2 to "Voice empty",
-                            3 to "Either",
-                        ).forEach { (value, label) ->
-                            TextButton(
-                                onClick = {
-                                    viewModel.saveSettings(
-                                        state.settings.copy(autoDisconnect = value)
-                                    )
-                                },
-                            ) { Text(label) }
-                        }
-                    }
+                    DiscordSelectorSingle(
+                        kind = SelectorKind.Channel,
+                        options = listOf(SelectorOption(NoneId, "All channels")) +
+                            state.textChannels.map { SelectorOption(it.id, it.name) },
+                        placeholder = "All channels",
+                        label = "Music channel",
+                        selectedId = state.settings.musicChannelId ?: NoneId,
+                        onSelect = { channel ->
+                            viewModel.saveSettings(
+                                state.settings.copy(musicChannelId = channel?.takeIf { it != NoneId })
+                            )
+                        },
+                    )
+                    DiscordSelectorSingle(
+                        kind = SelectorKind.Role,
+                        options = listOf(SelectorOption(NoneId, "No DJ role")) +
+                            state.availableRoles.map { SelectorOption(it.id, it.name) },
+                        placeholder = "No DJ role",
+                        label = "DJ role",
+                        selectedId = state.settings.djRoleId ?: NoneId,
+                        onSelect = { role ->
+                            viewModel.saveSettings(
+                                state.settings.copy(djRoleId = role?.takeIf { it != NoneId })
+                            )
+                        },
+                    )
+                    DiscordSelectorSingle(
+                        kind = SelectorKind.Custom(Icons.Default.Repeat),
+                        options = RepeatModeOptions,
+                        placeholder = "Select repeat mode",
+                        label = "Default repeat mode",
+                        selectedId = state.settings.playerRepeat.toString(),
+                        onSelect = { mode ->
+                            viewModel.saveSettings(
+                                state.settings.copy(playerRepeat = mode?.toIntOrNull() ?: 0)
+                            )
+                        },
+                    )
+                }
+
+                SectionCard {
+                    SectionCardHeader("Advanced settings", Icons.Default.Tune)
+                    DiscordSelectorSingle(
+                        kind = SelectorKind.Custom(Icons.Default.Tune),
+                        options = AutoDisconnectOptions,
+                        placeholder = "Select auto disconnect",
+                        label = "Auto disconnect",
+                        selectedId = state.settings.autoDisconnect.toString(),
+                        onSelect = { mode ->
+                            viewModel.saveSettings(
+                                state.settings.copy(autoDisconnect = mode?.toIntOrNull() ?: 0)
+                            )
+                        },
+                    )
                     SwitchRow(
                         title = "Autoplay",
                         subtitle = "Keep playing related tracks when the queue runs out",
@@ -644,6 +722,67 @@ fun MusicScreen(
                             )
                         },
                     )
+                    SwitchRow(
+                        title = "Enable vote skip",
+                        checked = state.settings.voteSkipEnabled,
+                        onCheckedChange = { value ->
+                            viewModel.saveSettings(state.settings.copy(voteSkipEnabled = value))
+                        },
+                    )
+                    if (state.settings.voteSkipEnabled) {
+                        CommittingSliderRow(
+                            label = "Vote skip threshold",
+                            value = state.settings.voteSkipThreshold.toFloat(),
+                            valueRange = 1f..100f,
+                            valueLabel = { "${it.toInt()}%" },
+                            onCommit = {
+                                viewModel.saveSettings(
+                                    state.settings.copy(voteSkipThreshold = it.toInt())
+                                )
+                            },
+                        )
+                    }
+                }
+
+                SectionCard {
+                    SectionCardHeader(
+                        title = "Music link conversion",
+                        icon = Icons.Default.Link,
+                        trailing = {
+                            IconButton(onClick = { showAddLinkChannel = true }) {
+                                Icon(Icons.Default.Add, contentDescription = "Add channel")
+                            }
+                        },
+                    )
+                    Text(
+                        text = "Apple Music, Spotify, and YouTube links posted in these channels " +
+                            "are replaced with a cross-platform embed.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    if (state.linkChannels.isEmpty()) {
+                        EmptyState("No channels have music link conversion enabled.")
+                    } else {
+                        state.linkChannels.forEach { channelId ->
+                            val name = state.textChannels.firstOrNull { it.id == channelId }?.name
+                                ?: channelId
+                            ListItem(
+                                headlineContent = { Text(name) },
+                                trailingContent = {
+                                    IconButton(
+                                        onClick = { pendingRemoveLinkChannel = channelId },
+                                    ) {
+                                        Icon(
+                                            Icons.Default.Delete,
+                                            contentDescription = "Remove",
+                                            tint = MaterialTheme.colorScheme.error,
+                                        )
+                                    }
+                                },
+                                colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+                            )
+                        }
+                    }
                 }
             }
         }
@@ -652,6 +791,9 @@ fun MusicScreen(
     if (showAddTtsChannel) {
         var voiceChannelId by remember { mutableStateOf<String?>(null) }
         var textChannelId by remember { mutableStateOf<String?>(null) }
+        var announceJoinLeave by remember { mutableStateOf(false) }
+        var joinFormat by remember { mutableStateOf("") }
+        var leaveFormat by remember { mutableStateOf("") }
         AlertDialog(
             onDismissRequest = { showAddTtsChannel = false },
             title = { Text("Add TTS channel") },
@@ -673,12 +815,50 @@ fun MusicScreen(
                         selectedId = textChannelId,
                         onSelect = { textChannelId = it },
                     )
+                    SwitchRow(
+                        title = "Announce join/leave",
+                        checked = announceJoinLeave,
+                        onCheckedChange = { announceJoinLeave = it },
+                    )
+                    if (announceJoinLeave) {
+                        MewdekoTextField(
+                            value = joinFormat,
+                            onValueChange = { joinFormat = it },
+                            label = "Join format",
+                            placeholder = "%user.name% joined the channel",
+                        )
+                        MewdekoTextField(
+                            value = leaveFormat,
+                            onValueChange = { leaveFormat = it },
+                            label = "Leave format",
+                            placeholder = "%user.name% left the channel",
+                        )
+                        Text(
+                            text = "Placeholders: %user.name% %user.mention% %user.id% " +
+                                "%server.name% %server.members% %channel.name%",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
                 }
             },
             confirmButton = {
                 Button(
                     onClick = {
-                        voiceChannelId?.let { viewModel.addTtsChannel(it, textChannelId) }
+                        val vc = voiceChannelId
+                        if (vc != null) {
+                            viewModel.upsertTtsChannel(
+                                TtsVoiceChannelEntry(
+                                    voiceChannelId = vc,
+                                    enabled = true,
+                                    linkedTextChannelId = textChannelId,
+                                    announceJoinLeave = announceJoinLeave,
+                                    joinFormat = joinFormat.takeIf { it.isNotBlank() },
+                                    leaveFormat = leaveFormat.takeIf { it.isNotBlank() },
+                                ),
+                                reloadAfter = true,
+                            )
+                        }
                         showAddTtsChannel = false
                     },
                     enabled = voiceChannelId != null,
@@ -686,6 +866,36 @@ fun MusicScreen(
             },
             dismissButton = {
                 TextButton(onClick = { showAddTtsChannel = false }) { Text("Cancel") }
+            },
+        )
+    }
+
+    if (showAddLinkChannel) {
+        var linkChannelId by remember { mutableStateOf<String?>(null) }
+        AlertDialog(
+            onDismissRequest = { showAddLinkChannel = false },
+            title = { Text("Add link conversion channel") },
+            text = {
+                DiscordSelectorSingle(
+                    kind = SelectorKind.Channel,
+                    options = state.textChannels.map { SelectorOption(it.id, it.name) },
+                    placeholder = "Pick a channel",
+                    label = "Channel",
+                    selectedId = linkChannelId,
+                    onSelect = { linkChannelId = it },
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        linkChannelId?.let { viewModel.addLinkChannel(it) }
+                        showAddLinkChannel = false
+                    },
+                    enabled = linkChannelId != null,
+                ) { Text("Enable") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showAddLinkChannel = false }) { Text("Cancel") }
             },
         )
     }
@@ -699,4 +909,140 @@ fun MusicScreen(
             onDismiss = { pendingClearQueue = false },
         )
     }
+
+    pendingRemoveTtsChannel?.let { voiceChannelId ->
+        ConfirmDialog(
+            title = "Remove TTS channel?",
+            message = "Text-to-speech will stop reading messages aloud in this voice channel.",
+            confirmLabel = "Remove",
+            onConfirm = { viewModel.removeTtsChannel(voiceChannelId) },
+            onDismiss = { pendingRemoveTtsChannel = null },
+        )
+    }
+
+    pendingRemoveLinkChannel?.let { channelId ->
+        ConfirmDialog(
+            title = "Disable link conversion?",
+            message = "Music links posted in this channel will no longer be converted.",
+            confirmLabel = "Disable",
+            onConfirm = { viewModel.removeLinkChannel(channelId) },
+            onDismiss = { pendingRemoveLinkChannel = null },
+        )
+    }
+}
+
+/** One editable row in the TTS voice channel list. */
+@Composable
+private fun TtsChannelRow(
+    entry: TtsVoiceChannelEntry,
+    voiceChannelName: String,
+    textChannels: List<dev.mewdeko.mobile.core.model.TextChannelLite>,
+    onChange: (TtsVoiceChannelEntry) -> Unit,
+    onRemove: () -> Unit,
+) {
+    SectionCard {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(voiceChannelName, style = MaterialTheme.typography.titleSmall)
+            IconButton(onClick = onRemove) {
+                Icon(
+                    Icons.Default.Delete,
+                    contentDescription = "Remove",
+                    tint = MaterialTheme.colorScheme.error,
+                )
+            }
+        }
+        SwitchRow(
+            title = "Enabled",
+            checked = entry.enabled,
+            onCheckedChange = { onChange(entry.copy(enabled = it)) },
+        )
+        DiscordSelectorSingle(
+            kind = SelectorKind.Channel,
+            options = listOf(SelectorOption(NoneId, "VC text chat only")) +
+                textChannels.map { SelectorOption(it.id, it.name) },
+            placeholder = "VC text chat only",
+            label = "Linked text channel",
+            selectedId = entry.linkedTextChannelId ?: NoneId,
+            onSelect = { channel ->
+                onChange(entry.copy(linkedTextChannelId = channel?.takeIf { it != NoneId }))
+            },
+        )
+        SwitchRow(
+            title = "Announce join/leave",
+            checked = entry.announceJoinLeave,
+            onCheckedChange = { onChange(entry.copy(announceJoinLeave = it)) },
+        )
+        if (entry.announceJoinLeave) {
+            BlurCommitTextField(
+                value = entry.joinFormat.orEmpty(),
+                label = "Join format",
+                placeholder = "%user.name% joined the channel",
+                onCommit = { onChange(entry.copy(joinFormat = it.takeIf { f -> f.isNotBlank() })) },
+            )
+            BlurCommitTextField(
+                value = entry.leaveFormat.orEmpty(),
+                label = "Leave format",
+                placeholder = "%user.name% left the channel",
+                onCommit = { onChange(entry.copy(leaveFormat = it.takeIf { f -> f.isNotBlank() })) },
+            )
+            Text(
+                text = "Placeholders: %user.name% %user.mention% %user.id% " +
+                    "%server.name% %server.members% %channel.name%",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
+/**
+ * A slider that tracks the drag locally and only commits once the gesture
+ * ends, so dragging never fires a request per frame.
+ */
+@Composable
+private fun CommittingSliderRow(
+    label: String,
+    value: Float,
+    valueRange: ClosedFloatingPointRange<Float>,
+    onCommit: (Float) -> Unit,
+    modifier: Modifier = Modifier,
+    valueLabel: (Float) -> String = { it.toInt().toString() },
+) {
+    var draft by remember(value) { mutableFloatStateOf(value) }
+    SliderRow(
+        label = label,
+        value = draft,
+        onValueChange = { draft = it },
+        onValueChangeFinished = { onCommit(draft) },
+        valueRange = valueRange,
+        valueLabel = valueLabel(draft),
+        modifier = modifier,
+    )
+}
+
+/** A text field that tracks edits locally and only commits when it loses focus. */
+@Composable
+private fun BlurCommitTextField(
+    value: String,
+    label: String,
+    onCommit: (String) -> Unit,
+    modifier: Modifier = Modifier,
+    placeholder: String? = null,
+    supportingText: String? = null,
+) {
+    var draft by remember(value) { mutableStateOf(value) }
+    MewdekoTextField(
+        value = draft,
+        onValueChange = { draft = it },
+        label = label,
+        placeholder = placeholder,
+        supportingText = supportingText,
+        modifier = modifier.onFocusChanged { focus ->
+            if (!focus.isFocused && draft != value) onCommit(draft)
+        },
+    )
 }

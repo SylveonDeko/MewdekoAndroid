@@ -3,12 +3,15 @@ package dev.mewdeko.mobile.feature.moderation
 import androidx.lifecycle.SavedStateHandle
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dev.mewdeko.mobile.core.auth.SessionHolder
+import dev.mewdeko.mobile.core.model.GuildRole
 import dev.mewdeko.mobile.core.model.Snowflake
 import dev.mewdeko.mobile.core.model.SnowflakeSerializer
 import dev.mewdeko.mobile.core.model.TextChannelLite
-import dev.mewdeko.mobile.core.model.WarningRecord
 import dev.mewdeko.mobile.core.net.ApiClient
 import dev.mewdeko.mobile.core.net.Endpoint
+import dev.mewdeko.mobile.core.net.HttpMethod
+import dev.mewdeko.mobile.core.net.InstantSerializer
+import dev.mewdeko.mobile.core.net.MewdekoJson
 import dev.mewdeko.mobile.core.ui.FeatureViewModel
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
@@ -16,12 +19,101 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
-import dev.mewdeko.mobile.core.net.HttpMethod
-import dev.mewdeko.mobile.core.net.MewdekoJson
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.builtins.ListSerializer
 import java.time.Instant
 import javax.inject.Inject
+
+/** A warning issued to a member, with its forgiveness state. */
+@Serializable
+data class ModerationWarning(
+    val id: Int = 0,
+    @Serializable(with = SnowflakeSerializer::class) val userId: Snowflake? = null,
+    val reason: String? = null,
+    val moderator: String? = null,
+    val forgivenBy: String? = null,
+    @Serializable(with = InstantSerializer::class) val dateAdded: Instant? = null,
+    val forgiven: Boolean = false,
+)
+
+/** One user's warnings, grouped for the per-user "forgive all" action. */
+data class WarningGroup(
+    val userId: Snowflake,
+    val warnings: List<ModerationWarning>,
+    val activeCount: Int,
+)
+
+/** Result of issuing a warning, reporting whether the ladder fired a punishment. */
+@Serializable
+data class WarnUserResult(
+    val punishmentApplied: Boolean = false,
+    val punishment: String? = null,
+)
+
+/** Body for [ModerationViewModel.warnUser]. */
+@Serializable
+private data class WarnUserRequestBody(val moderatorId: Snowflake, val reason: String)
+
+/** Body for endpoints that only need the acting dashboard moderator. */
+@Serializable
+private data class ModeratorRequestBody(val moderatorId: Snowflake)
+
+/** Body for [ModerationViewModel.addPunishment]. */
+@Serializable
+private data class SetWarnPunishmentRequestBody(
+    val count: Int,
+    val punishment: Int,
+    val timeMinutes: Int? = null,
+    val roleId: Snowflake? = null,
+)
+
+/** Body for [ModerationViewModel.setWarnLogChannel]. */
+@Serializable
+private data class SetWarnLogChannelRequestBody(val channelId: Snowflake)
+
+/**
+ * The punishment codes the ladder can be configured with, mirroring
+ * `Mewdeko.Modules.Administration.Common.PunishmentAction`.
+ */
+object PunishmentActions {
+    const val MUTE = 0
+    const val KICK = 1
+    const val BAN = 2
+    const val SOFTBAN = 3
+    const val REMOVE_ROLES = 4
+    const val CHAT_MUTE = 5
+    const val VOICE_MUTE = 6
+    const val ADD_ROLE = 7
+    const val DELETE = 8
+    const val WARN = 9
+    const val TIMEOUT = 10
+    const val NONE = 11
+
+    /** The nine actions the ladder's add form can choose from, in dashboard order. */
+    val Selectable: List<Pair<Int, String>> = listOf(
+        MUTE to "Mute",
+        CHAT_MUTE to "Chat mute",
+        VOICE_MUTE to "Voice mute",
+        TIMEOUT to "Timeout",
+        KICK to "Kick",
+        SOFTBAN to "Softban",
+        BAN to "Ban",
+        ADD_ROLE to "Add role",
+        REMOVE_ROLES to "Remove all roles",
+    )
+
+    /** Actions that accept an optional duration in minutes. */
+    val Timed: Set<Int> = setOf(MUTE, CHAT_MUTE, VOICE_MUTE, TIMEOUT, BAN, ADD_ROLE)
+
+    /** Human-readable label for any punishment code, including ones not in [Selectable]. */
+    fun label(code: Int): String = Selectable.firstOrNull { it.first == code }?.second
+        ?: when (code) {
+            DELETE -> "Delete message"
+            WARN -> "Warn"
+            NONE -> "None"
+            else -> "Action #$code"
+        }
+}
 
 /** One rung of the automatic warning-punishment ladder. */
 @Serializable
@@ -33,20 +125,7 @@ data class WarningPunishment(
     @Serializable(with = SnowflakeSerializer::class) val roleId: Snowflake? = null,
 ) {
     /** Human-readable name for the punishment code the bot stores. */
-    val actionLabel: String
-        get() = when (punishment) {
-            1 -> "Mute"
-            2 -> "Kick"
-            3 -> "Ban"
-            4 -> "Soft-ban"
-            5 -> "Add role"
-            6 -> "Voice mute"
-            7 -> "Chat mute"
-            8 -> "Timeout"
-            9 -> "Warn"
-            10 -> "Remove roles"
-            else -> "Action #$punishment"
-        }
+    val actionLabel: String get() = PunishmentActions.label(punishment)
 }
 
 /** Which part of a guild a ban purge setting applies to. */
@@ -96,16 +175,18 @@ data class WarnLogChannelResponse(
 
 /** Moderation screen state. */
 data class ModerationState(
-    val warnings: List<WarningRecord> = emptyList(),
+    val warnings: List<ModerationWarning> = emptyList(),
+    val recentActivity: List<ModerationWarning> = emptyList(),
     val punishments: List<WarningPunishment> = emptyList(),
     val warnLogChannel: Snowflake? = null,
     val availableChannels: List<TextChannelLite> = emptyList(),
     val availableCategories: List<TextChannelLite> = emptyList(),
+    val availableRoles: List<GuildRole> = emptyList(),
     val pruneActions: List<BanPruneActionInfo> = emptyList(),
     val pruneSettings: List<BanPruneSetting> = emptyList(),
     val section: String = "overview",
     val filterText: String = "",
-    val activeOnly: Boolean = false,
+    val showForgiven: Boolean = true,
 ) {
     /** Server-wide purge settings, keyed by action. An empty key covers every action. */
     val guildPruneDefaults: Map<String, BanPruneSetting>
@@ -168,17 +249,35 @@ data class ModerationState(
             availableChannels.firstOrNull { it.id == id }?.name ?: id
         }
 
-    /** Warnings matching the current filter and active-only toggle. */
-    val filteredWarnings: List<WarningRecord>
+    /** The role name for a ladder rung's role, falling back to its raw id. */
+    fun roleName(roleId: Snowflake?): String? =
+        roleId?.let { id -> availableRoles.firstOrNull { it.id == id }?.name ?: id }
+
+    /** Warnings matching the current search and the "show forgiven" toggle. */
+    val filteredWarnings: List<ModerationWarning>
         get() {
             val query = filterText.trim().lowercase()
             return warnings
-                .filter { !activeOnly || !it.forgiven }
+                .filter { showForgiven || !it.forgiven }
                 .filter { warning ->
                     query.isEmpty() ||
                         warning.userId?.contains(query) == true ||
-                        warning.reason.orEmpty().lowercase().contains(query)
+                        warning.reason.orEmpty().lowercase().contains(query) ||
+                        warning.moderator.orEmpty().lowercase().contains(query)
                 }
+        }
+
+    /** [filteredWarnings] grouped by the user they were issued to. */
+    val warningsByUser: List<WarningGroup>
+        get() {
+            val groups = LinkedHashMap<Snowflake, MutableList<ModerationWarning>>()
+            filteredWarnings.forEach { warning ->
+                val userId = warning.userId ?: return@forEach
+                groups.getOrPut(userId) { mutableListOf() }.add(warning)
+            }
+            return groups.map { (userId, items) ->
+                WarningGroup(userId, items, items.count { !it.forgiven })
+            }
         }
 }
 
@@ -206,7 +305,15 @@ class ModerationViewModel @Inject constructor(
                 runCatching {
                     api.send(
                         Endpoint("api/Moderation/$guildId/warnings"),
-                        ListSerializer(WarningRecord.serializer()),
+                        ListSerializer(ModerationWarning.serializer()),
+                    )
+                }.getOrDefault(emptyList())
+            }
+            val recentActivity = async {
+                runCatching {
+                    api.send(
+                        Endpoint("api/Moderation/$guildId/recent?limit=10"),
+                        ListSerializer(ModerationWarning.serializer()),
                     )
                 }.getOrDefault(emptyList())
             }
@@ -242,6 +349,14 @@ class ModerationViewModel @Inject constructor(
                     )
                 }.getOrDefault(emptyList())
             }
+            val roles = async {
+                runCatching {
+                    api.send(
+                        Endpoint("api/ClientOperations/roles/$guildId"),
+                        ListSerializer(GuildRole.serializer()),
+                    )
+                }.getOrDefault(emptyList())
+            }
             val pruneActions = async {
                 runCatching {
                     api.send(
@@ -263,6 +378,7 @@ class ModerationViewModel @Inject constructor(
                 it.copy(
                     warnings = warnings.await()
                         .sortedByDescending { warning -> warning.dateAdded ?: Instant.EPOCH },
+                    recentActivity = recentActivity.await(),
                     punishments = punishments.await().sortedBy { punishment -> punishment.count },
                     warnLogChannel = logChannel.await()?.channelId
                         ?.takeIf { id -> id.isNotEmpty() && id != "0" },
@@ -270,6 +386,8 @@ class ModerationViewModel @Inject constructor(
                         .sortedBy { channel -> channel.name.lowercase() },
                     availableCategories = categories.await()
                         .sortedBy { category -> category.name.lowercase() },
+                    availableRoles = roles.await()
+                        .sortedBy { role -> role.name.lowercase() },
                     pruneActions = pruneActions.await(),
                     pruneSettings = pruneSettings.await(),
                 )
@@ -283,8 +401,124 @@ class ModerationViewModel @Inject constructor(
     /** Updates the warning search filter. */
     fun setFilter(text: String) = _state.update { it.copy(filterText = text) }
 
-    /** Toggles hiding forgiven warnings. */
-    fun setActiveOnly(value: Boolean) = _state.update { it.copy(activeOnly = value) }
+    /** Toggles whether forgiven warnings are shown in the list. */
+    fun setShowForgiven(value: Boolean) = _state.update { it.copy(showForgiven = value) }
+
+    /**
+     * Warns a member. The bot may apply an automatic ladder punishment as a side
+     * effect, reported back so the screen can surface it since it happens on Discord.
+     */
+    fun warnUser(targetUserId: Snowflake, reason: String) =
+        launchAction("Failed to warn user. Make sure the ID belongs to a member of this server.") {
+            val payload = WarnUserRequestBody(moderatorId = userId, reason = reason.trim())
+            val result = api.send(
+                Endpoint(
+                    "api/Moderation/$guildId/warnings/user/$targetUserId",
+                    HttpMethod.POST,
+                    MewdekoJson.encodeToString(WarnUserRequestBody.serializer(), payload),
+                ),
+                WarnUserResult.serializer(),
+            )
+            refreshWarnings()
+            if (result.punishmentApplied && !result.punishment.isNullOrBlank()) {
+                postSuccess("Auto-punishment applied: ${result.punishment}")
+            }
+        }
+
+    /** Forgives a single warning. */
+    fun forgiveWarning(warningId: Int) = launchAction("Failed to forgive warning.") {
+        api.sendIgnoringBody(
+            Endpoint(
+                "api/Moderation/$guildId/warnings/$warningId/forgive",
+                HttpMethod.POST,
+                MewdekoJson.encodeToString(ModeratorRequestBody.serializer(), ModeratorRequestBody(userId)),
+            ),
+        )
+        refreshWarnings()
+    }
+
+    /** Forgives every active warning for a user. */
+    fun forgiveAllForUser(targetUserId: Snowflake) = launchAction("Failed to forgive warnings.") {
+        api.sendIgnoringBody(
+            Endpoint(
+                "api/Moderation/$guildId/warnings/user/$targetUserId/forgive-all",
+                HttpMethod.POST,
+                MewdekoJson.encodeToString(ModeratorRequestBody.serializer(), ModeratorRequestBody(userId)),
+            ),
+        )
+        refreshWarnings()
+    }
+
+    /** Permanently deletes a warning. */
+    fun deleteWarning(warningId: Int) = launchAction("Failed to delete warning.") {
+        api.sendIgnoringBody(Endpoint("api/Moderation/$guildId/warnings/$warningId", HttpMethod.DELETE))
+        refreshWarnings()
+    }
+
+    private suspend fun refreshWarnings() {
+        val warnings = runCatching {
+            api.send(
+                Endpoint("api/Moderation/$guildId/warnings"),
+                ListSerializer(ModerationWarning.serializer()),
+            )
+        }.getOrDefault(emptyList())
+        val recentActivity = runCatching {
+            api.send(
+                Endpoint("api/Moderation/$guildId/recent?limit=10"),
+                ListSerializer(ModerationWarning.serializer()),
+            )
+        }.getOrDefault(emptyList())
+        _state.update {
+            it.copy(
+                warnings = warnings.sortedByDescending { warning -> warning.dateAdded ?: Instant.EPOCH },
+                recentActivity = recentActivity,
+            )
+        }
+    }
+
+    /** Adds or replaces the punishment fired at [count] warnings. */
+    fun addPunishment(count: Int, punishment: Int, timeMinutes: Int?, roleId: Snowflake?) =
+        launchAction("Failed to save punishment.") {
+            val payload = SetWarnPunishmentRequestBody(
+                count = count,
+                punishment = punishment,
+                timeMinutes = timeMinutes?.takeIf { it > 0 },
+                roleId = roleId,
+            )
+            val updated = api.send(
+                Endpoint(
+                    "api/Moderation/$guildId/punishments",
+                    HttpMethod.PUT,
+                    MewdekoJson.encodeToString(SetWarnPunishmentRequestBody.serializer(), payload),
+                ),
+                ListSerializer(WarningPunishment.serializer()),
+            )
+            _state.update { it.copy(punishments = updated.sortedBy { rung -> rung.count }) }
+        }
+
+    /** Removes the punishment ladder rung at [count] warnings. */
+    fun removePunishment(count: Int) = launchAction("Failed to remove punishment.") {
+        val updated = api.send(
+            Endpoint("api/Moderation/$guildId/punishments/$count", HttpMethod.DELETE),
+            ListSerializer(WarningPunishment.serializer()),
+        )
+        _state.update { it.copy(punishments = updated.sortedBy { rung -> rung.count }) }
+    }
+
+    /** Sets the channel warnings are logged to. */
+    fun setWarnLogChannel(channelId: Snowflake) = launchAction("Failed to set warning log channel.") {
+        api.sendIgnoringBody(
+            Endpoint(
+                "api/Moderation/$guildId/warnlog-channel",
+                HttpMethod.POST,
+                MewdekoJson.encodeToString(
+                    SetWarnLogChannelRequestBody.serializer(),
+                    SetWarnLogChannelRequestBody(channelId),
+                ),
+            ),
+        )
+        _state.update { it.copy(warnLogChannel = channelId) }
+    }
 
     /**
      * Stores how many days of messages one action purges within one scope.

@@ -6,12 +6,14 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.PersonAddAlt
 import androidx.compose.material.icons.filled.Tag
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -27,19 +29,32 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.mewdeko.mobile.core.model.EmbedMessage
+import dev.mewdeko.mobile.core.ui.ConfirmDialog
 import dev.mewdeko.mobile.core.ui.DiscordSelectorSingle
 import dev.mewdeko.mobile.core.ui.EmptyState
 import dev.mewdeko.mobile.core.ui.FeatureScaffold
+import dev.mewdeko.mobile.core.ui.MewdekoTextField
 import dev.mewdeko.mobile.core.ui.SectionCard
 import dev.mewdeko.mobile.core.ui.SectionCardHeader
 import dev.mewdeko.mobile.core.ui.SelectorKind
 import dev.mewdeko.mobile.core.ui.SelectorOption
-import dev.mewdeko.mobile.core.ui.SliderRow
 import dev.mewdeko.mobile.core.ui.StatTile
 import dev.mewdeko.mobile.core.ui.SwitchRow
 import dev.mewdeko.mobile.core.ui.TagChip
 import dev.mewdeko.mobile.feature.embed.EmbedMessageEditor
+import dev.mewdeko.mobile.feature.embed.Placeholder
 import dev.mewdeko.mobile.navigation.GuildRouteArgs
+
+/**
+ * Extra placeholders the bot resolves for a role greet, mirroring the
+ * dashboard's `additionalPlaceholders` list passed to its embed builder.
+ */
+private val RoleGreetPlaceholders = listOf(
+    Placeholder("Role Greet", "%user.username%", "The new member's username"),
+    Placeholder("Role Greet", "%user.mention%", "Mention the new member"),
+    Placeholder("Role Greet", "%server.name%", "The server's name"),
+    Placeholder("Role Greet", "%role.name%", "The name of the role that was assigned"),
+)
 
 /** Greetings posted when a member gains a role. */
 @Composable
@@ -53,6 +68,7 @@ fun RoleGreetsScreen(
     val status by viewModel.status.collectAsStateWithLifecycle()
 
     var showAdd by remember { mutableStateOf(false) }
+    var pendingDelete by remember { mutableStateOf<RoleGreetEntry?>(null) }
 
     FeatureScaffold(
         title = "Role Greets",
@@ -94,7 +110,19 @@ fun RoleGreetsScreen(
                             title = "@${state.roleName(greet.roleId)}",
                             icon = Icons.Default.PersonAddAlt,
                             trailing = {
-                                TagChip("#${state.channelName(greet.channelId)}", icon = Icons.Default.Tag)
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                ) {
+                                    TagChip("#${state.channelName(greet.channelId)}", icon = Icons.Default.Tag)
+                                    IconButton(onClick = { pendingDelete = greet }) {
+                                        Icon(
+                                            Icons.Default.Delete,
+                                            contentDescription = "Delete greet",
+                                            tint = MaterialTheme.colorScheme.error,
+                                        )
+                                    }
+                                }
                             },
                         )
                         SwitchRow(
@@ -108,14 +136,30 @@ fun RoleGreetsScreen(
                             checked = greet.greetBots,
                             onCheckedChange = { viewModel.updateGreetBots(greet.id, it) },
                         )
-                        SliderRow(
-                            label = "Auto-delete after",
-                            value = greet.deleteTime.toFloat(),
-                            onValueChange = { },
-                            onValueChangeFinished = { },
-                            valueRange = 0f..600f,
-                            valueLabel = if (greet.deleteTime == 0) "Never" else "${greet.deleteTime}s",
-                        )
+                        var deleteTimeDraft by remember(greet.id, greet.deleteTime) {
+                            mutableStateOf(greet.deleteTime.toString())
+                        }
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            MewdekoTextField(
+                                value = deleteTimeDraft,
+                                onValueChange = { deleteTimeDraft = it.filter { c -> c.isDigit() } },
+                                label = "Delete after (seconds, 0 for never)",
+                                numeric = true,
+                                modifier = Modifier.weight(1f),
+                            )
+                            val deleteTimeValue = deleteTimeDraft.toIntOrNull()
+                            Button(
+                                onClick = {
+                                    deleteTimeValue?.let { viewModel.updateDeleteTime(greet.id, it) }
+                                },
+                                enabled = deleteTimeValue != null &&
+                                    deleteTimeValue >= 0 &&
+                                    deleteTimeValue != greet.deleteTime,
+                            ) { Text("Save") }
+                        }
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             listOf(0, 30, 60, 300).forEach { seconds ->
                                 TextButton(onClick = { viewModel.updateDeleteTime(greet.id, seconds) }) {
@@ -126,13 +170,28 @@ fun RoleGreetsScreen(
                         EmbedMessageEditor(
                             message = EmbedMessage.parse(greet.message),
                             onMessageChange = { viewModel.updateMessage(greet.id, it) },
+                            additionalPlaceholders = RoleGreetPlaceholders,
                         )
-                        if (!greet.webhookUrl.isNullOrBlank()) {
-                            Text(
-                                text = "Posted through a webhook.",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        var webhookDraft by remember(greet.id, greet.webhookUrl) {
+                            mutableStateOf(greet.webhookUrl.orEmpty())
+                        }
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            MewdekoTextField(
+                                value = webhookDraft,
+                                onValueChange = { webhookDraft = it },
+                                label = "Webhook URL (optional)",
+                                placeholder = "https://discord.com/api/webhooks/...",
+                                modifier = Modifier.weight(1f),
                             )
+                            Button(
+                                onClick = {
+                                    viewModel.updateWebhook(greet.id, webhookDraft.trim().ifBlank { null })
+                                },
+                                enabled = webhookDraft.trim().ifBlank { null } != greet.webhookUrl,
+                            ) { Text("Save") }
                         }
                     }
                 }
@@ -178,6 +237,16 @@ fun RoleGreetsScreen(
                 ) { Text("Add") }
             },
             dismissButton = { TextButton(onClick = { showAdd = false }) { Text("Cancel") } },
+        )
+    }
+
+    pendingDelete?.let { greet ->
+        ConfirmDialog(
+            title = "Delete role greet?",
+            message = "The greeting for @${state.roleName(greet.roleId)} in " +
+                "#${state.channelName(greet.channelId)} is removed.",
+            onConfirm = { viewModel.delete(greet.id) },
+            onDismiss = { pendingDelete = null },
         )
     }
 }

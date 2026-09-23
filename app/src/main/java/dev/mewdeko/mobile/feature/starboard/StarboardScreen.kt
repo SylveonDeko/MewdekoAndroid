@@ -29,7 +29,6 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -55,7 +54,6 @@ import dev.mewdeko.mobile.core.ui.SectionTab
 import dev.mewdeko.mobile.core.ui.SectionTabs
 import dev.mewdeko.mobile.core.ui.SelectorKind
 import dev.mewdeko.mobile.core.ui.SelectorOption
-import dev.mewdeko.mobile.core.ui.SliderRow
 import dev.mewdeko.mobile.core.ui.StatTile
 import dev.mewdeko.mobile.core.ui.SwitchRow
 import dev.mewdeko.mobile.core.ui.TagChip
@@ -82,7 +80,7 @@ fun StarboardScreen(
 
     var showCreate by remember { mutableStateOf(false) }
     var pendingDelete by remember { mutableStateOf<StarboardConfig?>(null) }
-    var editingChannels by remember { mutableStateOf<StarboardConfig?>(null) }
+    var editingChannelsId by remember { mutableStateOf<Int?>(null) }
     var addingEmote by remember { mutableStateOf<StarboardConfig?>(null) }
 
     FeatureScaffold(
@@ -220,13 +218,15 @@ fun StarboardScreen(
                         },
                     )
                     FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        val canRemoveEmote = board.emotes.size > 1
                         board.emotes.forEach { emote ->
                             InputChip(
                                 selected = true,
+                                enabled = canRemoveEmote,
                                 onClick = { viewModel.removeEmote(board.id, emote) },
                                 label = { Text(emote) },
                                 trailingIcon = {
-                                    Icon(Icons.Default.Close, contentDescription = null)
+                                    Icon(Icons.Default.Close, contentDescription = "Remove emote")
                                 },
                             )
                         }
@@ -236,36 +236,56 @@ fun StarboardScreen(
                             leadingIcon = { Icon(Icons.Default.Add, contentDescription = null) },
                         )
                     }
-                    SliderRow(
-                        label = "Stars needed",
-                        value = board.threshold.toFloat(),
-                        onValueChange = { },
-                        onValueChangeFinished = { },
-                        valueRange = 1f..50f,
-                        valueLabel = "${board.threshold}",
-                    )
-                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                        listOf(1, 3, 5, 10).forEach { value ->
-                            TextButton(onClick = { viewModel.setThreshold(board.id, value) }) {
-                                Text("$value")
-                            }
-                        }
+                    var starThresholdDraft by remember(board.id, board.threshold) {
+                        mutableStateOf(board.threshold.toString())
                     }
-                    SliderRow(
-                        label = "Repost after",
-                        value = board.repostThreshold.toFloat(),
-                        onValueChange = { },
-                        onValueChangeFinished = { },
-                        valueRange = 0f..50f,
-                        valueLabel = if (board.repostThreshold == 0) "Never"
-                        else "${board.repostThreshold} messages",
-                    )
-                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                        listOf(0, 5, 10, 25).forEach { value ->
-                            TextButton(
-                                onClick = { viewModel.setRepostThreshold(board.id, value) },
-                            ) { Text(if (value == 0) "Never" else "$value") }
-                        }
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        MewdekoTextField(
+                            value = starThresholdDraft,
+                            onValueChange = { starThresholdDraft = it.filter { c -> c.isDigit() } },
+                            label = "Stars needed",
+                            numeric = true,
+                            modifier = Modifier.weight(1f),
+                        )
+                        val starThresholdValue = starThresholdDraft.toIntOrNull()
+                        Button(
+                            onClick = {
+                                starThresholdValue?.let { viewModel.setThreshold(board.id, it) }
+                            },
+                            enabled = starThresholdValue != null && starThresholdValue >= 1 &&
+                                starThresholdValue != board.threshold,
+                        ) { Text("Save") }
+                    }
+                    var repostThresholdDraft by remember(board.id, board.repostThreshold) {
+                        mutableStateOf(board.repostThreshold.toString())
+                    }
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        MewdekoTextField(
+                            value = repostThresholdDraft,
+                            onValueChange = {
+                                repostThresholdDraft = it.filter { c -> c.isDigit() }
+                            },
+                            label = "Repost after (0 to disable)",
+                            numeric = true,
+                            modifier = Modifier.weight(1f),
+                        )
+                        val repostThresholdValue = repostThresholdDraft.toIntOrNull()
+                        Button(
+                            onClick = {
+                                repostThresholdValue?.let {
+                                    viewModel.setRepostThreshold(board.id, it)
+                                }
+                            },
+                            enabled = repostThresholdValue != null &&
+                                repostThresholdValue >= 0 &&
+                                repostThresholdValue != board.repostThreshold,
+                        ) { Text("Save") }
                     }
                     SwitchRow(
                         title = "Allow bot messages",
@@ -297,7 +317,7 @@ fun StarboardScreen(
                         checked = board.useBlacklist,
                         onCheckedChange = { viewModel.setUseBlacklist(board.id, it) },
                     )
-                    TextButton(onClick = { editingChannels = board }) {
+                    TextButton(onClick = { editingChannelsId = board.id }) {
                         Text("Channels (${board.checkedChannelIds.size})")
                     }
                 }
@@ -308,7 +328,8 @@ fun StarboardScreen(
     if (showCreate) {
         var channelId by remember { mutableStateOf<String?>(null) }
         var emote by remember { mutableStateOf("⭐") }
-        var threshold by remember { mutableIntStateOf(3) }
+        var thresholdText by remember { mutableStateOf("3") }
+        val threshold = thresholdText.toIntOrNull()
         AlertDialog(
             onDismissRequest = { showCreate = false },
             title = { Text("New starboard") },
@@ -322,27 +343,40 @@ fun StarboardScreen(
                         selectedId = channelId,
                         onSelect = { channelId = it },
                     )
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        listOf("⭐", "🌟", "😲", "✨").forEach { preset ->
+                            AssistChip(
+                                onClick = { emote = preset },
+                                label = { Text(preset) },
+                            )
+                        }
+                    }
                     MewdekoTextField(
                         value = emote,
                         onValueChange = { emote = it },
                         label = "Star emote",
+                        placeholder = "⭐ or <:name:id>",
                     )
-                    SliderRow(
-                        label = "Stars needed",
-                        value = threshold.toFloat(),
-                        onValueChange = { threshold = it.toInt().coerceAtLeast(1) },
-                        valueRange = 1f..50f,
-                        valueLabel = "$threshold",
+                    MewdekoTextField(
+                        value = thresholdText,
+                        onValueChange = { thresholdText = it.filter { c -> c.isDigit() } },
+                        label = "Threshold (reactions needed)",
+                        numeric = true,
                     )
                 }
             },
             confirmButton = {
                 Button(
                     onClick = {
-                        channelId?.let { viewModel.create(it, emote, threshold) }
-                        showCreate = false
+                        val id = channelId
+                        val value = threshold
+                        if (id != null && value != null) {
+                            viewModel.create(id, emote, value)
+                            showCreate = false
+                        }
                     },
-                    enabled = channelId != null && emote.isNotBlank(),
+                    enabled = channelId != null && emote.isNotBlank() &&
+                        threshold != null && threshold >= 1,
                 ) { Text("Create") }
             },
             dismissButton = { TextButton(onClick = { showCreate = false }) { Text("Cancel") } },
@@ -372,9 +406,15 @@ fun StarboardScreen(
         )
     }
 
-    editingChannels?.let { board ->
+    val editingChannelsBoard = editingChannelsId?.let { id ->
+        state.boards.firstOrNull { it.id == id }
+    }
+    editingChannelsBoard?.let { board ->
+        val staleChannelIds = board.checkedChannelIds.filter { checkedId ->
+            state.availableChannels.none { it.id == checkedId }
+        }
         AlertDialog(
-            onDismissRequest = { editingChannels = null },
+            onDismissRequest = { editingChannelsId = null },
             title = { Text(if (board.useBlacklist) "Ignored channels" else "Watched channels") },
             text = {
                 Column {
@@ -393,10 +433,36 @@ fun StarboardScreen(
                                 .clickableRow { viewModel.toggleChannel(board.id, channel.id) },
                         )
                     }
+                    if (staleChannelIds.isNotEmpty()) {
+                        Text(
+                            text = "Listed channels no longer visible",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        staleChannelIds.forEach { staleId ->
+                            ListItem(
+                                headlineContent = { Text("Channel ID: $staleId") },
+                                trailingContent = {
+                                    IconButton(
+                                        onClick = { viewModel.toggleChannel(board.id, staleId) },
+                                    ) {
+                                        Icon(
+                                            Icons.Default.Close,
+                                            contentDescription = "Remove channel",
+                                        )
+                                    }
+                                },
+                                colors = ListItemDefaults.colors(
+                                    containerColor = Color.Transparent,
+                                ),
+                                modifier = Modifier.fillMaxWidth(),
+                            )
+                        }
+                    }
                 }
             },
             confirmButton = {
-                Button(onClick = { editingChannels = null }) { Text("Done") }
+                Button(onClick = { editingChannelsId = null }) { Text("Done") }
             },
         )
     }

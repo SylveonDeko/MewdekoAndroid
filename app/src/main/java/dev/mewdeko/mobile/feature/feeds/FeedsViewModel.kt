@@ -37,9 +37,19 @@ data class FeedSubscription(
     val channelName: String? = null,
 )
 
+/** One entry of the stats endpoint's per-channel feed breakdown. */
+@Serializable
+data class FeedChannelCount(
+    @Serializable(with = SnowflakeSerializer::class) val channelId: Snowflake = "0",
+    val count: Int = 0,
+)
+
 /** Feed counters returned by the stats endpoint. */
 @Serializable
-data class FeedStats(val totalFeeds: Int = 0)
+data class FeedStats(
+    val totalFeeds: Int = 0,
+    val feedsByChannel: List<FeedChannelCount> = emptyList(),
+)
 
 /** Feeds screen state. */
 data class FeedsState(
@@ -50,6 +60,10 @@ data class FeedsState(
     /** Resolves a channel id to its name, falling back to the raw id. */
     fun channelName(id: Snowflake): String =
         availableChannels.firstOrNull { it.id == id }?.name ?: id
+
+    /** Count of distinct feed source URLs, mirroring the dashboard's unique-feed stat. */
+    val uniqueFeedCount: Int
+        get() = feeds.map { it.url }.distinct().size
 }
 
 /** RSS and social feed subscriptions for a guild. */
@@ -125,6 +139,7 @@ class FeedsViewModel @Inject constructor(
         )
         _state.update { it.copy(feeds = it.feeds.filterNot { entry -> entry.index == feed.index }) }
         postSuccess("Feed removed.")
+        load(refreshing = true)
     }
 
     /** Sets the announcement template for one feed. */

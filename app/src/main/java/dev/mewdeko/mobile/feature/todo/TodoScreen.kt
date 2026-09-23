@@ -13,26 +13,37 @@ import androidx.compose.material.icons.filled.Checklist
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.FilterList
 import androidx.compose.material.icons.filled.Groups
 import androidx.compose.material.icons.filled.Schedule
+import androidx.compose.material.icons.filled.Shield
+import androidx.compose.material.icons.filled.Sort
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.AssistChip
+import androidx.compose.material3.AssistChipDefaults
 import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
+import androidx.compose.material3.DatePicker
+import androidx.compose.material3.DatePickerDialog
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.InputChip
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.rememberDatePickerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -43,6 +54,7 @@ import dev.mewdeko.mobile.core.ui.DiscordSelectorSingle
 import dev.mewdeko.mobile.core.ui.EmptyState
 import dev.mewdeko.mobile.core.ui.FeatureScaffold
 import dev.mewdeko.mobile.core.ui.MewdekoTextField
+import dev.mewdeko.mobile.core.ui.SearchField
 import dev.mewdeko.mobile.core.ui.SectionCard
 import dev.mewdeko.mobile.core.ui.SectionCardHeader
 import dev.mewdeko.mobile.core.ui.SelectorKind
@@ -51,7 +63,6 @@ import dev.mewdeko.mobile.core.ui.StatTile
 import dev.mewdeko.mobile.core.ui.SwitchRow
 import dev.mewdeko.mobile.core.ui.TagChip
 import dev.mewdeko.mobile.navigation.GuildRouteArgs
-import dev.mewdeko.mobile.util.relativeToNow
 import dev.mewdeko.mobile.util.shortDate
 import java.time.Instant
 import java.time.temporal.ChronoUnit
@@ -69,9 +80,11 @@ fun TodoScreen(
     val status by viewModel.status.collectAsStateWithLifecycle()
 
     var showCreateList by remember { mutableStateOf(false) }
+    var showFilters by remember { mutableStateOf(false) }
     var addingItemTo by remember { mutableStateOf<TodoListModel?>(null) }
     var editingItem by remember { mutableStateOf<TodoItemModel?>(null) }
     var taggingItem by remember { mutableStateOf<TodoItemModel?>(null) }
+    var permissionsForList by remember { mutableStateOf<TodoListModel?>(null) }
     var pendingDeleteList by remember { mutableStateOf<TodoListModel?>(null) }
     var pendingDeleteItem by remember { mutableStateOf<TodoItemModel?>(null) }
 
@@ -84,6 +97,11 @@ fun TodoScreen(
         onStatusShown = viewModel::clearStatus,
         onRefresh = { viewModel.load(refreshing = true) },
         onRetry = { viewModel.load() },
+        actions = {
+            IconButton(onClick = { showFilters = !showFilters }) {
+                Icon(Icons.Default.FilterList, contentDescription = "Filters")
+            }
+        },
         floatingActionButton = {
             ExtendedFloatingActionButton(
                 onClick = { showCreateList = true },
@@ -99,39 +117,83 @@ fun TodoScreen(
                 StatTile("Open", "${state.openCount}", Modifier.weight(1f))
                 StatTile("Done", "${state.doneCount}", Modifier.weight(1f))
             }
-            SwitchRow(
-                title = "Show completed",
-                checked = state.includeCompleted,
-                onCheckedChange = viewModel::setIncludeCompleted,
-            )
         }
 
-        if (state.lists.isEmpty()) {
+        SearchField(
+            value = state.searchQuery,
+            onValueChange = viewModel::setSearchQuery,
+            placeholder = "Search todo lists...",
+        )
+
+        if (showFilters) {
+            SectionCard {
+                SectionCardHeader("Filters", Icons.Default.Sort)
+                SwitchRow(
+                    title = "Show completed items",
+                    checked = state.includeCompleted,
+                    onCheckedChange = viewModel::setIncludeCompleted,
+                )
+                DiscordSelectorSingle(
+                    kind = SelectorKind.Custom(Icons.Default.Sort),
+                    options = TodoSortBy.entries.map { SelectorOption(it.id, it.label) },
+                    placeholder = "Sort by",
+                    label = "Sort by",
+                    selectedId = state.sortBy.id,
+                    onSelect = { viewModel.setSortBy(TodoSortBy.from(it)) },
+                )
+                DiscordSelectorSingle(
+                    kind = SelectorKind.Custom(Icons.Default.Sort),
+                    options = TodoSortOrder.entries.map { SelectorOption(it.id, it.label) },
+                    placeholder = "Order",
+                    label = "Order",
+                    selectedId = state.sortOrder.id,
+                    onSelect = { viewModel.setSortOrder(TodoSortOrder.from(it)) },
+                )
+            }
+        }
+
+        val visibleLists = state.visibleLists()
+        if (visibleLists.isEmpty()) {
             SectionCard {
                 EmptyState(
-                    message = "No lists yet. Create one to start tracking tasks.",
+                    message = if (state.searchQuery.isBlank()) {
+                        "No lists yet. Create one to start tracking tasks."
+                    } else {
+                        "No lists match \"${state.searchQuery}\"."
+                    },
                     icon = Icons.Default.Checklist,
                 )
             }
         } else {
-            state.lists.forEach { list ->
-                val items = state.items(list.id)
+            visibleLists.forEach { list ->
+                val perms = state.permissionsFor(list, viewModel.userId)
+                val stats = state.stats(list.id)
+                val items = state.visibleItems(list.id)
+
                 SectionCard {
                     SectionCardHeader(
                         title = list.name,
-                        icon = if (list.isServerList) Icons.Default.Groups
-                        else Icons.Default.Checklist,
+                        icon = if (list.isServerList) Icons.Default.Groups else Icons.Default.Checklist,
                         trailing = {
                             Row {
-                                IconButton(onClick = { addingItemTo = list }) {
-                                    Icon(Icons.Default.Add, contentDescription = "Add task")
+                                if (perms.canAdd) {
+                                    IconButton(onClick = { addingItemTo = list }) {
+                                        Icon(Icons.Default.Add, contentDescription = "Add task")
+                                    }
                                 }
-                                IconButton(onClick = { pendingDeleteList = list }) {
-                                    Icon(
-                                        Icons.Default.Delete,
-                                        contentDescription = "Delete list",
-                                        tint = MaterialTheme.colorScheme.error,
-                                    )
+                                if (perms.canView) {
+                                    IconButton(onClick = { permissionsForList = list }) {
+                                        Icon(Icons.Default.Shield, contentDescription = "Manage permissions")
+                                    }
+                                }
+                                if (perms.canManage) {
+                                    IconButton(onClick = { pendingDeleteList = list }) {
+                                        Icon(
+                                            Icons.Default.Delete,
+                                            contentDescription = "Delete list",
+                                            tint = MaterialTheme.colorScheme.error,
+                                        )
+                                    }
                                 }
                             }
                         },
@@ -146,11 +208,15 @@ fun TodoScreen(
                     Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                         if (list.isServerList) TagChip("Server list")
                         if (list.isPublic) TagChip("Public")
-                        TagChip("${items.count { !it.isCompleted }} open")
                     }
 
+                    ListStatsRow(stats)
+
                     if (items.isEmpty()) {
-                        EmptyState("Nothing on this list yet.")
+                        EmptyState(
+                            if (state.items(list.id).isEmpty()) "Nothing on this list yet."
+                            else "No items match the current filters.",
+                        )
                     } else {
                         items.forEach { item ->
                             ListItem(
@@ -158,7 +224,7 @@ fun TodoScreen(
                                     Checkbox(
                                         checked = item.isCompleted,
                                         onCheckedChange = { viewModel.complete(item) },
-                                        enabled = !item.isCompleted,
+                                        enabled = !item.isCompleted && (perms.canComplete || perms.canEdit),
                                     )
                                 },
                                 headlineContent = {
@@ -176,60 +242,53 @@ fun TodoScreen(
                                 supportingContent = {
                                     Column {
                                         item.description?.takeIf { it.isNotBlank() }?.let {
-                                            Text(
-                                                text = it,
-                                                maxLines = 2,
-                                                overflow = TextOverflow.Ellipsis,
-                                            )
+                                            Text(it, maxLines = 2, overflow = TextOverflow.Ellipsis)
                                         }
-                                        FlowRow(
-                                            horizontalArrangement = Arrangement.spacedBy(6.dp),
-                                        ) {
+                                        FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                                             TagChip(
                                                 label = item.priorityType.label,
                                                 icon = item.priorityType.icon,
                                             )
                                             item.dueDate?.let {
-                                                TagChip(
-                                                    label = "Due ${it.shortDate()}",
-                                                    icon = Icons.Default.Schedule,
-                                                )
+                                                DueDateChip(dueDate = it, overdue = item.isOverdue)
                                             }
                                             item.tags.forEach { tag -> TagChip(tag) }
-                                            item.completedAt?.let {
-                                                TagChip("Done ${it.relativeToNow()}")
-                                            }
+                                            item.completedAt?.let { TagChip("Done ${it.shortDate()}") }
                                         }
                                     }
                                 },
                                 trailingContent = {
                                     Row {
-                                        IconButton(onClick = { taggingItem = item }) {
-                                            Icon(
-                                                Icons.Default.Add,
-                                                contentDescription = "Add tag",
-                                                modifier = Modifier.size(18.dp),
-                                            )
+                                        if (perms.canEdit) {
+                                            IconButton(onClick = { taggingItem = item }) {
+                                                Icon(
+                                                    Icons.Default.Add,
+                                                    contentDescription = "Add tag",
+                                                    modifier = Modifier.size(18.dp),
+                                                )
+                                            }
+                                            IconButton(onClick = { editingItem = item }) {
+                                                Icon(
+                                                    Icons.Default.Edit,
+                                                    contentDescription = "Edit task",
+                                                    modifier = Modifier.size(18.dp),
+                                                )
+                                            }
                                         }
-                                        IconButton(onClick = { editingItem = item }) {
-                                            Icon(
-                                                Icons.Default.Edit,
-                                                contentDescription = "Edit task",
-                                                modifier = Modifier.size(18.dp),
-                                            )
-                                        }
-                                        IconButton(onClick = { pendingDeleteItem = item }) {
-                                            Icon(
-                                                Icons.Default.Close,
-                                                contentDescription = "Delete task",
-                                                tint = MaterialTheme.colorScheme.error,
-                                                modifier = Modifier.size(18.dp),
-                                            )
+                                        if (perms.canDelete) {
+                                            IconButton(onClick = { pendingDeleteItem = item }) {
+                                                Icon(
+                                                    Icons.Default.Close,
+                                                    contentDescription = "Delete task",
+                                                    tint = MaterialTheme.colorScheme.error,
+                                                    modifier = Modifier.size(18.dp),
+                                                )
+                                            }
                                         }
                                     }
                                 },
                                 colors = ListItemDefaults.colors(
-                                    containerColor = androidx.compose.ui.graphics.Color.Transparent,
+                                    containerColor = Color.Transparent,
                                 ),
                             )
                         }
@@ -242,38 +301,28 @@ fun TodoScreen(
     if (showCreateList) {
         var name by remember { mutableStateOf("") }
         var description by remember { mutableStateOf("") }
-        var isServerList by remember { mutableStateOf(false) }
         AlertDialog(
             onDismissRequest = { showCreateList = false },
             title = { Text("New list") },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    MewdekoTextField(
-                        value = name,
-                        onValueChange = { name = it },
-                        label = "Name",
-                    )
+                    MewdekoTextField(value = name, onValueChange = { name = it }, label = "Name")
                     MewdekoTextField(
                         value = description,
                         onValueChange = { description = it },
                         label = "Description (optional)",
                     )
-                    SwitchRow(
-                        title = "Server list",
-                        subtitle = "Visible to everyone in this server",
-                        checked = isServerList,
-                        onCheckedChange = { isServerList = it },
+                    Text(
+                        text = "Server lists are visible to everyone in this server.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
             },
             confirmButton = {
                 Button(
                     onClick = {
-                        viewModel.createList(
-                            name.trim(),
-                            description.takeIf { it.isNotBlank() },
-                            isServerList,
-                        )
+                        viewModel.createList(name.trim(), description.takeIf { it.isNotBlank() })
                         showCreateList = false
                     },
                     enabled = name.isNotBlank(),
@@ -295,11 +344,7 @@ fun TodoScreen(
             title = { Text("Add task to ${list.name}") },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    MewdekoTextField(
-                        value = title,
-                        onValueChange = { title = it },
-                        label = "Title",
-                    )
+                    MewdekoTextField(value = title, onValueChange = { title = it }, label = "Title")
                     MewdekoTextField(
                         value = description,
                         onValueChange = { description = it },
@@ -309,9 +354,7 @@ fun TodoScreen(
                     )
                     DiscordSelectorSingle(
                         kind = SelectorKind.Custom(Icons.Default.Checklist),
-                        options = TodoPriority.entries.map {
-                            SelectorOption(it.raw.toString(), it.label)
-                        },
+                        options = TodoPriority.entries.map { SelectorOption(it.raw.toString(), it.label) },
                         placeholder = "Medium",
                         label = "Priority",
                         selectedId = priority.raw.toString(),
@@ -348,16 +391,16 @@ fun TodoScreen(
     editingItem?.let { item ->
         var title by remember(item.id) { mutableStateOf(item.title) }
         var description by remember(item.id) { mutableStateOf(item.description.orEmpty()) }
+        var priority by remember(item.id) { mutableStateOf(item.priorityType) }
+        var dueDate by remember(item.id) { mutableStateOf(item.dueDate) }
+        var showDatePicker by remember(item.id) { mutableStateOf(false) }
+
         AlertDialog(
             onDismissRequest = { editingItem = null },
             title = { Text("Edit task") },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    MewdekoTextField(
-                        value = title,
-                        onValueChange = { title = it },
-                        label = "Title",
-                    )
+                    MewdekoTextField(value = title, onValueChange = { title = it }, label = "Title")
                     MewdekoTextField(
                         value = description,
                         onValueChange = { description = it },
@@ -365,9 +408,21 @@ fun TodoScreen(
                         singleLine = false,
                         minLines = 2,
                     )
-                    if (item.dueDate != null) {
-                        TextButton(onClick = { viewModel.setDueDate(item, null) }) {
-                            Text("Clear due date")
+                    DiscordSelectorSingle(
+                        kind = SelectorKind.Custom(Icons.Default.Checklist),
+                        options = TodoPriority.entries.map { SelectorOption(it.raw.toString(), it.label) },
+                        placeholder = "Priority",
+                        label = "Priority",
+                        selectedId = priority.raw.toString(),
+                        onSelect = { priority = TodoPriority.from(it?.toIntOrNull() ?: priority.raw) },
+                    )
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        TextButton(onClick = { showDatePicker = true }) {
+                            Icon(Icons.Default.Schedule, contentDescription = null)
+                            Text("  " + (dueDate?.shortDate() ?: "Set due date"))
+                        }
+                        if (dueDate != null) {
+                            TextButton(onClick = { dueDate = null }) { Text("Clear") }
                         }
                     }
                     if (item.tags.isNotEmpty()) {
@@ -393,6 +448,8 @@ fun TodoScreen(
                             item,
                             title.trim(),
                             description.takeIf { it.isNotBlank() },
+                            priority,
+                            dueDate,
                         )
                         editingItem = null
                     },
@@ -401,6 +458,14 @@ fun TodoScreen(
             },
             dismissButton = { TextButton(onClick = { editingItem = null }) { Text("Cancel") } },
         )
+
+        if (showDatePicker) {
+            DueDatePickerDialog(
+                initial = dueDate,
+                onConfirm = { dueDate = it; showDatePicker = false },
+                onDismiss = { showDatePicker = false },
+            )
+        }
     }
 
     taggingItem?.let { item ->
@@ -421,6 +486,19 @@ fun TodoScreen(
         )
     }
 
+    permissionsForList?.let { list ->
+        TodoPermissionsDialog(
+            list = list,
+            permissions = state.permissionsByList[list.id].orEmpty(),
+            members = state.members,
+            onGrant = { target, canView, canEdit, canManage ->
+                viewModel.grantPermission(list.id, target, canView, canEdit, canManage)
+            },
+            onRevoke = { target -> viewModel.revokePermission(list.id, target) },
+            onDismiss = { permissionsForList = null },
+        )
+    }
+
     pendingDeleteList?.let { list ->
         ConfirmDialog(
             title = "Delete list?",
@@ -437,5 +515,94 @@ fun TodoScreen(
             onConfirm = { viewModel.deleteItem(item) },
             onDismiss = { pendingDeleteItem = null },
         )
+    }
+}
+
+/** Pending, completed, overdue counts and a completion-rate progress bar for one list. */
+@Composable
+private fun ListStatsRow(stats: TodoListStats) {
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+        ) {
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text(
+                    "${stats.pending} pending",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Text(
+                    "${stats.completed} done",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                if (stats.overdue > 0) {
+                    Text(
+                        "${stats.overdue} overdue",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                }
+            }
+            Text(
+                "${stats.total} item${if (stats.total == 1) "" else "s"}",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.primary,
+            )
+        }
+        if (stats.total > 0) {
+            LinearProgressIndicator(
+                progress = { stats.completionRate / 100f },
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
+    }
+}
+
+/** Due-date chip that turns error-colored when the item is overdue. */
+@Composable
+private fun DueDateChip(dueDate: Instant, overdue: Boolean) {
+    AssistChip(
+        onClick = {},
+        enabled = false,
+        label = { Text("Due ${dueDate.shortDate()}", style = MaterialTheme.typography.labelSmall) },
+        leadingIcon = { Icon(Icons.Default.Schedule, contentDescription = null, modifier = Modifier.size(16.dp)) },
+        colors = if (overdue) {
+            AssistChipDefaults.assistChipColors(
+                disabledContainerColor = MaterialTheme.colorScheme.errorContainer,
+                disabledLabelColor = MaterialTheme.colorScheme.onErrorContainer,
+                disabledLeadingIconContentColor = MaterialTheme.colorScheme.onErrorContainer,
+            )
+        } else {
+            AssistChipDefaults.assistChipColors()
+        },
+    )
+}
+
+/** A Material date picker constrained to setting a task's due date. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun DueDatePickerDialog(
+    initial: Instant?,
+    onConfirm: (Instant) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val pickerState = rememberDatePickerState(
+        initialSelectedDateMillis = (initial ?: Instant.now()).toEpochMilli(),
+    )
+    DatePickerDialog(
+        onDismissRequest = onDismiss,
+        confirmButton = {
+            TextButton(
+                onClick = {
+                    val millis = pickerState.selectedDateMillis ?: return@TextButton
+                    onConfirm(Instant.ofEpochMilli(millis).plus(23, ChronoUnit.HOURS).plusSeconds(59 * 60 + 59))
+                },
+            ) { Text("Set") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+    ) {
+        DatePicker(state = pickerState)
     }
 }

@@ -22,20 +22,20 @@ import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ConfirmationNumber
 import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.Description
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Flag
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Insights
 import androidx.compose.material.icons.filled.Label
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.NoteAdd
+import androidx.compose.material.icons.filled.OpenInNew
 import androidx.compose.material.icons.filled.PanTool
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.SmartButton
 import androidx.compose.material.icons.filled.Tag
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.ViewCarousel
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -59,17 +59,25 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import dev.mewdeko.mobile.core.model.EmbedFooter
+import dev.mewdeko.mobile.core.model.EmbedMessage
+import dev.mewdeko.mobile.core.model.EmbedSpec
 import dev.mewdeko.mobile.core.model.Snowflake
+import dev.mewdeko.mobile.core.net.MewdekoJson
+import dev.mewdeko.mobile.core.net.normalizeKeys
 import dev.mewdeko.mobile.core.ui.ConfirmDialog
 import dev.mewdeko.mobile.core.ui.DiscordSelector
 import dev.mewdeko.mobile.core.ui.DiscordSelectorSingle
 import dev.mewdeko.mobile.core.ui.EmptyState
+import dev.mewdeko.mobile.core.ui.FeatureLinkCard
 import dev.mewdeko.mobile.core.ui.FeatureScaffold
+import dev.mewdeko.mobile.core.ui.InfoRow
 import dev.mewdeko.mobile.core.ui.MewdekoTextField
 import dev.mewdeko.mobile.core.ui.SectionCard
 import dev.mewdeko.mobile.core.ui.SectionCardHeader
@@ -84,6 +92,10 @@ import dev.mewdeko.mobile.core.ui.TagChip
 import dev.mewdeko.mobile.core.ui.clickableRow
 import dev.mewdeko.mobile.navigation.GuildRouteArgs
 import dev.mewdeko.mobile.util.relativeToNow
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonObject
 
 /** The Material icon standing in for each section. */
 private val TicketSection.icon: ImageVector
@@ -96,6 +108,17 @@ private val TicketSection.icon: ImageVector
         TicketSection.ADVANCED -> Icons.Default.Build
     }
 
+/** A blank starting embed for new panels. */
+private val DefaultPanelEmbedJson: String
+    get() = EmbedMessage(
+        embeds = listOf(
+            EmbedSpec(
+                title = "Open a ticket",
+                description = "Click the button below to open a new ticket.",
+            )
+        ),
+    ).serialize()
+
 /** Which sheet, if any, is open over the tickets screen. */
 private sealed interface TicketSheet {
     /** Adding a staff note to one ticket. */
@@ -107,11 +130,20 @@ private sealed interface TicketSheet {
     /** Setting one ticket's urgency. */
     data class Priority(val ticket: TicketSummary) : TicketSheet
 
+    /** Closing a ticket, with an optional reason. */
+    data class CloseTicket(val ticket: TicketSummary) : TicketSheet
+
     /** Posting a new panel. */
     data object CreatePanel : TicketSheet
 
+    /** Replacing an existing panel's embed. */
+    data class EditPanelEmbed(val panel: TicketPanel) : TicketSheet
+
     /** Opening a new case. */
     data object CreateCase : TicketSheet
+
+    /** Linking more tickets into the open case. */
+    data class LinkTickets(val caseId: Int) : TicketSheet
 
     /** Defining a new urgency level. */
     data object CreatePriority : TicketSheet
@@ -121,6 +153,15 @@ private sealed interface TicketSheet {
 
     /** Adding a button to the open panel. */
     data class AddButton(val panel: TicketPanel) : TicketSheet
+
+    /** Adding a select menu to the open panel. */
+    data class AddMenu(val panel: TicketPanel) : TicketSheet
+
+    /** Editing one select menu's placeholder. */
+    data class EditMenuPlaceholder(val panel: TicketPanel, val menu: PanelSelectMenu) : TicketSheet
+
+    /** Adding an option to the open select menu. */
+    data class AddMenuOption(val menu: PanelSelectMenu) : TicketSheet
 }
 
 /** The support ticket system. */
@@ -135,28 +176,58 @@ fun TicketsScreen(
     val status by viewModel.status.collectAsStateWithLifecycle()
 
     var sheet by remember { mutableStateOf<TicketSheet?>(null) }
-    var pendingClose by remember { mutableStateOf<TicketSummary?>(null) }
     var pendingDeletePanel by remember { mutableStateOf<TicketPanel?>(null) }
     var pendingDeleteButton by remember { mutableStateOf<PanelButton?>(null) }
+    var pendingDeleteMenu by remember { mutableStateOf<PanelSelectMenu?>(null) }
+    var pendingDeleteOption by remember { mutableStateOf<SelectMenuOption?>(null) }
+    var pendingBatchClose by remember { mutableStateOf<Int?>(null) }
 
     val panel = state.openPanel
+    val menu = state.openMenu
+    val caseDetail = state.openCase
+    val drilledDown = panel != null || caseDetail != null
 
-    /** The open panel is an in-screen layer, so system back must close it first. */
-    BackHandler(enabled = panel != null) { viewModel.closePanel() }
+    /** Panels, menus, and case detail are in-screen layers, so back must unwind them first. */
+    BackHandler(enabled = drilledDown) {
+        when {
+            menu != null -> viewModel.closeMenu()
+            panel != null -> viewModel.closePanel()
+            caseDetail != null -> viewModel.closeCaseDetail()
+        }
+    }
+
+    val screenTitle = when {
+        menu != null -> menu.menu.placeholder ?: "Menu #${menu.menu.id}"
+        panel != null -> "Panel #${panel.panel.id}"
+        caseDetail != null -> caseDetail.detail.title.ifEmpty { "Case #${caseDetail.detail.id}" }
+        else -> "Tickets"
+    }
 
     FeatureScaffold(
-        title = if (panel != null) "Panel #${panel.panel.id}" else "Tickets",
+        title = screenTitle,
         subtitle = guild.name.takeIf { it.isNotEmpty() },
-        onBack = if (panel != null) viewModel::closePanel else onBack,
+        onBack = if (drilledDown) {
+            {
+                when {
+                    menu != null -> viewModel.closeMenu()
+                    panel != null -> viewModel.closePanel()
+                    caseDetail != null -> viewModel.closeCaseDetail()
+                }
+            }
+        } else onBack,
         loadState = loadState,
         status = status,
         onStatusShown = viewModel::clearStatus,
         onRefresh = {
-            if (panel != null) viewModel.loadPanelDetail(panel.panel) else viewModel.load(true)
+            when {
+                panel != null -> viewModel.loadPanelDetail(panel.panel)
+                caseDetail != null -> viewModel.loadCaseDetail(caseDetail.detail.id)
+                else -> viewModel.load(true)
+            }
         },
         onRetry = { viewModel.load() },
         actions = {
-            if (panel == null && state.section == TicketSection.PANELS) {
+            if (!drilledDown && state.section == TicketSection.PANELS) {
                 PanelsOverflow(
                     onCreate = { sheet = TicketSheet.CreatePanel },
                     onRepostAll = viewModel::recreateAllPanels,
@@ -165,13 +236,19 @@ fun TicketsScreen(
         },
         floatingActionButton = {
             when {
+                menu != null -> ExtendedFloatingActionButton(
+                    onClick = { sheet = TicketSheet.AddMenuOption(menu.menu) },
+                    icon = { Icon(Icons.Default.Add, contentDescription = null) },
+                    text = { Text("Add option") },
+                )
+
                 panel != null -> ExtendedFloatingActionButton(
                     onClick = { sheet = TicketSheet.AddButton(panel.panel) },
                     icon = { Icon(Icons.Default.Add, contentDescription = null) },
                     text = { Text("Add button") },
                 )
 
-                state.section == TicketSection.CASES -> ExtendedFloatingActionButton(
+                caseDetail == null && state.section == TicketSection.CASES -> ExtendedFloatingActionButton(
                     onClick = { sheet = TicketSheet.CreateCase },
                     icon = { Icon(Icons.Default.Add, contentDescription = null) },
                     text = { Text("New case") },
@@ -179,12 +256,42 @@ fun TicketsScreen(
             }
         },
     ) {
-        if (panel != null) {
-            PanelDetailSection(
-                detail = panel,
-                onDeleteButton = { pendingDeleteButton = it },
-            )
-            return@FeatureScaffold
+        when {
+            menu != null -> {
+                MenuDetailSection(
+                    detail = menu,
+                    onEditPlaceholder = { sheet = TicketSheet.EditMenuPlaceholder(menu.panel, menu.menu) },
+                    onDeleteMenu = { pendingDeleteMenu = menu.menu },
+                    onEditOption = viewModel::openOptionEditor,
+                    onDeleteOption = { pendingDeleteOption = it },
+                )
+                return@FeatureScaffold
+            }
+
+            panel != null -> {
+                PanelDetailSection(
+                    detail = panel,
+                    onEditEmbed = { sheet = TicketSheet.EditPanelEmbed(panel.panel) },
+                    onCheckStatus = { viewModel.checkPanelStatus(panel.panel) },
+                    onEditButton = viewModel::openButtonEditor,
+                    onDeleteButton = { pendingDeleteButton = it },
+                    onOpenMenu = { viewModel.openMenu(panel.panel, it) },
+                    onAddMenu = { sheet = TicketSheet.AddMenu(panel.panel) },
+                )
+                return@FeatureScaffold
+            }
+
+            caseDetail != null -> {
+                CaseDetailSection(
+                    detail = caseDetail,
+                    unlinkedTickets = state.unlinkedTickets,
+                    onClose = { viewModel.closeTicketCase(caseDetail.detail.id) },
+                    onReopen = { viewModel.reopenTicketCase(caseDetail.detail.id) },
+                    onLinkMore = { sheet = TicketSheet.LinkTickets(caseDetail.detail.id) },
+                    onUnlink = { viewModel.unlinkTicket(caseDetail.detail.id, it) },
+                )
+                return@FeatureScaffold
+            }
         }
 
         SectionTabs(
@@ -196,14 +303,16 @@ fun TicketsScreen(
         )
 
         when (state.section) {
-            TicketSection.OVERVIEW -> OverviewSection(state)
+            TicketSection.OVERVIEW -> OverviewSection(state, onNavigate = viewModel::setSection)
             TicketSection.TICKETS -> TicketsSection(
+                guildId = guild.id,
                 state = state,
                 onFilter = viewModel::setFilter,
+                onSearch = viewModel::setSearch,
                 onClaim = viewModel::claim,
                 onUnclaim = viewModel::unclaim,
                 onArchive = viewModel::archive,
-                onClose = { pendingClose = it },
+                onClose = { sheet = TicketSheet.CloseTicket(it) },
                 onNote = { sheet = TicketSheet.Note(it) },
                 onTags = { sheet = TicketSheet.Tags(it) },
                 onPriority = { sheet = TicketSheet.Priority(it) },
@@ -213,6 +322,7 @@ fun TicketsScreen(
                 state = state,
                 onOpen = viewModel::openPanel,
                 onRepost = viewModel::recreatePanel,
+                onCheckStatus = { viewModel.checkPanelStatus(it) },
                 onDelete = { pendingDeletePanel = it },
                 onCreate = { sheet = TicketSheet.CreatePanel },
             )
@@ -227,23 +337,19 @@ fun TicketsScreen(
                 onDeleteTag = viewModel::deleteTag,
             )
 
-            TicketSection.CASES -> CasesSection(state, onCreate = { sheet = TicketSheet.CreateCase })
+            TicketSection.CASES -> CasesSection(
+                state = state,
+                onOpen = viewModel::openCase,
+                onCreate = { sheet = TicketSheet.CreateCase },
+            )
+
             TicketSection.ADVANCED -> AdvancedSection(
                 state = state,
+                onBatchClose = { pendingBatchClose = it },
                 onBlacklist = viewModel::blacklist,
                 onUnblacklist = viewModel::unblacklist,
             )
         }
-    }
-
-    pendingClose?.let { ticket ->
-        ConfirmDialog(
-            title = "Close ticket?",
-            message = "#${ticket.channelName} will be closed and a transcript saved.",
-            confirmLabel = "Close ticket",
-            onConfirm = { pendingClose = null; viewModel.close(ticket) },
-            onDismiss = { pendingClose = null },
-        )
     }
 
     pendingDeletePanel?.let { target ->
@@ -264,6 +370,59 @@ fun TicketsScreen(
         )
     }
 
+    pendingDeleteMenu?.let { target ->
+        ConfirmDialog(
+            title = "Delete select menu?",
+            message = "This menu and all of its options will be removed from the panel.",
+            onConfirm = {
+                pendingDeleteMenu = null
+                panel?.let { viewModel.deleteMenu(it.panel, target) }
+            },
+            onDismiss = { pendingDeleteMenu = null },
+        )
+    }
+
+    pendingDeleteOption?.let { target ->
+        ConfirmDialog(
+            title = "Delete option?",
+            message = "\"${target.label}\" will be removed from the menu.",
+            onConfirm = { pendingDeleteOption = null; viewModel.deleteMenuOption(target.id) },
+            onDismiss = { pendingDeleteOption = null },
+        )
+    }
+
+    pendingBatchClose?.let { hours ->
+        ConfirmDialog(
+            title = "Close inactive tickets?",
+            message = "Every open ticket with no activity in the last $hours hour(s) will be closed.",
+            confirmLabel = "Close tickets",
+            onConfirm = { pendingBatchClose = null; viewModel.batchCloseInactive(hours) },
+            onDismiss = { pendingBatchClose = null },
+        )
+    }
+
+    state.editingButton?.let { button ->
+        EditButtonSheet(
+            button = button,
+            categories = state.availableCategories.map { SelectorOption(it.id, it.name) },
+            roles = state.availableRoles.map { SelectorOption(it.id, it.name) },
+            priorities = state.priorities,
+            onDismiss = viewModel::closeButtonEditor,
+            onConfirm = { form -> viewModel.updateButton(button, form) },
+        )
+    }
+
+    state.editingOption?.let { option ->
+        EditMenuOptionSheet(
+            option = option,
+            categories = state.availableCategories.map { SelectorOption(it.id, it.name) },
+            roles = state.availableRoles.map { SelectorOption(it.id, it.name) },
+            priorities = state.priorities,
+            onDismiss = viewModel::closeOptionEditor,
+            onConfirm = { form -> viewModel.updateMenuOption(option, form) },
+        )
+    }
+
     when (val open = sheet) {
         null -> Unit
         is TicketSheet.Note -> TextEntrySheet(
@@ -279,7 +438,10 @@ fun TicketsScreen(
             ticket = open.ticket,
             tags = state.tags,
             onDismiss = { sheet = null },
-            onConfirm = { sheet = null; viewModel.addTags(open.ticket, it) },
+            onConfirm = { original, updated ->
+                sheet = null
+                viewModel.updateTags(open.ticket, original, updated)
+            },
         )
 
         is TicketSheet.Priority -> PriorityPickerSheet(
@@ -289,21 +451,42 @@ fun TicketsScreen(
             onConfirm = { sheet = null; viewModel.setPriority(open.ticket, it) },
         )
 
+        is TicketSheet.CloseTicket -> CloseTicketSheet(
+            ticket = open.ticket,
+            onDismiss = { sheet = null },
+            onConfirm = { reason -> sheet = null; viewModel.close(open.ticket, reason) },
+        )
+
         TicketSheet.CreatePanel -> CreatePanelSheet(
             channels = state.availableChannels.map { SelectorOption(it.id, it.name) },
             onDismiss = { sheet = null },
-            onConfirm = { channelId, title, description ->
+            onConfirm = { channelId, embedJson ->
                 sheet = null
-                viewModel.createPanel(channelId, title, description)
+                viewModel.createPanel(channelId, embedJson)
             },
         )
 
-        TicketSheet.CreateCase -> CreateCaseSheet(
+        is TicketSheet.EditPanelEmbed -> EmbedBuilderSheet(
+            title = "Edit panel embed",
+            confirmLabel = "Save",
+            initialJson = open.panel.embedJson,
             onDismiss = { sheet = null },
-            onConfirm = { title, description ->
+            onConfirm = { json -> sheet = null; viewModel.updatePanelEmbed(open.panel, json) },
+        )
+
+        TicketSheet.CreateCase -> CreateCaseSheet(
+            unlinkedTickets = state.unlinkedTickets,
+            onDismiss = { sheet = null },
+            onConfirm = { title, description, linkIds ->
                 sheet = null
-                viewModel.createCase(title, description)
+                viewModel.createCase(title, description, linkIds)
             },
+        )
+
+        is TicketSheet.LinkTickets -> LinkTicketsSheet(
+            unlinkedTickets = state.unlinkedTickets,
+            onDismiss = { sheet = null },
+            onConfirm = { ids -> sheet = null; viewModel.linkTickets(open.caseId, ids) },
         )
 
         TicketSheet.CreatePriority -> CreatePrioritySheet(
@@ -322,24 +505,38 @@ fun TicketsScreen(
             },
         )
 
-        is TicketSheet.AddButton -> AddPanelButtonSheet(
+        is TicketSheet.AddButton -> AddButtonSheet(
             categories = state.availableCategories.map { SelectorOption(it.id, it.name) },
             roles = state.availableRoles.map { SelectorOption(it.id, it.name) },
+            priorities = state.priorities,
             onDismiss = { sheet = null },
-            onConfirm = { label, emoji, style, category, archive, support, viewer, max ->
+            onConfirm = { form -> sheet = null; viewModel.addPanelButton(open.panel, form) },
+        )
+
+        is TicketSheet.AddMenu -> CreateMenuSheet(
+            onDismiss = { sheet = null },
+            onConfirm = { placeholder, label, description, emoji ->
                 sheet = null
-                viewModel.addPanelButton(
-                    panel = open.panel,
-                    label = label,
-                    emoji = emoji,
-                    style = style,
-                    categoryId = category,
-                    archiveCategoryId = archive,
-                    supportRoles = support,
-                    viewerRoles = viewer,
-                    maxActiveTickets = max,
-                )
+                viewModel.createSelectMenu(open.panel, placeholder, label, description, emoji)
             },
+        )
+
+        is TicketSheet.EditMenuPlaceholder -> TextEntrySheet(
+            title = "Menu placeholder",
+            label = "Placeholder text",
+            confirmLabel = "Save",
+            minLines = 1,
+            initial = open.menu.placeholder.orEmpty(),
+            onDismiss = { sheet = null },
+            onConfirm = { sheet = null; viewModel.updateMenuPlaceholder(open.panel, open.menu, it) },
+        )
+
+        is TicketSheet.AddMenuOption -> AddMenuOptionSheet(
+            categories = state.availableCategories.map { SelectorOption(it.id, it.name) },
+            roles = state.availableRoles.map { SelectorOption(it.id, it.name) },
+            priorities = state.priorities,
+            onDismiss = { sheet = null },
+            onConfirm = { form -> sheet = null; viewModel.addMenuOption(open.menu, form) },
         )
     }
 }
@@ -367,20 +564,44 @@ private fun PanelsOverflow(onCreate: () -> Unit, onRepostAll: () -> Unit) {
 }
 
 @Composable
-private fun OverviewSection(state: TicketsState) {
+private fun OverviewSection(state: TicketsState, onNavigate: (TicketSection) -> Unit) {
+    val stats = state.overview?.statistics
+
     SectionCard {
         SectionCardHeader("Ticket volume", Icons.Default.Insights)
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            StatTile("Open", "${state.countFor(TicketFilter.OPEN)}", Modifier.weight(1f))
-            StatTile("Claimed", "${state.countFor(TicketFilter.CLAIMED)}", Modifier.weight(1f))
+            StatTile("Total", "${stats?.totalTickets ?: state.tickets.size}", Modifier.weight(1f))
+            StatTile("Open", "${stats?.openTickets ?: state.countFor(TicketFilter.OPEN)}", Modifier.weight(1f))
         }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            StatTile("Closed", "${state.countFor(TicketFilter.CLOSED)}", Modifier.weight(1f))
-            StatTile("Archived", "${state.countFor(TicketFilter.ARCHIVED)}", Modifier.weight(1f))
+            StatTile("Closed", "${stats?.closedTickets ?: state.countFor(TicketFilter.CLOSED)}", Modifier.weight(1f))
+            StatTile("Active panels", "${state.panels.size}", Modifier.weight(1f))
         }
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            StatTile("Panels", "${state.panels.size}", Modifier.weight(1f))
-            StatTile("Cases", "${state.cases.size}", Modifier.weight(1f))
+    }
+
+    if (stats != null) {
+        SectionCard {
+            SectionCardHeader("Response times", Icons.Default.Insights)
+            InfoRow("Average response", "${"%.1f".format(stats.averageResponseTime)} min")
+            InfoRow("Average resolution", "${"%.1f".format(stats.averageResolutionTime)} hrs")
+        }
+
+        if (stats.ticketsByPriority.isNotEmpty()) {
+            SectionCard {
+                SectionCardHeader("Tickets by priority", Icons.Default.Flag)
+                stats.ticketsByPriority.forEach { (name, count) ->
+                    InfoRow(name.ifEmpty { "None" }, "$count")
+                }
+            }
+        }
+    }
+
+    state.overview?.staffResponseStats?.takeIf { it.isNotEmpty() }?.let { staff ->
+        SectionCard {
+            SectionCardHeader("Staff performance", Icons.Default.ConfirmationNumber)
+            staff.forEach { s ->
+                InfoRow(s.staffName, "${"%.1f".format(s.averageResponseTimeMinutes)} min avg")
+            }
         }
     }
 
@@ -393,36 +614,41 @@ private fun OverviewSection(state: TicketsState) {
         }
     }
 
-    state.tickets.firstOrNull()?.let { recent ->
-        SectionCard {
-            SectionCardHeader("Most recent ticket", Icons.Default.ConfirmationNumber)
-            Text(
-                "#${recent.channelName}",
-                style = MaterialTheme.typography.titleSmall,
-                fontWeight = FontWeight.SemiBold,
-            )
-            recent.creatorName?.let {
-                Text(
-                    "Created by $it",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-            recent.lastActivityAt?.let {
-                Text(
-                    "Last activity ${it.relativeToNow()}",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-        }
+    SectionCard {
+        SectionCardHeader("Quick links", Icons.Default.ChevronRight)
+        FeatureLinkCard(
+            title = "Manage panels",
+            subtitle = "Create and configure ticket panels",
+            icon = Icons.Default.ViewCarousel,
+            onClick = { onNavigate(TicketSection.PANELS) },
+        )
+        FeatureLinkCard(
+            title = "Configuration",
+            subtitle = "Set up priorities, tags, and channels",
+            icon = Icons.Default.Tune,
+            onClick = { onNavigate(TicketSection.CONFIGURATION) },
+        )
+        FeatureLinkCard(
+            title = "View cases",
+            subtitle = "Manage linked ticket cases",
+            icon = Icons.Default.Folder,
+            onClick = { onNavigate(TicketSection.CASES) },
+        )
+        FeatureLinkCard(
+            title = "Advanced tools",
+            subtitle = "Batch operations and blacklist",
+            icon = Icons.Default.Build,
+            onClick = { onNavigate(TicketSection.ADVANCED) },
+        )
     }
 }
 
 @Composable
 private fun TicketsSection(
+    guildId: Snowflake,
     state: TicketsState,
     onFilter: (TicketFilter) -> Unit,
+    onSearch: (String) -> Unit,
     onClaim: (TicketSummary) -> Unit,
     onUnclaim: (TicketSummary) -> Unit,
     onArchive: (TicketSummary) -> Unit,
@@ -431,6 +657,15 @@ private fun TicketsSection(
     onTags: (TicketSummary) -> Unit,
     onPriority: (TicketSummary) -> Unit,
 ) {
+    val uriHandler = LocalUriHandler.current
+
+    MewdekoTextField(
+        value = state.searchQuery,
+        onValueChange = onSearch,
+        label = "Search",
+        placeholder = "Ticket #, creator, channel, claimer, tag",
+    )
+
     Row(
         modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
         horizontalArrangement = Arrangement.spacedBy(6.dp),
@@ -487,6 +722,13 @@ private fun TicketsSection(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
+            ticket.createdAt?.let {
+                Text(
+                    "Opened ${it.relativeToNow()}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
             ticket.lastActivityAt?.let {
                 Text(
                     "Last activity ${it.relativeToNow()}",
@@ -502,12 +744,28 @@ private fun TicketsSection(
                     TagChip(it, icon = Icons.Default.Flag)
                 }
                 ticket.source?.let { TagChip(it, icon = Icons.Default.SmartButton) }
+                ticket.caseId?.let { TagChip("Case #$it", icon = Icons.Default.Folder) }
                 ticket.tags.forEach { TagChip(it, icon = Icons.Default.Label) }
             }
             Row(
                 modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
             ) {
+                TextButton(
+                    onClick = {
+                        uriHandler.openUri("https://discord.com/channels/$guildId/${ticket.channelId}")
+                    },
+                ) {
+                    Icon(
+                        Icons.Default.OpenInNew,
+                        contentDescription = null,
+                        modifier = Modifier.size(16.dp),
+                    )
+                    Text("Discord", modifier = Modifier.padding(start = 6.dp))
+                }
+                ticket.transcriptUrl?.takeIf { it.isNotEmpty() }?.let { url ->
+                    TextButton(onClick = { uriHandler.openUri(url) }) { Text("Transcript") }
+                }
                 if (ticket.isOpen) {
                     if (ticket.claimedBy == null) {
                         TextButton(onClick = { onClaim(ticket) }) {
@@ -588,6 +846,7 @@ private fun PanelsSection(
     state: TicketsState,
     onOpen: (TicketPanel) -> Unit,
     onRepost: (TicketPanel) -> Unit,
+    onCheckStatus: (TicketPanel) -> Unit,
     onDelete: (TicketPanel) -> Unit,
     onCreate: () -> Unit,
 ) {
@@ -633,6 +892,10 @@ private fun PanelsSection(
                     }
                     DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
                         DropdownMenuItem(
+                            text = { Text("Check status") },
+                            onClick = { menuOpen = false; onCheckStatus(panel) },
+                        )
+                        DropdownMenuItem(
                             text = { Text("Repost panel") },
                             leadingIcon = { Icon(Icons.Default.Refresh, contentDescription = null) },
                             onClick = { menuOpen = false; onRepost(panel) },
@@ -665,9 +928,39 @@ private fun PanelsSection(
 }
 
 @Composable
-private fun PanelDetailSection(detail: PanelDetail, onDeleteButton: (PanelButton) -> Unit) {
+private fun PanelDetailSection(
+    detail: PanelDetail,
+    onEditEmbed: () -> Unit,
+    onCheckStatus: () -> Unit,
+    onEditButton: (PanelButton) -> Unit,
+    onDeleteButton: (PanelButton) -> Unit,
+    onOpenMenu: (PanelSelectMenu) -> Unit,
+    onAddMenu: () -> Unit,
+) {
     SectionCard {
-        SectionCardHeader("Panel #${detail.panel.id}", Icons.Default.ViewCarousel)
+        SectionCardHeader(
+            title = "Panel #${detail.panel.id}",
+            icon = Icons.Default.ViewCarousel,
+            trailing = {
+                var open by remember { mutableStateOf(false) }
+                Box {
+                    IconButton(onClick = { open = true }) {
+                        Icon(Icons.Default.MoreVert, contentDescription = "Panel actions")
+                    }
+                    DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+                        DropdownMenuItem(
+                            text = { Text("Edit embed") },
+                            leadingIcon = { Icon(Icons.Default.Edit, contentDescription = null) },
+                            onClick = { open = false; onEditEmbed() },
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Check status") },
+                            onClick = { open = false; onCheckStatus() },
+                        )
+                    }
+                }
+            },
+        )
         Text(
             "#${detail.panel.channelName ?: detail.panel.channelId}",
             style = MaterialTheme.typography.bodySmall,
@@ -705,6 +998,9 @@ private fun PanelDetailSection(detail: PanelDetail, onDeleteButton: (PanelButton
                     fontWeight = FontWeight.Medium,
                     modifier = Modifier.weight(1f),
                 )
+                IconButton(onClick = { onEditButton(button) }) {
+                    Icon(Icons.Default.Edit, contentDescription = "Edit button")
+                }
                 IconButton(onClick = { onDeleteButton(button) }) {
                     Icon(
                         Icons.Default.Delete,
@@ -716,31 +1012,211 @@ private fun PanelDetailSection(detail: PanelDetail, onDeleteButton: (PanelButton
         }
     }
 
-    if (detail.menus.isNotEmpty()) {
-        SectionCard {
-            SectionCardHeader("Select menus", Icons.Default.Tune)
-            detail.menus.forEach { menu ->
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
+    SectionCard {
+        SectionCardHeader(
+            title = "Select menus",
+            icon = Icons.Default.Tune,
+            trailing = {
+                IconButton(onClick = onAddMenu) {
+                    Icon(Icons.Default.Add, contentDescription = "Add select menu")
+                }
+            },
+        )
+        if (detail.menus.isEmpty()) {
+            EmptyState(message = "No select menus yet.", icon = Icons.Default.Tune)
+        }
+        detail.menus.forEach { menu ->
+            Row(
+                modifier = Modifier.fillMaxWidth().clickableRow { onOpenMenu(menu) },
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    menu.placeholder ?: "Select menu #${menu.id}",
+                    style = MaterialTheme.typography.bodyMedium,
+                    modifier = Modifier.weight(1f),
+                )
+                Text(
+                    "${menu.optionTotal} options",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Icon(
+                    Icons.Default.ChevronRight,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun MenuDetailSection(
+    detail: MenuDetail,
+    onEditPlaceholder: () -> Unit,
+    onDeleteMenu: () -> Unit,
+    onEditOption: (SelectMenuOption) -> Unit,
+    onDeleteOption: (SelectMenuOption) -> Unit,
+) {
+    SectionCard {
+        SectionCardHeader(
+            title = detail.menu.placeholder ?: "Select menu #${detail.menu.id}",
+            icon = Icons.Default.Tune,
+            trailing = {
+                var open by remember { mutableStateOf(false) }
+                Box {
+                    IconButton(onClick = { open = true }) {
+                        Icon(Icons.Default.MoreVert, contentDescription = "Menu actions")
+                    }
+                    DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+                        DropdownMenuItem(
+                            text = { Text("Edit placeholder") },
+                            leadingIcon = { Icon(Icons.Default.Edit, contentDescription = null) },
+                            onClick = { open = false; onEditPlaceholder() },
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Delete menu") },
+                            leadingIcon = {
+                                Icon(
+                                    Icons.Default.Delete,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.error,
+                                )
+                            },
+                            onClick = { open = false; onDeleteMenu() },
+                        )
+                    }
+                }
+            },
+        )
+    }
+
+    SectionCard {
+        SectionCardHeader("Options", Icons.Default.Label)
+        if (detail.menu.options.isEmpty()) {
+            EmptyState(message = "No options yet.", icon = Icons.Default.Label)
+        }
+        detail.menu.options.forEach { option ->
+            Row(
+                modifier = Modifier.fillMaxWidth().clickableRow { onEditOption(option) },
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                option.emoji?.takeIf { it.isNotEmpty() }?.let { Text(it) }
+                Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        menu.placeholder ?: "Select menu #${menu.id}",
+                        option.label,
                         style = MaterialTheme.typography.bodyMedium,
-                        modifier = Modifier.weight(1f),
+                        fontWeight = FontWeight.Medium,
                     )
-                    Text(
-                        "${menu.optionTotal} options",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    option.description?.takeIf { it.isNotEmpty() }?.let {
+                        Text(
+                            it,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                }
+                IconButton(onClick = { onDeleteOption(option) }) {
+                    Icon(
+                        Icons.Default.Delete,
+                        contentDescription = "Delete option",
+                        tint = MaterialTheme.colorScheme.error,
                     )
                 }
             }
-            Text(
-                "Menu options are edited from the web dashboard or with /tickets commands.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
+        }
+    }
+}
+
+@Composable
+private fun CaseDetailSection(
+    detail: CaseDetailState,
+    unlinkedTickets: List<TicketSummary>,
+    onClose: () -> Unit,
+    onReopen: () -> Unit,
+    onLinkMore: () -> Unit,
+    onUnlink: (Int) -> Unit,
+) {
+    val case = detail.detail
+    SectionCard {
+        SectionCardHeader(
+            title = case.title.ifEmpty { "Case #${case.id}" },
+            icon = Icons.Default.Folder,
+            trailing = {
+                if (case.isClosed) Pill("Closed", MaterialTheme.colorScheme.error)
+                else Pill("Open", MaterialTheme.colorScheme.tertiary)
+            },
+        )
+        case.description?.takeIf { it.isNotEmpty() }?.let {
+            Text(it, style = MaterialTheme.typography.bodyMedium)
+        }
+        case.createdAt?.let { InfoRow("Opened", it.relativeToNow()) }
+        if (case.isClosed) {
+            Button(onClick = onReopen, modifier = Modifier.fillMaxWidth()) { Text("Reopen case") }
+        } else {
+            OutlinedButton(onClick = onClose, modifier = Modifier.fillMaxWidth()) { Text("Close case") }
+        }
+    }
+
+    SectionCard {
+        SectionCardHeader(
+            title = "Linked tickets",
+            icon = Icons.Default.ConfirmationNumber,
+            trailing = {
+                if (unlinkedTickets.isNotEmpty()) {
+                    IconButton(onClick = onLinkMore) {
+                        Icon(Icons.Default.Add, contentDescription = "Link tickets")
+                    }
+                }
+            },
+        )
+        if (detail.loading) {
+            EmptyState(message = "Loading…", icon = Icons.Default.ConfirmationNumber)
+        } else if (case.linkedTickets.isEmpty()) {
+            EmptyState(message = "No tickets linked yet.", icon = Icons.Default.ConfirmationNumber)
+        }
+        case.linkedTickets.forEach { ticket ->
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        "#${ticket.channelName}",
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.Medium,
+                    )
+                    ticket.creatorName?.let {
+                        Text(
+                            "by $it",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+                if (ticket.isArchived) TagChip("Archived")
+                else if (ticket.closedAt != null) TagChip("Closed")
+                IconButton(onClick = { onUnlink(ticket.id) }) {
+                    Icon(
+                        Icons.Default.Close,
+                        contentDescription = "Unlink ticket",
+                        tint = MaterialTheme.colorScheme.error,
+                    )
+                }
+            }
+        }
+    }
+
+    if (case.notes.isNotEmpty()) {
+        SectionCard {
+            SectionCardHeader("Notes", Icons.Default.NoteAdd)
+            case.notes.forEach { note ->
+                Text(note.content, style = MaterialTheme.typography.bodyMedium)
+            }
         }
     }
 }
@@ -881,7 +1357,7 @@ private fun ConfigurationSection(
 }
 
 @Composable
-private fun CasesSection(state: TicketsState, onCreate: () -> Unit) {
+private fun CasesSection(state: TicketsState, onOpen: (TicketCase) -> Unit, onCreate: () -> Unit) {
     if (state.cases.isEmpty()) {
         SectionCard {
             EmptyState(message = "No cases yet.", icon = Icons.Default.Folder)
@@ -894,7 +1370,7 @@ private fun CasesSection(state: TicketsState, onCreate: () -> Unit) {
     }
 
     state.cases.forEach { case ->
-        SectionCard {
+        SectionCard(modifier = Modifier.clickableRow { onOpen(case) }) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
@@ -912,6 +1388,11 @@ private fun CasesSection(state: TicketsState, onCreate: () -> Unit) {
                     modifier = Modifier.weight(1f),
                 )
                 if (case.isClosed) Pill("Closed", MaterialTheme.colorScheme.error)
+                Icon(
+                    Icons.Default.ChevronRight,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
             case.description?.takeIf { it.isNotEmpty() }?.let {
                 Text(
@@ -924,11 +1405,8 @@ private fun CasesSection(state: TicketsState, onCreate: () -> Unit) {
             }
             Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 case.createdAt?.let { TagChip("Opened ${it.relativeToNow()}") }
-                if (case.linked.isNotEmpty()) {
-                    TagChip(
-                        "${case.linked.size} tickets",
-                        icon = Icons.Default.ConfirmationNumber,
-                    )
+                if (case.linkedTickets > 0) {
+                    TagChip("${case.linkedTickets} tickets", icon = Icons.Default.ConfirmationNumber)
                 }
             }
         }
@@ -938,11 +1416,27 @@ private fun CasesSection(state: TicketsState, onCreate: () -> Unit) {
 @Composable
 private fun AdvancedSection(
     state: TicketsState,
+    onBatchClose: (Int) -> Unit,
     onBlacklist: (Snowflake, String?) -> Unit,
     onUnblacklist: (BlacklistedUser) -> Unit,
 ) {
+    var inactiveHours by remember { mutableStateOf(48f) }
     var targetId by remember { mutableStateOf("") }
     var reason by remember { mutableStateOf("") }
+
+    SectionCard {
+        SectionCardHeader("Batch close inactive tickets", Icons.Default.Close)
+        SliderRow(
+            label = "Inactive for at least",
+            value = inactiveHours,
+            onValueChange = { inactiveHours = it },
+            valueRange = 1f..720f,
+            valueLabel = "${inactiveHours.toInt()}h",
+        )
+        Button(onClick = { onBatchClose(inactiveHours.toInt()) }, modifier = Modifier.fillMaxWidth()) {
+            Text("Close inactive tickets")
+        }
+    }
 
     SectionCard {
         SectionCardHeader("Blacklist a user", Icons.Default.Block)
@@ -1047,8 +1541,9 @@ private fun TextEntrySheet(
     minLines: Int,
     onDismiss: () -> Unit,
     onConfirm: (String) -> Unit,
+    initial: String = "",
 ) {
-    var text by remember { mutableStateOf("") }
+    var text by remember { mutableStateOf(initial) }
     SheetBody(title, onDismiss) {
         MewdekoTextField(
             value = text,
@@ -1062,18 +1557,44 @@ private fun TextEntrySheet(
 }
 
 @Composable
+private fun CloseTicketSheet(
+    ticket: TicketSummary,
+    onDismiss: () -> Unit,
+    onConfirm: (String?) -> Unit,
+) {
+    var reason by remember { mutableStateOf("") }
+    SheetBody("Close #${ticket.channelName}", onDismiss) {
+        Text(
+            "A transcript will be saved and the ticket marked closed.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        MewdekoTextField(
+            value = reason,
+            onValueChange = { reason = it },
+            label = "Reason",
+            placeholder = "Optional",
+            singleLine = false,
+            minLines = 3,
+        )
+        SheetActions("Close ticket", true, onDismiss) {
+            onConfirm(reason.trim().takeIf { it.isNotBlank() })
+        }
+    }
+}
+
+@Composable
 private fun TagPickerSheet(
     ticket: TicketSummary,
     tags: List<TicketTag>,
     onDismiss: () -> Unit,
-    onConfirm: (List<String>) -> Unit,
+    onConfirm: (original: List<String>, updated: List<String>) -> Unit,
 ) {
-    var selection by remember {
-        mutableStateOf(
-            tags.filter { tag -> ticket.tags.any { it.equals(tag.name, ignoreCase = true) } }
-                .map { it.id }
-        )
+    val originalIds = remember(ticket, tags) {
+        tags.filter { tag -> ticket.tags.any { it.equals(tag.name, ignoreCase = true) } }
+            .map { it.id }
     }
+    var selection by remember { mutableStateOf(originalIds) }
     SheetBody("Tags for #${ticket.channelName}", onDismiss) {
         if (tags.isEmpty()) {
             EmptyState(
@@ -1090,7 +1611,7 @@ private fun TagPickerSheet(
                 onSelectionChange = { selection = it },
             )
         }
-        SheetActions("Apply", selection.isNotEmpty(), onDismiss) { onConfirm(selection) }
+        SheetActions("Apply", true, onDismiss) { onConfirm(originalIds, selection) }
     }
 }
 
@@ -1126,16 +1647,223 @@ private fun PriorityPickerSheet(
 }
 
 @Composable
+private fun EmbedBuilderSheet(
+    title: String,
+    confirmLabel: String,
+    initialJson: String?,
+    onDismiss: () -> Unit,
+    onConfirm: (String) -> Unit,
+) {
+    val initialMessage = remember(initialJson) { EmbedMessage.parse(initialJson) }
+    val initialSpec = remember(initialMessage) { initialMessage.embeds.firstOrNull() ?: EmbedSpec.Blank }
+    var content by remember { mutableStateOf(initialMessage.content) }
+    var embedTitle by remember { mutableStateOf(initialSpec.title) }
+    var description by remember { mutableStateOf(initialSpec.description) }
+    var color by remember { mutableStateOf(initialSpec.color) }
+    var footerText by remember { mutableStateOf(initialSpec.footer.text) }
+    var imageUrl by remember { mutableStateOf(initialSpec.imageUrl) }
+    var thumbnailUrl by remember { mutableStateOf(initialSpec.thumbnailUrl) }
+    var useRaw by remember { mutableStateOf(false) }
+    var rawJson by remember { mutableStateOf(initialJson.orEmpty()) }
+
+    SheetBody(title, onDismiss) {
+        SwitchRow(
+            title = "Raw JSON",
+            subtitle = "Paste a dashboard-style embed JSON payload instead",
+            checked = useRaw,
+            onCheckedChange = { useRaw = it },
+        )
+        if (useRaw) {
+            MewdekoTextField(
+                value = rawJson,
+                onValueChange = { rawJson = it },
+                label = "Embed JSON",
+                singleLine = false,
+                minLines = 8,
+            )
+        } else {
+            MewdekoTextField(value = content, onValueChange = { content = it }, label = "Message text", placeholder = "Optional")
+            MewdekoTextField(value = embedTitle, onValueChange = { embedTitle = it }, label = "Embed title")
+            MewdekoTextField(
+                value = description,
+                onValueChange = { description = it },
+                label = "Embed description",
+                singleLine = false,
+                minLines = 3,
+            )
+            MewdekoTextField(value = color, onValueChange = { color = it }, label = "Color", placeholder = "#3498DB")
+            MewdekoTextField(value = footerText, onValueChange = { footerText = it }, label = "Footer text", placeholder = "Optional")
+            MewdekoTextField(value = imageUrl, onValueChange = { imageUrl = it }, label = "Image URL", placeholder = "Optional")
+            MewdekoTextField(value = thumbnailUrl, onValueChange = { thumbnailUrl = it }, label = "Thumbnail URL", placeholder = "Optional")
+        }
+        SheetActions(confirmLabel, if (useRaw) rawJson.isNotBlank() else true, onDismiss) {
+            val json = if (useRaw) {
+                rawJson.trim()
+            } else {
+                EmbedMessage(
+                    content = content,
+                    embeds = listOf(
+                        EmbedSpec(
+                            title = embedTitle,
+                            description = description,
+                            color = color,
+                            footer = EmbedFooter(text = footerText),
+                        ).withImage(imageUrl).withThumbnail(thumbnailUrl),
+                    ),
+                ).serialize()
+            }
+            onConfirm(json)
+        }
+    }
+}
+
+/** One question in a ticket-creation form. */
+private data class ModalFieldDraft(
+    val key: String,
+    val label: String = "",
+    val style: Int = 1,
+    val required: Boolean = true,
+    val placeholder: String = "",
+)
+
+/** Decodes the bot's `{title, fields: {key: {...}}}` modal payload. */
+private fun parseModalJson(json: String?): Pair<String, List<ModalFieldDraft>> {
+    if (json.isNullOrBlank()) return "Create Ticket" to emptyList()
+    return runCatching {
+        val root = MewdekoJson.parseToJsonElement(json).normalizeKeys() as? JsonObject
+            ?: return@runCatching "Create Ticket" to emptyList()
+        val title = (root["title"] as? JsonPrimitive)?.content ?: "Create Ticket"
+        val fields = (root["fields"] as? JsonObject)?.entries?.map { (key, value) ->
+            val obj = value as? JsonObject
+            ModalFieldDraft(
+                key = key,
+                label = (obj?.get("label") as? JsonPrimitive)?.content ?: key,
+                style = (obj?.get("style") as? JsonPrimitive)?.content?.toIntOrNull() ?: 1,
+                required = (obj?.get("required") as? JsonPrimitive)?.content?.toBooleanStrictOrNull() ?: true,
+                placeholder = (obj?.get("placeholder") as? JsonPrimitive)?.content ?: "",
+            )
+        }.orEmpty()
+        title to fields
+    }.getOrDefault("Create Ticket" to emptyList())
+}
+
+/** Encodes a modal draft back into the bot's payload, or `null` when there are no questions. */
+private fun buildModalJson(title: String, fields: List<ModalFieldDraft>): String? {
+    val usable = fields.filter { it.label.isNotBlank() }
+    if (usable.isEmpty()) return null
+    val obj = buildJsonObject {
+        put("title", JsonPrimitive(title.ifBlank { "Create Ticket" }))
+        put(
+            "fields",
+            buildJsonObject {
+                usable.forEachIndexed { index, field ->
+                    val key = field.key.ifBlank { "field_${index + 1}" }
+                    put(
+                        key,
+                        buildJsonObject {
+                            put("label", JsonPrimitive(field.label))
+                            put("style", JsonPrimitive(field.style))
+                            put("required", JsonPrimitive(field.required))
+                            if (field.placeholder.isNotBlank()) {
+                                put("placeholder", JsonPrimitive(field.placeholder))
+                            }
+                        },
+                    )
+                }
+            },
+        )
+    }
+    return MewdekoJson.encodeToString(JsonObject.serializer(), obj)
+}
+
+@Composable
+private fun ModalBuilderSheet(
+    initialJson: String?,
+    onDismiss: () -> Unit,
+    onConfirm: (String?) -> Unit,
+) {
+    val parsed = remember(initialJson) { parseModalJson(initialJson) }
+    var title by remember { mutableStateOf(parsed.first) }
+    var fields by remember {
+        mutableStateOf(parsed.second.ifEmpty { listOf(ModalFieldDraft(key = "field_1")) })
+    }
+    var enabled by remember { mutableStateOf(!initialJson.isNullOrBlank()) }
+
+    SheetBody("Ticket form", onDismiss) {
+        SwitchRow(
+            title = "Custom form",
+            subtitle = "Ask up to 5 questions before the ticket opens",
+            checked = enabled,
+            onCheckedChange = { enabled = it },
+        )
+        if (enabled) {
+            MewdekoTextField(value = title, onValueChange = { title = it }, label = "Modal title")
+            fields.forEachIndexed { index, field ->
+                SectionCard {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text("Question ${index + 1}", style = MaterialTheme.typography.labelLarge)
+                        if (fields.size > 1) {
+                            IconButton(onClick = { fields = fields.toMutableList().also { it.removeAt(index) } }) {
+                                Icon(
+                                    Icons.Default.Delete,
+                                    contentDescription = "Remove question",
+                                    tint = MaterialTheme.colorScheme.error,
+                                )
+                            }
+                        }
+                    }
+                    MewdekoTextField(
+                        value = field.label,
+                        onValueChange = { v -> fields = fields.toMutableList().also { it[index] = field.copy(label = v) } },
+                        label = "Label",
+                    )
+                    MewdekoTextField(
+                        value = field.placeholder,
+                        onValueChange = { v -> fields = fields.toMutableList().also { it[index] = field.copy(placeholder = v) } },
+                        label = "Placeholder",
+                        placeholder = "Optional",
+                    )
+                    SectionTabs(
+                        tabs = listOf(SectionTab("1", "Short"), SectionTab("2", "Paragraph")),
+                        selectedId = field.style.toString(),
+                        onSelect = { v -> fields = fields.toMutableList().also { it[index] = field.copy(style = v.toIntOrNull() ?: 1) } },
+                    )
+                    SwitchRow(
+                        title = "Required",
+                        checked = field.required,
+                        onCheckedChange = { v -> fields = fields.toMutableList().also { it[index] = field.copy(required = v) } },
+                    )
+                }
+            }
+            if (fields.size < 5) {
+                OutlinedButton(
+                    onClick = { fields = fields + ModalFieldDraft(key = "field_${fields.size + 1}") },
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Icon(Icons.Default.Add, contentDescription = null)
+                    Text("Add question", modifier = Modifier.padding(start = 8.dp))
+                }
+            }
+        }
+        SheetActions("Save", true, onDismiss) {
+            onConfirm(if (enabled) buildModalJson(title, fields) else null)
+        }
+    }
+}
+
+@Composable
 private fun CreatePanelSheet(
     channels: List<SelectorOption>,
     onDismiss: () -> Unit,
-    onConfirm: (Snowflake, String, String) -> Unit,
+    onConfirm: (Snowflake, String) -> Unit,
 ) {
     var channelId by remember { mutableStateOf<String?>(null) }
-    var title by remember { mutableStateOf("Open a ticket") }
-    var description by remember {
-        mutableStateOf("Click the button below to open a new ticket.")
-    }
+    var embedJson by remember { mutableStateOf<String?>(null) }
+    var showEmbed by remember { mutableStateOf(false) }
 
     SheetBody("New panel", onDismiss) {
         DiscordSelectorSingle(
@@ -1146,33 +1874,41 @@ private fun CreatePanelSheet(
             onSelect = { channelId = it },
             label = "Channel",
         )
-        MewdekoTextField(
-            value = title,
-            onValueChange = { title = it },
-            label = "Embed title",
-        )
-        MewdekoTextField(
-            value = description,
-            onValueChange = { description = it },
-            label = "Embed description",
-            singleLine = false,
-            minLines = 4,
-        )
+        OutlinedButton(onClick = { showEmbed = true }, modifier = Modifier.fillMaxWidth()) {
+            Text(if (embedJson.isNullOrBlank()) "Design panel embed" else "Edit panel embed")
+        }
         Text(
             "Buttons and select menus are added from the panel once it has been posted.",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
-        SheetActions("Create", channelId != null && title.isNotBlank(), onDismiss) {
-            channelId?.let { onConfirm(it, title, description) }
+        SheetActions("Create", channelId != null && !embedJson.isNullOrBlank(), onDismiss) {
+            val id = channelId
+            val json = embedJson
+            if (id != null && json != null) onConfirm(id, json)
         }
+    }
+
+    if (showEmbed) {
+        EmbedBuilderSheet(
+            title = "Panel embed",
+            confirmLabel = "Save",
+            initialJson = embedJson ?: DefaultPanelEmbedJson,
+            onDismiss = { showEmbed = false },
+            onConfirm = { json -> embedJson = json; showEmbed = false },
+        )
     }
 }
 
 @Composable
-private fun CreateCaseSheet(onDismiss: () -> Unit, onConfirm: (String, String) -> Unit) {
+private fun CreateCaseSheet(
+    unlinkedTickets: List<TicketSummary>,
+    onDismiss: () -> Unit,
+    onConfirm: (String, String, List<Int>) -> Unit,
+) {
     var title by remember { mutableStateOf("") }
     var description by remember { mutableStateOf("") }
+    var selection by remember { mutableStateOf(emptyList<String>()) }
 
     SheetBody("New case", onDismiss) {
         MewdekoTextField(value = title, onValueChange = { title = it }, label = "Title")
@@ -1183,7 +1919,46 @@ private fun CreateCaseSheet(onDismiss: () -> Unit, onConfirm: (String, String) -
             singleLine = false,
             minLines = 4,
         )
-        SheetActions("Create", title.isNotBlank(), onDismiss) { onConfirm(title, description) }
+        if (unlinkedTickets.isNotEmpty()) {
+            DiscordSelector(
+                kind = SelectorKind.Custom(Icons.Default.ConfirmationNumber),
+                options = unlinkedTickets.map { SelectorOption(it.id.toString(), "#${it.channelName}", "Ticket #${it.id}") },
+                placeholder = "None",
+                label = "Link tickets",
+                multiple = true,
+                selection = selection,
+                onSelectionChange = { selection = it },
+            )
+        }
+        SheetActions("Create", title.isNotBlank(), onDismiss) {
+            onConfirm(title, description, selection.mapNotNull { it.toIntOrNull() })
+        }
+    }
+}
+
+@Composable
+private fun LinkTicketsSheet(
+    unlinkedTickets: List<TicketSummary>,
+    onDismiss: () -> Unit,
+    onConfirm: (List<Int>) -> Unit,
+) {
+    var selection by remember { mutableStateOf(emptyList<String>()) }
+    SheetBody("Link tickets", onDismiss) {
+        if (unlinkedTickets.isEmpty()) {
+            EmptyState(message = "Every ticket is already linked to a case.", icon = Icons.Default.ConfirmationNumber)
+        } else {
+            DiscordSelector(
+                kind = SelectorKind.Custom(Icons.Default.ConfirmationNumber),
+                options = unlinkedTickets.map { SelectorOption(it.id.toString(), "#${it.channelName}", "Ticket #${it.id}") },
+                placeholder = "Pick tickets",
+                multiple = true,
+                selection = selection,
+                onSelectionChange = { selection = it },
+            )
+        }
+        SheetActions("Link", selection.isNotEmpty(), onDismiss) {
+            onConfirm(selection.mapNotNull { it.toIntOrNull() })
+        }
     }
 }
 
@@ -1267,36 +2042,201 @@ private fun CreateTagSheet(onDismiss: () -> Unit, onConfirm: (String, String, St
 }
 
 @Composable
-private fun AddPanelButtonSheet(
-    categories: List<SelectorOption>,
-    roles: List<SelectorOption>,
+private fun CreateMenuSheet(
     onDismiss: () -> Unit,
-    onConfirm: (
-        String, String?, Int, Snowflake?, Snowflake?, List<Snowflake>, List<Snowflake>, Int,
-    ) -> Unit,
+    onConfirm: (String, String, String?, String?) -> Unit,
 ) {
+    var placeholder by remember { mutableStateOf("Select an option") }
     var label by remember { mutableStateOf("") }
+    var description by remember { mutableStateOf("") }
     var emoji by remember { mutableStateOf("") }
-    var style by remember { mutableStateOf(1) }
-    var categoryId by remember { mutableStateOf<String?>(null) }
-    var archiveCategoryId by remember { mutableStateOf<String?>(null) }
-    var supportRoles by remember { mutableStateOf(emptyList<String>()) }
-    var viewerRoles by remember { mutableStateOf(emptyList<String>()) }
-    var maxActive by remember { mutableStateOf(1f) }
 
-    SheetBody("Add button", onDismiss) {
+    SheetBody("New select menu", onDismiss) {
+        MewdekoTextField(value = placeholder, onValueChange = { placeholder = it }, label = "Placeholder text")
+        MewdekoTextField(value = label, onValueChange = { label = it }, label = "First option label")
         MewdekoTextField(
-            value = label,
-            onValueChange = { label = it },
-            label = "Label",
-            placeholder = "Open ticket",
-        )
-        MewdekoTextField(
-            value = emoji,
-            onValueChange = { emoji = it },
-            label = "Emoji",
+            value = description,
+            onValueChange = { description = it },
+            label = "First option description",
             placeholder = "Optional",
         )
+        MewdekoTextField(value = emoji, onValueChange = { emoji = it }, label = "First option emoji", placeholder = "Optional")
+        SheetActions("Create", placeholder.isNotBlank() && label.isNotBlank(), onDismiss) {
+            onConfirm(placeholder, label, description.takeIf { it.isNotBlank() }, emoji.takeIf { it.isNotBlank() })
+        }
+    }
+}
+
+/**
+ * Mutable draft for a panel button or select menu option, holding the full
+ * set of ticket-opening settings both share on the bot.
+ */
+private class ComponentDraft(
+    label: String = "",
+    description: String = "",
+    emoji: String = "",
+    style: Int = 1,
+    channelFormat: String = "",
+    categoryId: Snowflake? = null,
+    archiveCategoryId: Snowflake? = null,
+    supportRoles: List<Snowflake> = emptyList(),
+    viewerRoles: List<Snowflake> = emptyList(),
+    maxActiveTickets: Float = 1f,
+    autoCloseHours: Float = 0f,
+    requiredResponseMinutes: Float = 0f,
+    allowedPriorities: List<String> = emptyList(),
+    defaultPriority: String? = null,
+    openMessageJson: String? = null,
+    modalJson: String? = null,
+    saveTranscript: Boolean = true,
+    deleteOnClose: Boolean = false,
+    lockOnClose: Boolean = true,
+    renameOnClose: Boolean = true,
+    removeCreatorOnClose: Boolean = false,
+    deleteDelaySeconds: Float = 0f,
+    lockOnArchive: Boolean = true,
+    renameOnArchive: Boolean = true,
+    removeCreatorOnArchive: Boolean = false,
+    autoArchiveOnClose: Boolean = false,
+) {
+    var label by mutableStateOf(label)
+    var description by mutableStateOf(description)
+    var emoji by mutableStateOf(emoji)
+    var style by mutableStateOf(style)
+    var channelFormat by mutableStateOf(channelFormat)
+    var categoryId by mutableStateOf(categoryId)
+    var archiveCategoryId by mutableStateOf(archiveCategoryId)
+    var supportRoles by mutableStateOf(supportRoles)
+    var viewerRoles by mutableStateOf(viewerRoles)
+    var maxActiveTickets by mutableStateOf(maxActiveTickets)
+    var autoCloseHours by mutableStateOf(autoCloseHours)
+    var requiredResponseMinutes by mutableStateOf(requiredResponseMinutes)
+    var allowedPriorities by mutableStateOf(allowedPriorities)
+    var defaultPriority by mutableStateOf(defaultPriority)
+    var openMessageJson by mutableStateOf(openMessageJson)
+    var modalJson by mutableStateOf(modalJson)
+    var saveTranscript by mutableStateOf(saveTranscript)
+    var deleteOnClose by mutableStateOf(deleteOnClose)
+    var lockOnClose by mutableStateOf(lockOnClose)
+    var renameOnClose by mutableStateOf(renameOnClose)
+    var removeCreatorOnClose by mutableStateOf(removeCreatorOnClose)
+    var deleteDelaySeconds by mutableStateOf(deleteDelaySeconds)
+    var lockOnArchive by mutableStateOf(lockOnArchive)
+    var renameOnArchive by mutableStateOf(renameOnArchive)
+    var removeCreatorOnArchive by mutableStateOf(removeCreatorOnArchive)
+    var autoArchiveOnClose by mutableStateOf(autoArchiveOnClose)
+
+    fun toSubmission(): ComponentSubmission = ComponentSubmission(
+        label = label.trim(),
+        description = description.trim().takeIf { it.isNotEmpty() },
+        emoji = emoji.takeIf { it.isNotBlank() },
+        style = style,
+        channelFormat = channelFormat.takeIf { it.isNotBlank() },
+        categoryId = categoryId,
+        archiveCategoryId = archiveCategoryId,
+        supportRoles = supportRoles,
+        viewerRoles = viewerRoles,
+        maxActiveTickets = maxActiveTickets.toInt(),
+        autoCloseHours = autoCloseHours.toInt().takeIf { it > 0 },
+        requiredResponseMinutes = requiredResponseMinutes.toInt().takeIf { it > 0 },
+        allowedPriorities = allowedPriorities,
+        defaultPriority = defaultPriority,
+        openMessageJson = openMessageJson,
+        modalJson = modalJson,
+        saveTranscript = saveTranscript,
+        deleteOnClose = deleteOnClose,
+        lockOnClose = lockOnClose,
+        renameOnClose = renameOnClose,
+        removeCreatorOnClose = removeCreatorOnClose,
+        deleteDelaySeconds = deleteDelaySeconds.toInt(),
+        lockOnArchive = lockOnArchive,
+        renameOnArchive = renameOnArchive,
+        removeCreatorOnArchive = removeCreatorOnArchive,
+        autoArchiveOnClose = autoArchiveOnClose,
+    )
+
+    companion object {
+        fun fromButton(button: PanelButton) = ComponentDraft(
+            label = button.label,
+            emoji = button.emoji.orEmpty(),
+            style = button.style,
+            channelFormat = button.channelNameFormat.orEmpty(),
+            categoryId = button.categoryId,
+            archiveCategoryId = button.archiveCategoryId,
+            supportRoles = button.supportRoles,
+            viewerRoles = button.viewerRoles,
+            maxActiveTickets = button.maxActiveTickets.toFloat(),
+            autoCloseHours = timeSpanToHours(button.autoCloseTime).toFloat(),
+            requiredResponseMinutes = timeSpanToMinutes(button.requiredResponseTime).toFloat(),
+            allowedPriorities = button.allowedPriorities,
+            defaultPriority = button.defaultPriority,
+            openMessageJson = button.openMessageJson,
+            modalJson = button.modalJson,
+            saveTranscript = button.saveTranscript,
+            deleteOnClose = button.deleteOnClose,
+            lockOnClose = button.lockOnClose,
+            renameOnClose = button.renameOnClose,
+            removeCreatorOnClose = button.removeCreatorOnClose,
+            deleteDelaySeconds = timeSpanToSeconds(button.deleteDelay).toFloat(),
+            lockOnArchive = button.lockOnArchive,
+            renameOnArchive = button.renameOnArchive,
+            removeCreatorOnArchive = button.removeCreatorOnArchive,
+            autoArchiveOnClose = button.autoArchiveOnClose,
+        )
+
+        fun fromOption(option: SelectMenuOption) = ComponentDraft(
+            label = option.label,
+            description = option.description.orEmpty(),
+            emoji = option.emoji.orEmpty(),
+            channelFormat = option.channelNameFormat.orEmpty(),
+            categoryId = option.categoryId,
+            archiveCategoryId = option.archiveCategoryId,
+            supportRoles = option.supportRoles,
+            viewerRoles = option.viewerRoles,
+            maxActiveTickets = option.maxActiveTickets.toFloat(),
+            autoCloseHours = timeSpanToHours(option.autoCloseTime).toFloat(),
+            requiredResponseMinutes = timeSpanToMinutes(option.requiredResponseTime).toFloat(),
+            allowedPriorities = option.allowedPriorities,
+            defaultPriority = option.defaultPriority,
+            openMessageJson = option.openMessageJson,
+            modalJson = option.modalJson,
+            saveTranscript = option.saveTranscript,
+            deleteOnClose = option.deleteOnClose,
+            lockOnClose = option.lockOnClose,
+            renameOnClose = option.renameOnClose,
+            removeCreatorOnClose = option.removeCreatorOnClose,
+            deleteDelaySeconds = timeSpanToSeconds(option.deleteDelay).toFloat(),
+            lockOnArchive = option.lockOnArchive,
+            renameOnArchive = option.renameOnArchive,
+            removeCreatorOnArchive = option.removeCreatorOnArchive,
+            autoArchiveOnClose = option.autoArchiveOnClose,
+        )
+    }
+}
+
+@Composable
+private fun ComponentFormFields(
+    draft: ComponentDraft,
+    showStyle: Boolean,
+    showDescription: Boolean,
+    showToggles: Boolean,
+    categories: List<SelectorOption>,
+    roles: List<SelectorOption>,
+    priorities: List<TicketPriority>,
+    onEditOpenMessage: () -> Unit,
+    onEditModal: () -> Unit,
+) {
+    MewdekoTextField(value = draft.label, onValueChange = { draft.label = it }, label = "Label", placeholder = "Open ticket")
+    if (showDescription) {
+        MewdekoTextField(
+            value = draft.description,
+            onValueChange = { draft.description = it },
+            label = "Description",
+            placeholder = "Optional",
+        )
+    }
+    MewdekoTextField(value = draft.emoji, onValueChange = { draft.emoji = it }, label = "Emoji", placeholder = "Optional")
+    if (showStyle) {
         SectionTabs(
             tabs = listOf(
                 SectionTab("1", "Primary"),
@@ -1304,60 +2244,316 @@ private fun AddPanelButtonSheet(
                 SectionTab("3", "Success"),
                 SectionTab("4", "Danger"),
             ),
-            selectedId = style.toString(),
-            onSelect = { style = it.toIntOrNull() ?: 1 },
+            selectedId = draft.style.toString(),
+            onSelect = { draft.style = it.toIntOrNull() ?: 1 },
+        )
+    }
+    MewdekoTextField(
+        value = draft.channelFormat,
+        onValueChange = { draft.channelFormat = it },
+        label = "Channel name format",
+        placeholder = "ticket-{username}",
+    )
+    DiscordSelectorSingle(
+        kind = SelectorKind.Custom(Icons.Default.Folder),
+        options = categories,
+        placeholder = "Same as panel channel",
+        selectedId = draft.categoryId,
+        onSelect = { draft.categoryId = it },
+        label = "Ticket category",
+    )
+    DiscordSelectorSingle(
+        kind = SelectorKind.Custom(Icons.Default.Archive),
+        options = categories,
+        placeholder = "Same as ticket category",
+        selectedId = draft.archiveCategoryId,
+        onSelect = { draft.archiveCategoryId = it },
+        label = "Archive category",
+    )
+    DiscordSelector(
+        kind = SelectorKind.Role,
+        options = roles,
+        placeholder = "None",
+        label = "Support roles",
+        multiple = true,
+        selection = draft.supportRoles,
+        onSelectionChange = { draft.supportRoles = it },
+    )
+    DiscordSelector(
+        kind = SelectorKind.Role,
+        options = roles,
+        placeholder = "None",
+        label = "Viewer roles",
+        multiple = true,
+        selection = draft.viewerRoles,
+        onSelectionChange = { draft.viewerRoles = it },
+    )
+    SliderRow(
+        label = "Max active tickets per user",
+        value = draft.maxActiveTickets,
+        onValueChange = { draft.maxActiveTickets = it },
+        valueRange = 1f..50f,
+    )
+    SliderRow(
+        label = "Auto-close after inactivity",
+        value = draft.autoCloseHours,
+        onValueChange = { draft.autoCloseHours = it },
+        valueRange = 0f..168f,
+        valueLabel = if (draft.autoCloseHours <= 0f) "Off" else "${draft.autoCloseHours.toInt()}h",
+    )
+    SliderRow(
+        label = "Required staff response time",
+        value = draft.requiredResponseMinutes,
+        onValueChange = { draft.requiredResponseMinutes = it },
+        valueRange = 0f..1440f,
+        valueLabel = if (draft.requiredResponseMinutes <= 0f) "Off" else "${draft.requiredResponseMinutes.toInt()}m",
+    )
+    if (priorities.isNotEmpty()) {
+        val priorityOptions = priorities.map { SelectorOption(it.id, it.name) }
+        DiscordSelector(
+            kind = SelectorKind.Custom(Icons.Default.Flag),
+            options = priorityOptions,
+            placeholder = "All priorities",
+            label = "Allowed priorities",
+            multiple = true,
+            selection = draft.allowedPriorities,
+            onSelectionChange = { draft.allowedPriorities = it },
         )
         DiscordSelectorSingle(
-            kind = SelectorKind.Custom(Icons.Default.Folder),
-            options = categories,
-            placeholder = "Same as panel channel",
-            selectedId = categoryId,
-            onSelect = { categoryId = it },
-            label = "Ticket category",
+            kind = SelectorKind.Custom(Icons.Default.Flag),
+            options = priorityOptions,
+            placeholder = "Guild default",
+            selectedId = draft.defaultPriority,
+            onSelect = { draft.defaultPriority = it },
+            label = "Default priority",
         )
-        DiscordSelectorSingle(
-            kind = SelectorKind.Custom(Icons.Default.Archive),
-            options = categories,
-            placeholder = "Same as ticket category",
-            selectedId = archiveCategoryId,
-            onSelect = { archiveCategoryId = it },
-            label = "Archive category",
+    }
+    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+        OutlinedButton(onClick = onEditOpenMessage, modifier = Modifier.weight(1f)) {
+            Text(if (draft.openMessageJson.isNullOrBlank()) "Set open message" else "Edit open message")
+        }
+        OutlinedButton(onClick = onEditModal, modifier = Modifier.weight(1f)) {
+            Text(if (draft.modalJson.isNullOrBlank()) "Set ticket form" else "Edit ticket form")
+        }
+    }
+    if (showToggles) {
+        SectionCardHeader("Close behavior", Icons.Default.Close)
+        SwitchRow(title = "Save transcript", checked = draft.saveTranscript, onCheckedChange = { draft.saveTranscript = it })
+        SwitchRow(title = "Lock channel on close", checked = draft.lockOnClose, onCheckedChange = { draft.lockOnClose = it })
+        SwitchRow(title = "Rename channel on close", checked = draft.renameOnClose, onCheckedChange = { draft.renameOnClose = it })
+        SwitchRow(
+            title = "Remove creator on close",
+            checked = draft.removeCreatorOnClose,
+            onCheckedChange = { draft.removeCreatorOnClose = it },
         )
-        DiscordSelector(
-            kind = SelectorKind.Role,
-            options = roles,
-            placeholder = "None",
-            label = "Support roles",
-            multiple = true,
-            selection = supportRoles,
-            onSelectionChange = { supportRoles = it },
-        )
-        DiscordSelector(
-            kind = SelectorKind.Role,
-            options = roles,
-            placeholder = "None",
-            label = "Viewer roles",
-            multiple = true,
-            selection = viewerRoles,
-            onSelectionChange = { viewerRoles = it },
-        )
-        SliderRow(
-            label = "Max active tickets per user",
-            value = maxActive,
-            onValueChange = { maxActive = it },
-            valueRange = 1f..50f,
-        )
-        SheetActions("Add", label.isNotBlank(), onDismiss) {
-            onConfirm(
-                label,
-                emoji.takeIf { it.isNotEmpty() },
-                style,
-                categoryId,
-                archiveCategoryId,
-                supportRoles,
-                viewerRoles,
-                maxActive.toInt(),
+        SwitchRow(title = "Delete channel on close", checked = draft.deleteOnClose, onCheckedChange = { draft.deleteOnClose = it })
+        if (draft.deleteOnClose) {
+            SliderRow(
+                label = "Delete delay",
+                value = draft.deleteDelaySeconds,
+                onValueChange = { draft.deleteDelaySeconds = it },
+                valueRange = 0f..3600f,
+                valueLabel = "${draft.deleteDelaySeconds.toInt()}s",
             )
         }
+        SectionCardHeader("Archive behavior", Icons.Default.Archive)
+        SwitchRow(
+            title = "Auto-archive on close",
+            checked = draft.autoArchiveOnClose,
+            onCheckedChange = { draft.autoArchiveOnClose = it },
+        )
+        SwitchRow(title = "Lock channel on archive", checked = draft.lockOnArchive, onCheckedChange = { draft.lockOnArchive = it })
+        SwitchRow(
+            title = "Rename channel on archive",
+            checked = draft.renameOnArchive,
+            onCheckedChange = { draft.renameOnArchive = it },
+        )
+        SwitchRow(
+            title = "Remove creator on archive",
+            checked = draft.removeCreatorOnArchive,
+            onCheckedChange = { draft.removeCreatorOnArchive = it },
+        )
+    }
+}
+
+@Composable
+private fun AddButtonSheet(
+    categories: List<SelectorOption>,
+    roles: List<SelectorOption>,
+    priorities: List<TicketPriority>,
+    onDismiss: () -> Unit,
+    onConfirm: (ComponentSubmission) -> Unit,
+) {
+    val draft = remember { ComponentDraft() }
+    var showEmbed by remember { mutableStateOf(false) }
+    var showModal by remember { mutableStateOf(false) }
+
+    SheetBody("Add button", onDismiss) {
+        ComponentFormFields(
+            draft = draft,
+            showStyle = true,
+            showDescription = false,
+            showToggles = false,
+            categories = categories,
+            roles = roles,
+            priorities = priorities,
+            onEditOpenMessage = { showEmbed = true },
+            onEditModal = { showModal = true },
+        )
+        SheetActions("Add", draft.label.isNotBlank(), onDismiss) { onConfirm(draft.toSubmission()) }
+    }
+
+    if (showEmbed) {
+        EmbedBuilderSheet(
+            title = "Open message",
+            confirmLabel = "Save",
+            initialJson = draft.openMessageJson,
+            onDismiss = { showEmbed = false },
+            onConfirm = { json -> draft.openMessageJson = json; showEmbed = false },
+        )
+    }
+    if (showModal) {
+        ModalBuilderSheet(
+            initialJson = draft.modalJson,
+            onDismiss = { showModal = false },
+            onConfirm = { json -> draft.modalJson = json; showModal = false },
+        )
+    }
+}
+
+@Composable
+private fun EditButtonSheet(
+    button: PanelButton,
+    categories: List<SelectorOption>,
+    roles: List<SelectorOption>,
+    priorities: List<TicketPriority>,
+    onDismiss: () -> Unit,
+    onConfirm: (ComponentSubmission) -> Unit,
+) {
+    val draft = remember(button.id) { ComponentDraft.fromButton(button) }
+    var showEmbed by remember { mutableStateOf(false) }
+    var showModal by remember { mutableStateOf(false) }
+
+    SheetBody("Edit button", onDismiss) {
+        ComponentFormFields(
+            draft = draft,
+            showStyle = true,
+            showDescription = false,
+            showToggles = true,
+            categories = categories,
+            roles = roles,
+            priorities = priorities,
+            onEditOpenMessage = { showEmbed = true },
+            onEditModal = { showModal = true },
+        )
+        SheetActions("Save", draft.label.isNotBlank(), onDismiss) { onConfirm(draft.toSubmission()) }
+    }
+
+    if (showEmbed) {
+        EmbedBuilderSheet(
+            title = "Open message",
+            confirmLabel = "Save",
+            initialJson = draft.openMessageJson,
+            onDismiss = { showEmbed = false },
+            onConfirm = { json -> draft.openMessageJson = json; showEmbed = false },
+        )
+    }
+    if (showModal) {
+        ModalBuilderSheet(
+            initialJson = draft.modalJson,
+            onDismiss = { showModal = false },
+            onConfirm = { json -> draft.modalJson = json; showModal = false },
+        )
+    }
+}
+
+@Composable
+private fun AddMenuOptionSheet(
+    categories: List<SelectorOption>,
+    roles: List<SelectorOption>,
+    priorities: List<TicketPriority>,
+    onDismiss: () -> Unit,
+    onConfirm: (ComponentSubmission) -> Unit,
+) {
+    val draft = remember { ComponentDraft() }
+    var showEmbed by remember { mutableStateOf(false) }
+    var showModal by remember { mutableStateOf(false) }
+
+    SheetBody("Add option", onDismiss) {
+        ComponentFormFields(
+            draft = draft,
+            showStyle = false,
+            showDescription = true,
+            showToggles = false,
+            categories = categories,
+            roles = roles,
+            priorities = priorities,
+            onEditOpenMessage = { showEmbed = true },
+            onEditModal = { showModal = true },
+        )
+        SheetActions("Add", draft.label.isNotBlank(), onDismiss) { onConfirm(draft.toSubmission()) }
+    }
+
+    if (showEmbed) {
+        EmbedBuilderSheet(
+            title = "Open message",
+            confirmLabel = "Save",
+            initialJson = draft.openMessageJson,
+            onDismiss = { showEmbed = false },
+            onConfirm = { json -> draft.openMessageJson = json; showEmbed = false },
+        )
+    }
+    if (showModal) {
+        ModalBuilderSheet(
+            initialJson = draft.modalJson,
+            onDismiss = { showModal = false },
+            onConfirm = { json -> draft.modalJson = json; showModal = false },
+        )
+    }
+}
+
+@Composable
+private fun EditMenuOptionSheet(
+    option: SelectMenuOption,
+    categories: List<SelectorOption>,
+    roles: List<SelectorOption>,
+    priorities: List<TicketPriority>,
+    onDismiss: () -> Unit,
+    onConfirm: (ComponentSubmission) -> Unit,
+) {
+    val draft = remember(option.id) { ComponentDraft.fromOption(option) }
+    var showEmbed by remember { mutableStateOf(false) }
+    var showModal by remember { mutableStateOf(false) }
+
+    SheetBody("Edit option", onDismiss) {
+        ComponentFormFields(
+            draft = draft,
+            showStyle = false,
+            showDescription = true,
+            showToggles = true,
+            categories = categories,
+            roles = roles,
+            priorities = priorities,
+            onEditOpenMessage = { showEmbed = true },
+            onEditModal = { showModal = true },
+        )
+        SheetActions("Save", draft.label.isNotBlank(), onDismiss) { onConfirm(draft.toSubmission()) }
+    }
+
+    if (showEmbed) {
+        EmbedBuilderSheet(
+            title = "Open message",
+            confirmLabel = "Save",
+            initialJson = draft.openMessageJson,
+            onDismiss = { showEmbed = false },
+            onConfirm = { json -> draft.openMessageJson = json; showEmbed = false },
+        )
+    }
+    if (showModal) {
+        ModalBuilderSheet(
+            initialJson = draft.modalJson,
+            onDismiss = { showModal = false },
+            onConfirm = { json -> draft.modalJson = json; showModal = false },
+        )
     }
 }

@@ -5,17 +5,25 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.ChevronLeft
+import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.EmojiEvents
+import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Leaderboard
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.WorkspacePremium
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.ListItem
@@ -26,7 +34,6 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -42,22 +49,27 @@ import dev.mewdeko.mobile.core.ui.ConfirmDialog
 import dev.mewdeko.mobile.core.ui.DiscordSelectorSingle
 import dev.mewdeko.mobile.core.ui.EmptyState
 import dev.mewdeko.mobile.core.ui.FeatureScaffold
+import dev.mewdeko.mobile.core.ui.MewdekoTextField
 import dev.mewdeko.mobile.core.ui.SectionCard
 import dev.mewdeko.mobile.core.ui.SectionCardHeader
 import dev.mewdeko.mobile.core.ui.SectionTab
 import dev.mewdeko.mobile.core.ui.SectionTabs
 import dev.mewdeko.mobile.core.ui.SelectorKind
 import dev.mewdeko.mobile.core.ui.SelectorOption
-import dev.mewdeko.mobile.core.ui.SliderRow
 import dev.mewdeko.mobile.core.ui.StatTile
 import dev.mewdeko.mobile.core.ui.SwitchRow
 import dev.mewdeko.mobile.navigation.GuildRouteArgs
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
 
 private val Tabs = listOf(
     SectionTab("settings", "Settings", Icons.Default.Tune),
     SectionTab("leaderboard", "Leaders", Icons.Default.Leaderboard),
     SectionTab("rewards", "Rewards", Icons.Default.WorkspacePremium),
 )
+
+private val HistoryTimestampFormat: DateTimeFormatter =
+    DateTimeFormatter.ofPattern("d MMM yyyy, HH:mm").withZone(ZoneId.systemDefault())
 
 /** Member-to-member reputation. */
 @Composable
@@ -101,6 +113,11 @@ fun ReputationScreen(
                     value = "${state.stats?.averageRepPerUser ?: 0}",
                     modifier = Modifier.weight(1f),
                 )
+                StatTile(
+                    label = "Transactions",
+                    value = "${state.stats?.totalTransactions ?: 0}",
+                    modifier = Modifier.weight(1f),
+                )
             }
         }
 
@@ -134,12 +151,27 @@ fun ReputationScreen(
                             headlineContent = {
                                 Text(entry.username, maxLines = 1, overflow = TextOverflow.Ellipsis)
                             },
-                            trailingContent = {
+                            supportingContent = {
                                 Text(
-                                    text = "${entry.reputation}",
-                                    style = MaterialTheme.typography.titleMedium,
-                                    color = MaterialTheme.colorScheme.primary,
+                                    text = "User ID: ${entry.userId}",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 )
+                            },
+                            trailingContent = {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Text(
+                                        text = "${entry.reputation}",
+                                        style = MaterialTheme.typography.titleMedium,
+                                        color = MaterialTheme.colorScheme.primary,
+                                    )
+                                    IconButton(onClick = { viewModel.openHistory(entry) }) {
+                                        Icon(
+                                            Icons.Default.History,
+                                            contentDescription = "View history for ${entry.username}",
+                                        )
+                                    }
+                                }
                             },
                             colors = ListItemDefaults.colors(containerColor = Color.Transparent),
                         )
@@ -217,13 +249,10 @@ fun ReputationScreen(
 
                 SectionCard {
                     SectionCardHeader("Limits", Icons.Default.Tune)
-                    SliderRow(
-                        label = "Cooldown",
-                        value = state.config.defaultCooldownMinutes.toFloat(),
-                        onValueChange = { },
-                        onValueChangeFinished = { },
-                        valueRange = 0f..1440f,
-                        valueLabel = "${state.config.defaultCooldownMinutes}m",
+                    SettingNumberField(
+                        label = "Cooldown (minutes)",
+                        value = state.config.defaultCooldownMinutes,
+                        onCommit = viewModel::setCooldown,
                     )
                     Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                         listOf(0, 30, 60, 360, 1440).forEach { minutes ->
@@ -232,14 +261,11 @@ fun ReputationScreen(
                             }
                         }
                     }
-                    SliderRow(
+                    SettingNumberField(
                         label = "Daily limit",
-                        value = state.config.dailyLimit.toFloat(),
-                        onValueChange = { },
-                        onValueChangeFinished = { },
-                        valueRange = 0f..50f,
-                        valueLabel = if (state.config.dailyLimit == 0) "Unlimited"
-                        else "${state.config.dailyLimit}",
+                        value = state.config.dailyLimit,
+                        onCommit = viewModel::setDailyLimit,
+                        placeholder = "Unlimited",
                     )
                     Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                         listOf(0, 1, 3, 5, 10).forEach { limit ->
@@ -248,13 +274,10 @@ fun ReputationScreen(
                             }
                         }
                     }
-                    SliderRow(
+                    SettingNullableNumberField(
                         label = "Weekly limit",
-                        value = (state.config.weeklyLimit ?: 0).toFloat(),
-                        onValueChange = { },
-                        onValueChangeFinished = { },
-                        valueRange = 0f..200f,
-                        valueLabel = state.config.weeklyLimit?.toString() ?: "Unlimited",
+                        value = state.config.weeklyLimit,
+                        onCommit = viewModel::setWeeklyLimit,
                     )
                     Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                         listOf(null, 10, 25, 50).forEach { limit ->
@@ -267,13 +290,10 @@ fun ReputationScreen(
 
                 SectionCard {
                     SectionCardHeader("Eligibility", Icons.Default.Tune)
-                    SliderRow(
-                        label = "Minimum account age",
-                        value = state.config.minAccountAgeDays.toFloat(),
-                        onValueChange = { },
-                        onValueChangeFinished = { },
-                        valueRange = 0f..365f,
-                        valueLabel = "${state.config.minAccountAgeDays}d",
+                    SettingNumberField(
+                        label = "Minimum account age (days)",
+                        value = state.config.minAccountAgeDays,
+                        onCommit = viewModel::setMinAccountAge,
                     )
                     Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                         listOf(0, 7, 30, 90).forEach { days ->
@@ -282,13 +302,10 @@ fun ReputationScreen(
                             }
                         }
                     }
-                    SliderRow(
-                        label = "Minimum time in server",
-                        value = state.config.minServerMembershipHours.toFloat(),
-                        onValueChange = { },
-                        onValueChangeFinished = { },
-                        valueRange = 0f..720f,
-                        valueLabel = "${state.config.minServerMembershipHours}h",
+                    SettingNumberField(
+                        label = "Minimum time in server (hours)",
+                        value = state.config.minServerMembershipHours,
+                        onCommit = viewModel::setMinServerMembership,
                     )
                     Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                         listOf(0, 24, 72, 168).forEach { hours ->
@@ -297,13 +314,10 @@ fun ReputationScreen(
                             }
                         }
                     }
-                    SliderRow(
+                    SettingNumberField(
                         label = "Minimum messages",
-                        value = state.config.minMessageCount.toFloat(),
-                        onValueChange = { },
-                        onValueChangeFinished = { },
-                        valueRange = 0f..500f,
-                        valueLabel = "${state.config.minMessageCount}",
+                        value = state.config.minMessageCount,
+                        onCommit = viewModel::setMinMessageCount,
                     )
                     Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                         listOf(0, 10, 50, 100).forEach { count ->
@@ -319,11 +333,12 @@ fun ReputationScreen(
 
     if (showAddReward) {
         var roleId by remember { mutableStateOf<String?>(null) }
-        var repRequired by remember { mutableIntStateOf(10) }
-        var xpReward by remember { mutableIntStateOf(0) }
+        var repRequiredText by remember { mutableStateOf("10") }
+        var xpRewardText by remember { mutableStateOf("0") }
         var removeOnDrop by remember { mutableStateOf(true) }
         var announceDm by remember { mutableStateOf(false) }
         var announceChannel by remember { mutableStateOf<String?>(null) }
+        val repRequired = repRequiredText.toIntOrNull()
 
         AlertDialog(
             onDismissRequest = { showAddReward = false },
@@ -338,19 +353,19 @@ fun ReputationScreen(
                         selectedId = roleId,
                         onSelect = { roleId = it },
                     )
-                    SliderRow(
+                    MewdekoTextField(
+                        value = repRequiredText,
+                        onValueChange = { repRequiredText = it.filter(Char::isDigit).take(9) },
                         label = "Reputation required",
-                        value = repRequired.toFloat(),
-                        onValueChange = { repRequired = it.toInt() },
-                        valueRange = 1f..500f,
-                        valueLabel = "$repRequired",
+                        numeric = true,
+                        isError = repRequired == null || repRequired < 1,
+                        supportingText = if (repRequired == null || repRequired < 1) "Must be at least 1" else null,
                     )
-                    SliderRow(
+                    MewdekoTextField(
+                        value = xpRewardText,
+                        onValueChange = { xpRewardText = it.filter(Char::isDigit).take(9) },
                         label = "Bonus XP",
-                        value = xpReward.toFloat(),
-                        onValueChange = { xpReward = it.toInt() },
-                        valueRange = 0f..5000f,
-                        valueLabel = "$xpReward",
+                        numeric = true,
                     )
                     SwitchRow(
                         title = "Remove if rep drops",
@@ -375,19 +390,21 @@ fun ReputationScreen(
             confirmButton = {
                 Button(
                     onClick = {
-                        roleId?.let {
+                        val role = roleId
+                        val rep = repRequired
+                        if (role != null && rep != null && rep >= 1) {
                             viewModel.upsertRoleReward(
-                                roleId = it,
-                                repRequired = repRequired,
+                                roleId = role,
+                                repRequired = rep,
                                 removeOnDrop = removeOnDrop,
                                 announceChannel = announceChannel,
                                 announceDm = announceDm,
-                                xpReward = xpReward,
+                                xpReward = xpRewardText.toIntOrNull() ?: 0,
                             )
+                            showAddReward = false
                         }
-                        showAddReward = false
                     },
-                    enabled = roleId != null,
+                    enabled = roleId != null && repRequired != null && repRequired >= 1,
                 ) { Text("Save") }
             },
             dismissButton = {
@@ -404,5 +421,177 @@ fun ReputationScreen(
             onConfirm = { viewModel.removeRoleReward(reward.roleId) },
             onDismiss = { pendingDeleteReward = null },
         )
+    }
+
+    state.historyTarget?.let { target ->
+        AlertDialog(
+            onDismissRequest = viewModel::closeHistory,
+            title = { Text("Reputation history") },
+            text = {
+                Column(
+                    modifier = Modifier
+                        .heightIn(max = 420.dp)
+                        .verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Text(
+                        text = "${target.username} · ${target.reputation} reputation",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    when {
+                        state.historyLoading && state.historyEntries.isEmpty() -> Box(
+                            modifier = Modifier.fillMaxWidth().padding(24.dp),
+                            contentAlignment = Alignment.Center,
+                        ) { CircularProgressIndicator() }
+
+                        state.historyFailed && state.historyEntries.isEmpty() ->
+                            EmptyState("Failed to load reputation history.", icon = Icons.Default.History)
+
+                        state.historyEntries.isEmpty() ->
+                            EmptyState(
+                                "No reputation has been given to this member yet.",
+                                icon = Icons.Default.History,
+                            )
+
+                        else -> {
+                            state.historyEntries.forEach { entry ->
+                                Column(modifier = Modifier.fillMaxWidth()) {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Text(
+                                            text = if (entry.amount >= 0) "+${entry.amount}" else "${entry.amount}",
+                                            style = MaterialTheme.typography.titleSmall,
+                                            color = if (entry.amount >= 0) {
+                                                MaterialTheme.colorScheme.primary
+                                            } else {
+                                                MaterialTheme.colorScheme.error
+                                            },
+                                        )
+                                        Text(
+                                            text = "  ${entry.repType} from " +
+                                                if (entry.isAnonymous) "an anonymous member" else "user ${entry.giverId}",
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                        )
+                                    }
+                                    entry.reason?.takeIf { it.isNotBlank() }?.let { reason ->
+                                        Text(
+                                            text = reason,
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        )
+                                    }
+                                    Text(
+                                        text = HistoryTimestampFormat.format(entry.timestamp),
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                }
+                            }
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                TextButton(
+                                    onClick = { viewModel.loadHistory(state.historyPage - 1) },
+                                    enabled = state.historyPage > 1 && !state.historyLoading,
+                                ) {
+                                    Icon(Icons.Default.ChevronLeft, contentDescription = null)
+                                    Text("Previous")
+                                }
+                                Text(
+                                    "Page ${state.historyPage}",
+                                    style = MaterialTheme.typography.labelMedium,
+                                )
+                                TextButton(
+                                    onClick = { viewModel.loadHistory(state.historyPage + 1) },
+                                    enabled = state.historyEntries.size >= 20 && !state.historyLoading,
+                                ) {
+                                    Text("Next")
+                                    Icon(Icons.Default.ChevronRight, contentDescription = null)
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = viewModel::closeHistory) { Text("Close") }
+            },
+        )
+    }
+}
+
+/**
+ * A whole-number setting field that persists via [onCommit] once its typed
+ * value differs from [value]. Mirrors the dashboard's plain number inputs.
+ */
+@Composable
+private fun SettingNumberField(
+    label: String,
+    value: Int,
+    onCommit: (Int) -> Unit,
+    modifier: Modifier = Modifier,
+    placeholder: String? = null,
+) {
+    var draft by remember(value) { mutableStateOf(value.toString()) }
+    val parsed = draft.toIntOrNull()
+    Row(
+        modifier = modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        MewdekoTextField(
+            value = draft,
+            onValueChange = { draft = it.filter(Char::isDigit).take(9) },
+            label = label,
+            placeholder = placeholder,
+            numeric = true,
+            modifier = Modifier.weight(1f),
+        )
+        IconButton(
+            onClick = { parsed?.let(onCommit) },
+            enabled = parsed != null && parsed != value,
+        ) {
+            Icon(Icons.Default.Check, contentDescription = "Apply $label")
+        }
+    }
+}
+
+/**
+ * A nullable whole-number setting field. An empty box commits `null`
+ * (unlimited); mirrors the dashboard's optional number input.
+ */
+@Composable
+private fun SettingNullableNumberField(
+    label: String,
+    value: Int?,
+    onCommit: (Int?) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    var draft by remember(value) { mutableStateOf(value?.toString().orEmpty()) }
+    val next: Int? = draft.toIntOrNull()
+    val changed = (draft.isEmpty() && value != null) || (next != null && next != value)
+    Row(
+        modifier = modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        MewdekoTextField(
+            value = draft,
+            onValueChange = { draft = it.filter(Char::isDigit).take(9) },
+            label = label,
+            placeholder = "Unlimited",
+            numeric = true,
+            modifier = Modifier.weight(1f),
+        )
+        IconButton(
+            onClick = { onCommit(if (draft.isEmpty()) null else next) },
+            enabled = changed,
+        ) {
+            Icon(Icons.Default.Check, contentDescription = "Apply $label")
+        }
     }
 }

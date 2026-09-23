@@ -31,6 +31,40 @@ import kotlinx.serialization.builtins.serializer
 import java.time.Instant
 import javax.inject.Inject
 
+/** How the suggestion list is ordered. */
+enum class SuggestionSortBy(val raw: String, val label: String) {
+    DATE("dateAdded", "Date"),
+    STATUS("currentState", "Status"),
+}
+
+/** A guild's basic identity, as returned alongside its emoji list. */
+@Serializable
+data class SuggestionGuildInfo(
+    @Serializable(with = SnowflakeSerializer::class) val id: Snowflake = "",
+    val name: String = "",
+    val iconUrl: String? = null,
+)
+
+/** One custom emoji available in a guild. */
+@Serializable
+data class SuggestionEmojiInfo(
+    @Serializable(with = SnowflakeSerializer::class) val id: Snowflake = "",
+    val name: String = "",
+    val animated: Boolean = false,
+    val isAvailable: Boolean? = null,
+    val url: String = "",
+) {
+    /** The Discord mention form the bot expects, e.g. `<a:name:id>`. */
+    val mention: String get() = "<${if (animated) "a" else ""}:$name:$id>"
+}
+
+/** A guild's custom emoji list, as returned by the shared emoji picker endpoint. */
+@Serializable
+data class SuggestionGuildEmojis(
+    val guild: SuggestionGuildInfo = SuggestionGuildInfo(),
+    val emojis: List<SuggestionEmojiInfo> = emptyList(),
+)
+
 /** Where a suggestion currently stands. */
 enum class SuggestionState(val raw: Int, val label: String) {
     SUGGESTED(0, "Suggested"),
@@ -109,7 +143,17 @@ data class SuggestionsSettings(
     val archiveOnDeny: Boolean = false,
     val archiveOnConsider: Boolean = false,
     val archiveOnImplement: Boolean = false,
-)
+    val suggestButtonChannel: Snowflake? = null,
+    val suggestButtonColor: Int = 1,
+    val suggestButtonLabel: String = "",
+    val suggestButtonEmote: String = "",
+    val suggestButtonMessage: String = "",
+    val emoteButtonStyles: List<Int> = List(5) { 1 },
+) {
+    /** [emotes] split into individual entries, dropping blanks. */
+    val emoteList: List<String>
+        get() = emotes.split(",").map { it.trim() }.filter { it.isNotEmpty() }
+}
 
 /** Suggestions screen state. */
 data class SuggestionsState(
@@ -117,16 +161,26 @@ data class SuggestionsState(
     val settings: SuggestionsSettings = SuggestionsSettings(),
     val loadedSettings: SuggestionsSettings = SuggestionsSettings(),
     val availableChannels: List<TextChannelLite> = emptyList(),
+    val guildEmotes: List<SuggestionEmojiInfo> = emptyList(),
     val section: String = "list",
     val stateFilter: SuggestionState? = null,
+    val sortBy: SuggestionSortBy = SuggestionSortBy.DATE,
+    val sortDescending: Boolean = true,
 ) {
     /** Whether any setting differs from what the server has. */
     val hasUnsavedSettings: Boolean get() = settings != loadedSettings
 
-    /** Suggestions matching the current state filter. */
+    /** Suggestions matching the current state filter, sorted per [sortBy]/[sortDescending]. */
     val visible: List<SuggestionRecord>
-        get() = stateFilter?.let { filter -> suggestions.filter { it.state == filter } }
-            ?: suggestions
+        get() {
+            val filtered = stateFilter?.let { filter -> suggestions.filter { it.state == filter } }
+                ?: suggestions
+            val sorted = when (sortBy) {
+                SuggestionSortBy.DATE -> filtered.sortedBy { it.dateAdded ?: Instant.EPOCH }
+                SuggestionSortBy.STATUS -> filtered.sortedBy { it.currentState }
+            }
+            return if (sortDescending) sorted.reversed() else sorted
+        }
 
     /** How many suggestions sit in each state. */
     fun countFor(state: SuggestionState): Int = suggestions.count { it.state == state }
@@ -168,6 +222,17 @@ class SuggestionsViewModel @Inject constructor(
                     )
                 }.getOrDefault(emptyList())
             }
+            val guildEmotes = async {
+                runCatching {
+                    api.send(
+                        Endpoint("api/ClientOperations/emojis/$userId?adminOnly=true"),
+                        ListSerializer(SuggestionGuildEmojis.serializer()),
+                    )
+                }.getOrDefault(emptyList())
+                    .firstOrNull { it.guild.id == guildId }
+                    ?.emojis
+                    .orEmpty()
+            }
 
             val suggestCh = async { snowflake("suggestChannel") }
             val acceptCh = async { snowflake("acceptChannel") }
@@ -188,6 +253,12 @@ class SuggestionsViewModel @Inject constructor(
             val archDeny = async { bool("archiveOnDeny") }
             val archConsider = async { bool("archiveOnConsider") }
             val archImplement = async { bool("archiveOnImplement") }
+            val buttonChannel = async { snowflake("suggestButtonChannel") }
+            val buttonColor = async { int("suggestButtonColor") }
+            val buttonLabel = async { text("suggestButtonLabel") }
+            val buttonEmote = async { text("suggestButtonEmote") }
+            val buttonMessage = async { text("suggestButtonMessage") }
+            val buttonStyles = async { (1..5).map { n -> int("emoteButtonStyle/$n") ?: 1 } }
 
             val snapshot = SuggestionsSettings(
                 suggestChannel = suggestCh.await(),
@@ -209,15 +280,22 @@ class SuggestionsViewModel @Inject constructor(
                 archiveOnDeny = archDeny.await(),
                 archiveOnConsider = archConsider.await(),
                 archiveOnImplement = archImplement.await(),
+                suggestButtonChannel = buttonChannel.await(),
+                suggestButtonColor = buttonColor.await() ?: 1,
+                suggestButtonLabel = buttonLabel.await().orEmpty(),
+                suggestButtonEmote = buttonEmote.await().orEmpty(),
+                suggestButtonMessage = buttonMessage.await().orEmpty(),
+                emoteButtonStyles = buttonStyles.await(),
             )
 
             _state.update {
                 it.copy(
-                    suggestions = suggestions.await().sortedByDescending { entry -> entry.number },
+                    suggestions = suggestions.await(),
                     settings = snapshot,
                     loadedSettings = snapshot,
                     availableChannels = channels.await()
                         .sortedBy { channel -> channel.name.lowercase() },
+                    guildEmotes = guildEmotes.await(),
                 )
             }
         }
@@ -228,6 +306,12 @@ class SuggestionsViewModel @Inject constructor(
 
     /** Filters the list by state, or clears the filter with null. */
     fun setStateFilter(state: SuggestionState?) = _state.update { it.copy(stateFilter = state) }
+
+    /** Changes what the suggestion list is sorted by. */
+    fun setSortBy(sortBy: SuggestionSortBy) = _state.update { it.copy(sortBy = sortBy) }
+
+    /** Flips ascending/descending order for the suggestion list. */
+    fun toggleSortDirection() = _state.update { it.copy(sortDescending = !it.sortDescending) }
 
     /** Applies an edit to the staged settings. */
     fun edit(transform: (SuggestionsSettings) -> SuggestionsSettings) =
@@ -296,6 +380,30 @@ class SuggestionsViewModel @Inject constructor(
         }
         if (current.archiveOnImplement != loaded.archiveOnImplement) {
             send("archiveOnImplement", jsonBool(current.archiveOnImplement))
+        }
+        if (current.threadsType != loaded.threadsType) {
+            send("suggestThreadsType", jsonInt(current.threadsType))
+        }
+        if (current.emoteMode != loaded.emoteMode) send("emoteMode", jsonInt(current.emoteMode))
+        if (current.suggestButtonChannel != loaded.suggestButtonChannel) {
+            send("suggestButtonChannel", (current.suggestButtonChannel?.toLongOrNull() ?: 0L).toString())
+        }
+        if (current.suggestButtonColor != loaded.suggestButtonColor) {
+            send("suggestButtonColor", jsonInt(current.suggestButtonColor))
+        }
+        if (current.suggestButtonLabel != loaded.suggestButtonLabel) {
+            send("suggestButtonLabel", jsonString(current.suggestButtonLabel))
+        }
+        if (current.suggestButtonEmote != loaded.suggestButtonEmote) {
+            send("suggestButtonEmote", jsonString(current.suggestButtonEmote))
+        }
+        if (current.suggestButtonMessage != loaded.suggestButtonMessage) {
+            send("suggestButtonMessage", jsonString(current.suggestButtonMessage))
+        }
+        current.emoteButtonStyles.forEachIndexed { index, style ->
+            if (style != loaded.emoteButtonStyles.getOrElse(index) { 1 }) {
+                send("emoteButtonStyle/${index + 1}", jsonInt(style))
+            }
         }
 
         if (ok) {

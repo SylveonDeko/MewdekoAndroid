@@ -225,6 +225,7 @@ data class StatChannel(
 data class StatChannelsState(
     val channels: List<StatChannel> = emptyList(),
     val availableVoiceChannels: List<TextChannelLite> = emptyList(),
+    val availableCategories: List<TextChannelLite> = emptyList(),
     val availableRoles: List<GuildRole> = emptyList(),
     val countingChannels: List<CountingChannelLite> = emptyList(),
     val minecraftServers: List<MinecraftServerLite> = emptyList(),
@@ -286,6 +287,14 @@ class StatChannelsViewModel @Inject constructor(
             val voice = async {
                 runCatching {
                     api.send(
+                        Endpoint("api/ClientOperations/channels/$guildId/1"),
+                        ListSerializer(TextChannelLite.serializer()),
+                    )
+                }.getOrDefault(emptyList())
+            }
+            val categories = async {
+                runCatching {
+                    api.send(
                         Endpoint("api/ClientOperations/channels/$guildId/2"),
                         ListSerializer(TextChannelLite.serializer()),
                     )
@@ -325,6 +334,8 @@ class StatChannelsViewModel @Inject constructor(
                     minecraftServers = minecraft.await(),
                     availableVoiceChannels = voice.await()
                         .sortedBy { channel -> channel.name.lowercase() },
+                    availableCategories = categories.await()
+                        .sortedBy { channel -> channel.name.lowercase() },
                     availableRoles = roles.await()
                         .filter { role -> role.id != guildId }
                         .sortedBy { role -> role.name.lowercase() },
@@ -333,9 +344,13 @@ class StatChannelsViewModel @Inject constructor(
         }
     }
 
-    /** Turns a voice channel into a live stat display. */
+    /**
+     * Turns a voice channel into a live stat display. When [channelId] is `"0"` the bot creates a
+     * new voice channel instead of reusing an existing one, optionally inside [categoryId].
+     */
     fun add(
         channelId: Snowflake,
+        categoryId: Snowflake?,
         statType: Int,
         template: String,
         displayStyle: Int,
@@ -353,6 +368,7 @@ class StatChannelsViewModel @Inject constructor(
                 HttpMethod.POST,
                 jsonBody(
                     "channelId" to (channelId.toLongOrNull() ?: 0L),
+                    "categoryId" to categoryId?.toLongOrNull(),
                     "statType" to statType,
                     "template" to template,
                     "displayStyle" to displayStyle,

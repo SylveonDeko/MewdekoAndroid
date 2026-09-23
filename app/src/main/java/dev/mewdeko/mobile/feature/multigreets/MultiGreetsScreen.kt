@@ -1,11 +1,14 @@
 package dev.mewdeko.mobile.feature.multigreets
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.Tag
 import androidx.compose.material.icons.filled.WavingHand
 import androidx.compose.material3.AlertDialog
@@ -23,8 +26,8 @@ import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -33,13 +36,13 @@ import dev.mewdeko.mobile.core.ui.ConfirmDialog
 import dev.mewdeko.mobile.core.ui.DiscordSelectorSingle
 import dev.mewdeko.mobile.core.ui.EmptyState
 import dev.mewdeko.mobile.core.ui.FeatureScaffold
+import dev.mewdeko.mobile.core.ui.MewdekoTextField
 import dev.mewdeko.mobile.core.ui.SectionCard
 import dev.mewdeko.mobile.core.ui.SectionCardHeader
 import dev.mewdeko.mobile.core.ui.SelectorKind
 import dev.mewdeko.mobile.core.ui.SelectorOption
 import dev.mewdeko.mobile.core.ui.StatTile
 import dev.mewdeko.mobile.core.ui.SwitchRow
-import dev.mewdeko.mobile.core.ui.TagChip
 import dev.mewdeko.mobile.feature.embed.EmbedMessageEditor
 import dev.mewdeko.mobile.navigation.GuildRouteArgs
 
@@ -135,38 +138,131 @@ fun MultiGreetsScreen(
                             checked = greet.greetBots,
                             onCheckedChange = { viewModel.setGreetBots(greet.id, it) },
                         )
-                        Row(
-                            horizontalArrangement = Arrangement.spacedBy(4.dp),
-                            modifier = Modifier.fillMaxWidth(),
-                        ) {
-                            Text(
-                                text = "Auto-delete",
-                                style = MaterialTheme.typography.bodyMedium,
-                                modifier = Modifier.weight(1f),
+
+                        var editingDeleteTime by remember { mutableStateOf(false) }
+                        var deleteTimeText by remember { mutableStateOf("") }
+                        if (editingDeleteTime) {
+                            MewdekoTextField(
+                                value = deleteTimeText,
+                                onValueChange = { deleteTimeText = it },
+                                label = "Auto-delete after",
+                                placeholder = "e.g. 1m30s",
                             )
-                            listOf(0, 30, 60, 300).forEach { seconds ->
-                                TextButton(
-                                    onClick = { viewModel.updateDeleteTime(greet.id, seconds) },
-                                ) {
+                            Row(
+                                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                modifier = Modifier.fillMaxWidth(),
+                            ) {
+                                listOf("Never" to "0s", "30s" to "30s", "60s" to "60s", "5m" to "300s")
+                                    .forEach { (label, value) ->
+                                        TextButton(onClick = { deleteTimeText = value }) {
+                                            Text(label)
+                                        }
+                                    }
+                            }
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Button(
+                                    onClick = {
+                                        viewModel.updateDeleteTime(
+                                            greet.id,
+                                            deleteTimeText.ifBlank { "0s" },
+                                        )
+                                        editingDeleteTime = false
+                                    },
+                                ) { Text("Save") }
+                                TextButton(onClick = { editingDeleteTime = false }) {
+                                    Text("Cancel")
+                                }
+                            }
+                        } else {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Column {
+                                    Text("Auto-delete", style = MaterialTheme.typography.bodyMedium)
                                     Text(
-                                        text = if (seconds == 0) "Never" else "${seconds}s",
-                                        color = if (greet.deleteTime == seconds) {
-                                            MaterialTheme.colorScheme.primary
-                                        } else {
-                                            MaterialTheme.colorScheme.onSurfaceVariant
-                                        },
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis,
+                                        text = formatGreetDuration(greet.deleteTime),
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     )
+                                }
+                                IconButton(
+                                    onClick = {
+                                        deleteTimeText = if (greet.deleteTime > 0) {
+                                            formatGreetDuration(greet.deleteTime)
+                                        } else {
+                                            ""
+                                        }
+                                        editingDeleteTime = true
+                                    },
+                                ) {
+                                    Icon(Icons.Default.Edit, contentDescription = "Edit auto-delete")
                                 }
                             }
                         }
+
                         EmbedMessageEditor(
                             message = EmbedMessage.parse(greet.message),
                             onMessageChange = { viewModel.updateMessage(greet.id, it) },
                         )
-                        if (!greet.webhookUrl.isNullOrBlank()) {
-                            TagChip("Webhook")
+
+                        var editingWebhook by remember { mutableStateOf(false) }
+                        var webhookName by remember { mutableStateOf("") }
+                        var webhookAvatarUrl by remember { mutableStateOf("") }
+                        if (editingWebhook) {
+                            MewdekoTextField(
+                                value = webhookName,
+                                onValueChange = { webhookName = it },
+                                label = "Webhook name",
+                                placeholder = "e.g. Welcome Bot",
+                            )
+                            MewdekoTextField(
+                                value = webhookAvatarUrl,
+                                onValueChange = { webhookAvatarUrl = it },
+                                label = "Avatar URL (optional)",
+                                placeholder = "https://...",
+                            )
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Button(
+                                    onClick = {
+                                        viewModel.setWebhook(greet.id, webhookName, webhookAvatarUrl)
+                                        editingWebhook = false
+                                    },
+                                    enabled = webhookName.isNotBlank(),
+                                ) { Text("Save") }
+                                TextButton(onClick = { editingWebhook = false }) {
+                                    Text("Cancel")
+                                }
+                            }
+                        } else {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Column {
+                                    Text("Webhook", style = MaterialTheme.typography.bodyMedium)
+                                    Text(
+                                        text = if (greet.webhookUrl.isNullOrBlank()) {
+                                            "Not configured"
+                                        } else {
+                                            "Configured"
+                                        },
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                }
+                                IconButton(
+                                    onClick = {
+                                        webhookName = ""
+                                        webhookAvatarUrl = ""
+                                        editingWebhook = true
+                                    },
+                                ) {
+                                    Icon(Icons.Default.Link, contentDescription = "Edit webhook")
+                                }
+                            }
                         }
                     }
                 }
@@ -211,5 +307,18 @@ fun MultiGreetsScreen(
             onConfirm = { viewModel.remove(greet.id) },
             onDismiss = { pendingDelete = null },
         )
+    }
+}
+
+/** Renders a second count as a compact duration, e.g. "1m30s", or "Never" for zero. */
+private fun formatGreetDuration(seconds: Int): String {
+    if (seconds <= 0) return "Never"
+    val hours = seconds / 3600
+    val minutes = (seconds % 3600) / 60
+    val remainingSeconds = seconds % 60
+    return buildString {
+        if (hours > 0) append("${hours}h")
+        if (minutes > 0) append("${minutes}m")
+        if (remainingSeconds > 0 || isEmpty()) append("${remainingSeconds}s")
     }
 }

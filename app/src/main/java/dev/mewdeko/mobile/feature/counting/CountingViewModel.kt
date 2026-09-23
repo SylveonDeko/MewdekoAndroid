@@ -12,6 +12,8 @@ import dev.mewdeko.mobile.core.net.ApiClient
 import dev.mewdeko.mobile.core.net.Endpoint
 import dev.mewdeko.mobile.core.net.HttpMethod
 import dev.mewdeko.mobile.core.net.InstantSerializer
+import dev.mewdeko.mobile.core.net.MewdekoJson
+import dev.mewdeko.mobile.core.net.asSnowflakeNumber
 import dev.mewdeko.mobile.core.net.jsonBody
 import dev.mewdeko.mobile.core.ui.FeatureViewModel
 import kotlinx.coroutines.async
@@ -41,10 +43,11 @@ enum class CountingPattern(val raw: Int, val label: String) {
 }
 
 /** Which metric the counting leaderboard ranks by. */
-enum class LeaderboardType(val raw: Int, val label: String) {
-    CONTRIBUTIONS(0, "Contributions"),
-    STREAK(1, "Streak"),
-    ACCURACY(2, "Accuracy"),
+enum class LeaderboardType(val queryValue: String, val label: String) {
+    CONTRIBUTIONS("Contributions", "Contributions"),
+    STREAK("Streak", "Highest Streak"),
+    ACCURACY("Accuracy", "Accuracy"),
+    TOTAL_NUMBERS("TotalNumbers", "Total Numbers"),
 }
 
 /** A channel running the counting game. */
@@ -113,6 +116,7 @@ data class CountingChannelStats(
     val totalParticipants: Int = 0,
     val totalErrors: Int = 0,
     val milestonesReached: Int = 0,
+    val topContributor: CountingUserStats? = null,
     val averageAccuracy: Double = 0.0,
     @Serializable(with = InstantSerializer::class) val lastActivity: Instant? = null,
 )
@@ -120,8 +124,7 @@ data class CountingChannelStats(
 /** A page of the counting leaderboard. */
 @Serializable
 data class CountingLeaderboard(
-    val users: List<CountingUserStats> = emptyList(),
-    val totalUsers: Int = 0,
+    val entries: List<CountingUserStats> = emptyList(),
 )
 
 /** A restorable snapshot of a channel's count. */
@@ -135,6 +138,24 @@ data class CountingSavePoint(
     val isActive: Boolean = false,
 )
 
+/** A member currently banned from counting in a channel. */
+@Serializable
+data class CountingBan(
+    val id: Int = 0,
+    @Serializable(with = SnowflakeSerializer::class) val userId: Snowflake = "",
+    val username: String? = null,
+    val avatarUrl: String? = null,
+    @Serializable(with = SnowflakeSerializer::class) val bannedBy: Snowflake = "",
+    val bannedByUsername: String? = null,
+    @Serializable(with = InstantSerializer::class) val bannedAt: Instant? = null,
+    @Serializable(with = InstantSerializer::class) val expiresAt: Instant? = null,
+    val reason: String? = null,
+)
+
+/** Body for setting a channel's custom milestone numbers. */
+@Serializable
+private data class MilestonesBody(val milestones: List<Int>)
+
 /** Counting screen state. */
 data class CountingState(
     val channels: List<CountingChannelDetail> = emptyList(),
@@ -143,7 +164,10 @@ data class CountingState(
     val stats: CountingChannelStats? = null,
     val leaderboard: List<CountingUserStats> = emptyList(),
     val leaderboardType: LeaderboardType = LeaderboardType.CONTRIBUTIONS,
+    val leaderboardLimit: Int = 20,
     val savePoints: List<CountingSavePoint> = emptyList(),
+    val milestones: List<Int> = emptyList(),
+    val bans: List<CountingBan> = emptyList(),
     val availableChannels: List<TextChannelLite> = emptyList(),
     val availableRoles: List<GuildRole> = emptyList(),
     val section: String = "channels",
@@ -228,7 +252,14 @@ class CountingViewModel @Inject constructor(
     /** Changes the leaderboard metric and reloads it. */
     fun setLeaderboardType(type: LeaderboardType) = viewModelScope.launch {
         _state.update { it.copy(leaderboardType = type) }
-        _state.value.selectedChannelId?.let { loadLeaderboard(it, type) }
+        _state.value.selectedChannelId?.let { loadLeaderboard(it, type, _state.value.leaderboardLimit) }
+    }
+
+    /** Changes the leaderboard row limit and reloads it. */
+    fun setLeaderboardLimit(limit: Int) = viewModelScope.launch {
+        val clamped = limit.coerceIn(1, 100)
+        _state.update { it.copy(leaderboardLimit = clamped) }
+        _state.value.selectedChannelId?.let { loadLeaderboard(it, _state.value.leaderboardType, clamped) }
     }
 
     /** Turns a channel into a counting channel. */
@@ -253,7 +284,7 @@ class CountingViewModel @Inject constructor(
                     "api/Counting/$guildId/channels/$channelId/reset",
                     HttpMethod.POST,
                     jsonBody(
-                        "userId" to userId,
+                        "userId" to userId.asSnowflakeNumber(),
                         "newNumber" to newNumber,
                         "reason" to reason,
                     ),
@@ -308,9 +339,9 @@ class CountingViewModel @Inject constructor(
         launchAction("Failed to create save point.") {
             api.sendIgnoringBody(
                 Endpoint(
-                    "api/Counting/$guildId/channels/$channelId/savepoints",
+                    "api/Counting/$guildId/channels/$channelId/saves",
                     HttpMethod.POST,
-                    jsonBody("userId" to userId, "reason" to reason),
+                    jsonBody("userId" to userId.asSnowflakeNumber(), "reason" to reason),
                 )
             )
             postSuccess("Save point created.")
@@ -322,12 +353,106 @@ class CountingViewModel @Inject constructor(
         launchAction("Failed to restore save point.") {
             api.sendIgnoringBody(
                 Endpoint(
-                    "api/Counting/$guildId/channels/$channelId/savepoints/restore",
+                    "api/Counting/$guildId/channels/$channelId/restore",
                     HttpMethod.POST,
-                    jsonBody("saveId" to saveId, "userId" to userId),
+                    jsonBody("saveId" to saveId, "userId" to userId.asSnowflakeNumber()),
                 )
             )
             postSuccess("Save point restored.")
+            load(refreshing = true)
+        }
+
+    /** Permanently deletes a save point. */
+    fun deleteSavePoint(channelId: Snowflake, saveId: Int) =
+        launchAction("Failed to delete save point.") {
+            api.sendIgnoringBody(
+                Endpoint(
+                    "api/Counting/$guildId/channels/$channelId/saves/$saveId" +
+                        "?userId=${userId.asSnowflakeNumber()}",
+                    HttpMethod.DELETE,
+                )
+            )
+            _state.update {
+                it.copy(savePoints = it.savePoints.filterNot { save -> save.id == saveId })
+            }
+        }
+
+    /** Replaces the channel's custom milestone numbers. */
+    fun setMilestones(channelId: Snowflake, milestones: List<Int>) =
+        launchAction("Failed to update milestones.") {
+            val sorted = milestones.filter { it > 0 }.distinct().sorted()
+            api.sendIgnoringBody(
+                Endpoint(
+                    "api/Counting/$guildId/channels/$channelId/milestones",
+                    HttpMethod.PUT,
+                    MewdekoJson.encodeToString(MilestonesBody.serializer(), MilestonesBody(sorted)),
+                )
+            )
+            _state.update { it.copy(milestones = sorted) }
+        }
+
+    /** Adds one milestone number to the channel's custom list. */
+    fun addMilestone(channelId: Snowflake, value: Int) =
+        setMilestones(channelId, _state.value.milestones + value)
+
+    /** Removes one milestone number from the channel's custom list. */
+    fun removeMilestone(channelId: Snowflake, value: Int) =
+        setMilestones(channelId, _state.value.milestones.filterNot { it == value })
+
+    /** Sets the message announced when a milestone is reached. */
+    fun setMilestoneMessage(channelId: Snowflake, message: String) =
+        launchAction("Failed to save milestone message.") {
+            api.sendIgnoringBody(
+                Endpoint(
+                    "api/Counting/$guildId/channels/$channelId/messages/milestone",
+                    HttpMethod.PUT,
+                    jsonBody("message" to message),
+                )
+            )
+            postSuccess("Milestone message saved.")
+        }
+
+    /** Bans a member from counting in this channel. */
+    fun banUser(channelId: Snowflake, targetUserId: Snowflake, reason: String?, durationMinutes: Int?) =
+        launchAction("Failed to ban user.") {
+            api.sendIgnoringBody(
+                Endpoint(
+                    "api/Counting/$guildId/channels/$channelId/users/${targetUserId.asSnowflakeNumber()}/ban",
+                    HttpMethod.POST,
+                    jsonBody(
+                        "bannedBy" to userId.asSnowflakeNumber(),
+                        "durationMinutes" to durationMinutes,
+                        "reason" to reason,
+                    ),
+                )
+            )
+            loadBans(channelId)
+        }
+
+    /** Lifts a counting ban on a member. */
+    fun unbanUser(channelId: Snowflake, targetUserId: Snowflake) =
+        launchAction("Failed to unban user.") {
+            api.sendIgnoringBody(
+                Endpoint(
+                    "api/Counting/$guildId/channels/$channelId/users/${targetUserId.asSnowflakeNumber()}/ban",
+                    HttpMethod.DELETE,
+                    jsonBody("unbannedBy" to userId.asSnowflakeNumber()),
+                )
+            )
+            _state.update { it.copy(bans = it.bans.filterNot { ban -> ban.userId == targetUserId }) }
+        }
+
+    /** Wipes every count, streak, statistic, ban, and save point for a channel. */
+    fun purge(channelId: Snowflake, reason: String?) =
+        launchAction("Failed to purge counting channel.") {
+            api.sendIgnoringBody(
+                Endpoint(
+                    "api/Counting/$guildId/channels/$channelId/purge",
+                    HttpMethod.DELETE,
+                    jsonBody("userId" to userId.asSnowflakeNumber(), "reason" to reason),
+                )
+            )
+            postSuccess("Counting data purged.")
             load(refreshing = true)
         }
 
@@ -351,28 +476,54 @@ class CountingViewModel @Inject constructor(
         val savePoints = async {
             runCatching {
                 api.send(
-                    Endpoint("api/Counting/$guildId/channels/$channelId/savepoints"),
+                    Endpoint("api/Counting/$guildId/channels/$channelId/saves"),
                     ListSerializer(CountingSavePoint.serializer()),
                 )
             }.getOrDefault(emptyList())
         }
+        val milestones = async { loadMilestonesList(channelId) }
+        val bans = async { fetchBans(channelId) }
 
         _state.update {
-            it.copy(config = config.await(), stats = stats.await(), savePoints = savePoints.await())
+            it.copy(
+                config = config.await(),
+                stats = stats.await(),
+                savePoints = savePoints.await(),
+                milestones = milestones.await(),
+                bans = bans.await(),
+            )
         }
-        loadLeaderboard(channelId, _state.value.leaderboardType)
+        loadLeaderboard(channelId, _state.value.leaderboardType, _state.value.leaderboardLimit)
     }
 
-    private suspend fun loadLeaderboard(channelId: Snowflake, type: LeaderboardType) {
+    private suspend fun loadLeaderboard(channelId: Snowflake, type: LeaderboardType, limit: Int) {
         val board = runCatching {
             api.send(
                 Endpoint(
                     "api/Counting/$guildId/channels/$channelId/leaderboard" +
-                        "?type=${type.raw}&page=1&pageSize=25"
+                        "?type=${type.queryValue}&limit=$limit"
                 ),
                 CountingLeaderboard.serializer(),
             )
         }.getOrNull()
-        _state.update { it.copy(leaderboard = board?.users.orEmpty()) }
+        _state.update { it.copy(leaderboard = board?.entries.orEmpty()) }
+    }
+
+    private suspend fun loadMilestonesList(channelId: Snowflake): List<Int> = runCatching {
+        api.send(
+            Endpoint("api/Counting/$guildId/channels/$channelId/milestones"),
+            MilestonesBody.serializer(),
+        ).milestones
+    }.getOrDefault(emptyList())
+
+    private suspend fun fetchBans(channelId: Snowflake): List<CountingBan> = runCatching {
+        api.send(
+            Endpoint("api/Counting/$guildId/channels/$channelId/bans"),
+            ListSerializer(CountingBan.serializer()),
+        )
+    }.getOrDefault(emptyList())
+
+    private suspend fun loadBans(channelId: Snowflake) {
+        _state.update { it.copy(bans = fetchBans(channelId)) }
     }
 }

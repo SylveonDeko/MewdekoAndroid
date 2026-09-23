@@ -11,14 +11,20 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Block
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.DeleteForever
+import androidx.compose.material.icons.filled.Flag
 import androidx.compose.material.icons.filled.Leaderboard
 import androidx.compose.material.icons.filled.Numbers
 import androidx.compose.material.icons.filled.RestartAlt
 import androidx.compose.material.icons.filled.Save
+import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
@@ -43,6 +49,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import dev.mewdeko.mobile.core.model.Snowflake
 import dev.mewdeko.mobile.core.ui.Avatar
 import dev.mewdeko.mobile.core.ui.ConfirmDialog
 import dev.mewdeko.mobile.core.ui.DiscordSelector
@@ -67,6 +74,7 @@ private val Tabs = listOf(
     SectionTab("channels", "Channels", Icons.Default.Numbers),
     SectionTab("settings", "Settings", Icons.Default.Tune),
     SectionTab("leaderboard", "Leaders", Icons.Default.Leaderboard),
+    SectionTab("management", "Manage", Icons.Default.Shield),
 )
 
 /** Counting game channels. */
@@ -84,6 +92,10 @@ fun CountingScreen(
     var showReset by remember { mutableStateOf(false) }
     var showSavePoint by remember { mutableStateOf(false) }
     var pendingRemove by remember { mutableStateOf<CountingChannelDetail?>(null) }
+    var pendingRestoreSave by remember { mutableStateOf<CountingSavePoint?>(null) }
+    var pendingDeleteSave by remember { mutableStateOf<CountingSavePoint?>(null) }
+    var pendingPurge by remember { mutableStateOf(false) }
+    var purgeReason by remember { mutableStateOf("") }
 
     val selected = state.selected
 
@@ -179,6 +191,30 @@ fun CountingScreen(
                             value = "%.0f%%".format(stats.averageAccuracy),
                             modifier = Modifier.weight(1f),
                         )
+                        StatTile(
+                            label = "Milestones",
+                            value = "${stats.milestonesReached}",
+                            modifier = Modifier.weight(1f),
+                        )
+                    }
+                    stats.topContributor?.let { top ->
+                        ListItem(
+                            leadingContent = { Avatar(top.avatarUrl, top.username, size = 36) },
+                            headlineContent = { Text(top.username ?: top.userId) },
+                            supportingContent = {
+                                Text(
+                                    "${top.contributionsCount} contributions · " +
+                                        "best streak ${top.highestStreak} · " +
+                                        "%.0f%% accurate · ".format(top.accuracy) +
+                                        "${top.totalNumbersCounted} numbers"
+                                )
+                            },
+                            trailingContent = if (top.rank != null) {
+                                { TagChip("Rank #${top.rank}") }
+                            } else null,
+                            colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+                            modifier = Modifier.padding(0.dp),
+                        )
                     }
                     stats.lastActivity?.let {
                         Text(
@@ -209,10 +245,11 @@ fun CountingScreen(
 
         SectionTabs(tabs = Tabs, selectedId = state.section, onSelect = viewModel::setSection)
 
+        val channelId = state.selectedChannelId
+
         when (state.section) {
             "settings" -> {
                 val config = state.config
-                val channelId = state.selectedChannelId
                 if (config == null || channelId == null) {
                     SectionCard { EmptyState("Select a channel to configure it.") }
                 } else {
@@ -281,43 +318,41 @@ fun CountingScreen(
 
                     SectionCard {
                         SectionCardHeader("Limits", Icons.Default.Tune)
-                        SliderRow(
-                            label = "Cooldown",
-                            value = config.cooldown.toFloat(),
-                            onValueChange = { },
-                            onValueChangeFinished = { },
-                            valueRange = 0f..300f,
-                            valueLabel = if (config.cooldown == 0) "None" else "${config.cooldown}s",
+                        MewdekoTextField(
+                            value = config.numberBase.toString(),
+                            onValueChange = { raw ->
+                                raw.filter(Char::isDigit).toIntOrNull()?.takeIf { it > 0 }?.let { value ->
+                                    viewModel.updateConfig(channelId) { it.copy(numberBase = value) }
+                                }
+                            },
+                            label = "Number base",
+                            numeric = true,
+                            supportingText = "2-36 (10 for decimal)",
                         )
-                        Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                            listOf(0, 5, 15, 60).forEach { seconds ->
-                                TextButton(
-                                    onClick = {
-                                        viewModel.updateConfig(channelId) {
-                                            it.copy(cooldown = seconds)
-                                        }
-                                    },
-                                ) { Text(if (seconds == 0) "None" else "${seconds}s") }
-                            }
-                        }
-                        SliderRow(
+                        MewdekoTextField(
+                            value = config.cooldown.toString(),
+                            onValueChange = { raw ->
+                                val value = raw.filter(Char::isDigit).toIntOrNull() ?: 0
+                                viewModel.updateConfig(channelId) {
+                                    it.copy(cooldown = value.coerceAtLeast(0))
+                                }
+                            },
+                            label = "Cooldown (seconds)",
+                            numeric = true,
+                            supportingText = "0 for no cooldown",
+                        )
+                        MewdekoTextField(
+                            value = config.maxNumber.toString(),
+                            onValueChange = { raw ->
+                                val value = raw.filter(Char::isDigit).toIntOrNull() ?: 0
+                                viewModel.updateConfig(channelId) {
+                                    it.copy(maxNumber = value.coerceAtLeast(0))
+                                }
+                            },
                             label = "Maximum number",
-                            value = config.maxNumber.toFloat(),
-                            onValueChange = { },
-                            onValueChangeFinished = { },
-                            valueRange = 0f..100000f,
-                            valueLabel = if (config.maxNumber == 0) "Unlimited"
-                            else "${config.maxNumber}",
+                            numeric = true,
+                            supportingText = "0 for unlimited",
                         )
-                        Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                            listOf(0, 1000, 10000, 100000).forEach { max ->
-                                TextButton(
-                                    onClick = {
-                                        viewModel.updateConfig(channelId) { it.copy(maxNumber = max) }
-                                    },
-                                ) { Text(if (max == 0) "None" else "$max") }
-                            }
-                        }
                     }
 
                     SectionCard {
@@ -367,42 +402,6 @@ fun CountingScreen(
                             label = "Error emote",
                         )
                     }
-
-                    if (state.savePoints.isNotEmpty()) {
-                        SectionCard {
-                            SectionCardHeader("Save points", Icons.Default.Save)
-                            state.savePoints.forEach { save ->
-                                ListItem(
-                                    headlineContent = { Text("Number ${save.savedNumber}") },
-                                    supportingContent = {
-                                        Text(
-                                            buildString {
-                                                save.savedByUsername?.let { append("by $it") }
-                                                save.savedAt?.let {
-                                                    if (isNotEmpty()) append(" · ")
-                                                    append(it.relativeToNow())
-                                                }
-                                                save.reason?.takeIf { it.isNotBlank() }?.let {
-                                                    if (isNotEmpty()) append(" · ")
-                                                    append(it)
-                                                }
-                                            }
-                                        )
-                                    },
-                                    trailingContent = {
-                                        TextButton(
-                                            onClick = {
-                                                viewModel.restoreSavePoint(channelId, save.id)
-                                            },
-                                        ) { Text("Restore") }
-                                    },
-                                    colors = ListItemDefaults.colors(
-                                        containerColor = Color.Transparent,
-                                    ),
-                                )
-                            }
-                        }
-                    }
                 }
             }
 
@@ -422,6 +421,15 @@ fun CountingScreen(
                         )
                     }
                 }
+                MewdekoTextField(
+                    value = state.leaderboardLimit.toString(),
+                    onValueChange = { raw ->
+                        raw.filter(Char::isDigit).toIntOrNull()?.let { viewModel.setLeaderboardLimit(it) }
+                    },
+                    label = "Limit",
+                    numeric = true,
+                    supportingText = "5-100 rows",
+                )
                 if (state.leaderboard.isEmpty()) {
                     EmptyState("Nobody has counted here yet.", icon = Icons.Default.Numbers)
                 } else {
@@ -451,8 +459,9 @@ fun CountingScreen(
                             supportingContent = {
                                 Text(
                                     "${user.contributionsCount} counts · " +
-                                        "streak ${user.currentStreak} · " +
-                                        "%.0f%% accurate".format(user.accuracy)
+                                        "streak ${user.highestStreak} · " +
+                                        "%.0f%% accurate · ".format(user.accuracy) +
+                                        "${user.totalNumbersCounted} total"
                                 )
                             },
                             trailingContent = {
@@ -467,11 +476,28 @@ fun CountingScreen(
                     }
                 }
             }
+
+            "management" -> {
+                if (channelId == null) {
+                    SectionCard { EmptyState("Select a channel to manage it.") }
+                } else {
+                    ManagementSection(
+                        state = state,
+                        channelId = channelId,
+                        viewModel = viewModel,
+                        onRestoreSave = { pendingRestoreSave = it },
+                        onDeleteSave = { pendingDeleteSave = it },
+                        onPurge = { pendingPurge = true },
+                        purgeReason = purgeReason,
+                        onPurgeReasonChange = { purgeReason = it },
+                    )
+                }
+            }
         }
     }
 
     if (showSetup) {
-        var channelId by remember { mutableStateOf<String?>(null) }
+        var channelPick by remember { mutableStateOf<String?>(null) }
         var startNumber by remember { mutableStateOf("0") }
         var increment by remember { mutableIntStateOf(1) }
         AlertDialog(
@@ -484,8 +510,8 @@ fun CountingScreen(
                         options = state.availableChannels.map { SelectorOption(it.id, it.name) },
                         placeholder = "Pick a channel",
                         label = "Channel",
-                        selectedId = channelId,
-                        onSelect = { channelId = it },
+                        selectedId = channelPick,
+                        onSelect = { channelPick = it },
                     )
                     MewdekoTextField(
                         value = startNumber,
@@ -505,12 +531,12 @@ fun CountingScreen(
             confirmButton = {
                 Button(
                     onClick = {
-                        channelId?.let {
+                        channelPick?.let {
                             viewModel.setup(it, startNumber.toIntOrNull() ?: 0, increment)
                         }
                         showSetup = false
                     },
-                    enabled = channelId != null,
+                    enabled = channelPick != null,
                 ) { Text("Add") }
             },
             dismissButton = { TextButton(onClick = { showSetup = false }) { Text("Cancel") } },
@@ -594,5 +620,270 @@ fun CountingScreen(
             onConfirm = { viewModel.remove(channel.channelId) },
             onDismiss = { pendingRemove = null },
         )
+    }
+
+    pendingRestoreSave?.let { save ->
+        val channelId = state.selectedChannelId
+        ConfirmDialog(
+            title = "Restore save point?",
+            message = "Restores the count to ${save.savedNumber}.",
+            confirmLabel = "Restore",
+            destructive = false,
+            onConfirm = { channelId?.let { viewModel.restoreSavePoint(it, save.id) } },
+            onDismiss = { pendingRestoreSave = null },
+        )
+    }
+
+    pendingDeleteSave?.let { save ->
+        val channelId = state.selectedChannelId
+        ConfirmDialog(
+            title = "Delete save point?",
+            message = "Removes the save at number ${save.savedNumber}. This cannot be undone.",
+            confirmLabel = "Delete",
+            onConfirm = { channelId?.let { viewModel.deleteSavePoint(it, save.id) } },
+            onDismiss = { pendingDeleteSave = null },
+        )
+    }
+
+    if (pendingPurge) {
+        val channelId = state.selectedChannelId
+        ConfirmDialog(
+            title = "Purge counting data?",
+            message = "Wipes every count, streak, statistic, ban, and save point for this channel. " +
+                "It cannot be undone.",
+            confirmLabel = "Purge everything",
+            onConfirm = {
+                channelId?.let { viewModel.purge(it, purgeReason.takeIf { r -> r.isNotBlank() }) }
+                purgeReason = ""
+            },
+            onDismiss = { pendingPurge = false },
+        )
+    }
+}
+
+@Composable
+private fun ManagementSection(
+    state: CountingState,
+    channelId: Snowflake,
+    viewModel: CountingViewModel,
+    onRestoreSave: (CountingSavePoint) -> Unit,
+    onDeleteSave: (CountingSavePoint) -> Unit,
+    onPurge: () -> Unit,
+    purgeReason: String,
+    onPurgeReasonChange: (String) -> Unit,
+) {
+    SectionCard {
+        SectionCardHeader("Save points", Icons.Default.Save)
+        if (state.savePoints.isEmpty()) {
+            EmptyState("No save points yet.", icon = Icons.Default.Save)
+        } else {
+            state.savePoints.forEach { save ->
+                ListItem(
+                    headlineContent = { Text("Number ${save.savedNumber}") },
+                    supportingContent = {
+                        Text(
+                            buildString {
+                                save.savedByUsername?.let { append("by $it") }
+                                save.savedAt?.let {
+                                    if (isNotEmpty()) append(" · ")
+                                    append(it.relativeToNow())
+                                }
+                                save.reason?.takeIf { it.isNotBlank() }?.let {
+                                    if (isNotEmpty()) append(" · ")
+                                    append(it)
+                                }
+                            }
+                        )
+                    },
+                    trailingContent = {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            TextButton(onClick = { onRestoreSave(save) }) { Text("Restore") }
+                            IconButton(onClick = { onDeleteSave(save) }) {
+                                Icon(
+                                    Icons.Default.Delete,
+                                    contentDescription = "Delete save point",
+                                    tint = MaterialTheme.colorScheme.error,
+                                )
+                            }
+                        }
+                    },
+                    colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+                )
+            }
+        }
+    }
+
+    SectionCard {
+        SectionCardHeader("Milestones", Icons.Default.Flag)
+        Text(
+            text = "Numbers that trigger a celebration message when reached.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        if (state.milestones.isEmpty()) {
+            Text(
+                text = "Using the default milestones.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        } else {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                state.milestones.forEach { milestone ->
+                    AssistChip(
+                        onClick = { viewModel.removeMilestone(channelId, milestone) },
+                        label = { Text("$milestone") },
+                        trailingIcon = {
+                            Icon(
+                                Icons.Default.Delete,
+                                contentDescription = "Remove milestone $milestone",
+                                modifier = Modifier.width(16.dp),
+                            )
+                        },
+                    )
+                }
+            }
+        }
+        var newMilestone by remember { mutableStateOf("") }
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+            MewdekoTextField(
+                value = newMilestone,
+                onValueChange = { newMilestone = it.filter(Char::isDigit) },
+                label = "Add a milestone",
+                numeric = true,
+                modifier = Modifier.weight(1f),
+            )
+            Button(
+                onClick = {
+                    newMilestone.toIntOrNull()?.takeIf { it > 0 }?.let {
+                        viewModel.addMilestone(channelId, it)
+                        newMilestone = ""
+                    }
+                },
+                enabled = newMilestone.toIntOrNull()?.let { it > 0 } == true,
+            ) { Text("Add") }
+        }
+
+        var milestoneMessage by remember { mutableStateOf("") }
+        MewdekoTextField(
+            value = milestoneMessage,
+            onValueChange = { milestoneMessage = it },
+            label = "Milestone message",
+            placeholder = "🎉 %user% reached %number%!",
+            supportingText = "Supports %user%, %number%, and %channel%.",
+        )
+        Button(
+            onClick = { viewModel.setMilestoneMessage(channelId, milestoneMessage) },
+            enabled = milestoneMessage.isNotBlank(),
+        ) {
+            Icon(Icons.Default.Save, contentDescription = null)
+            Text("  Save message")
+        }
+    }
+
+    SectionCard {
+        SectionCardHeader("Counting bans", Icons.Default.Block)
+        Text(
+            text = "Banned members can still chat but their numbers are ignored.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        var banUserId by remember { mutableStateOf("") }
+        var banReason by remember { mutableStateOf("") }
+        var banDuration by remember { mutableStateOf("") }
+        MewdekoTextField(
+            value = banUserId,
+            onValueChange = { banUserId = it.filter(Char::isDigit) },
+            label = "User ID",
+            numeric = true,
+        )
+        MewdekoTextField(
+            value = banReason,
+            onValueChange = { banReason = it },
+            label = "Reason (optional)",
+        )
+        MewdekoTextField(
+            value = banDuration,
+            onValueChange = { banDuration = it.filter(Char::isDigit) },
+            label = "Duration in minutes (optional)",
+            numeric = true,
+            supportingText = "Leave empty for a permanent ban",
+        )
+        Button(
+            onClick = {
+                viewModel.banUser(
+                    channelId,
+                    banUserId,
+                    banReason.takeIf { it.isNotBlank() },
+                    banDuration.toIntOrNull(),
+                )
+                banUserId = ""
+                banReason = ""
+                banDuration = ""
+            },
+            enabled = banUserId.length in 15..22,
+        ) {
+            Icon(Icons.Default.Block, contentDescription = null)
+            Text("  Ban")
+        }
+
+        if (state.bans.isEmpty()) {
+            EmptyState("Nobody is banned from counting here.", icon = Icons.Default.Block)
+        } else {
+            state.bans.forEach { ban ->
+                ListItem(
+                    leadingContent = { Avatar(ban.avatarUrl, ban.username, size = 36) },
+                    headlineContent = { Text(ban.username ?: "User ${ban.userId}") },
+                    supportingContent = {
+                        Text(
+                            buildString {
+                                append(ban.reason?.takeIf { it.isNotBlank() } ?: "No reason provided")
+                                append(" · by ")
+                                append(ban.bannedByUsername ?: ban.bannedBy)
+                                ban.expiresAt?.let {
+                                    append(" · until ")
+                                    append(it.relativeToNow())
+                                } ?: append(" · permanent")
+                            }
+                        )
+                    },
+                    trailingContent = {
+                        TextButton(onClick = { viewModel.unbanUser(channelId, ban.userId) }) {
+                            Text("Unban")
+                        }
+                    },
+                    colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+                )
+            }
+        }
+    }
+
+    SectionCard {
+        SectionCardHeader("Purge channel data", Icons.Default.DeleteForever, tint = MaterialTheme.colorScheme.error)
+        Text(
+            text = "Deletes every count, statistic, streak, ban, and save point for this channel. " +
+                "The channel stays configured but starts from scratch.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        MewdekoTextField(
+            value = purgeReason,
+            onValueChange = onPurgeReasonChange,
+            label = "Reason (optional)",
+        )
+        Button(
+            onClick = onPurge,
+            colors = ButtonDefaults.buttonColors(
+                containerColor = MaterialTheme.colorScheme.error,
+                contentColor = MaterialTheme.colorScheme.onError,
+            ),
+        ) {
+            Icon(Icons.Default.DeleteForever, contentDescription = null)
+            Text("  Purge everything")
+        }
     }
 }

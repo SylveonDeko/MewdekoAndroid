@@ -11,16 +11,21 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.LockOpen
 import androidx.compose.material.icons.filled.Mic
+import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.PushPin
 import androidx.compose.material.icons.filled.Save
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.VolumeUp
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
 import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -51,11 +56,6 @@ import dev.mewdeko.mobile.core.ui.TagChip
 import dev.mewdeko.mobile.navigation.GuildRouteArgs
 import dev.mewdeko.mobile.util.relativeToNow
 
-private val Tabs = listOf(
-    SectionTab("settings", "Settings", Icons.Default.Tune),
-    SectionTab("channels", "Live", Icons.Default.VolumeUp),
-)
-
 /** User-owned temporary voice channels. */
 @Composable
 fun CustomVoiceScreen(
@@ -70,6 +70,12 @@ fun CustomVoiceScreen(
     var pendingDisable by remember { mutableStateOf(false) }
     var pendingCleanup by remember { mutableStateOf(false) }
     var pendingDelete by remember { mutableStateOf<CustomVoiceChannel?>(null) }
+
+    val tabs = listOf(
+        SectionTab("settings", "Settings", Icons.Default.Tune),
+        SectionTab("channels", "Live (${state.channels.size})", Icons.Default.VolumeUp),
+        SectionTab("preferences", "Preferences", Icons.Default.Person),
+    )
 
     FeatureScaffold(
         title = "Custom Voice",
@@ -96,7 +102,16 @@ fun CustomVoiceScreen(
         },
     ) {
         SectionCard {
-            SectionCardHeader("Overview", Icons.Default.Mic)
+            SectionCardHeader(
+                title = "Overview",
+                icon = Icons.Default.Mic,
+                trailing = {
+                    TagChip(
+                        label = if (state.isEnabled) "Enabled" else "Not configured",
+                        icon = if (state.isEnabled) Icons.Default.VolumeUp else Icons.Default.Tune,
+                    )
+                },
+            )
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 StatTile(
                     label = "Channels",
@@ -108,15 +123,22 @@ fun CustomVoiceScreen(
                     value = "${state.statistics?.activeChannels ?: 0}",
                     modifier = Modifier.weight(1f),
                 )
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 StatTile(
                     label = "Locked",
                     value = "${state.statistics?.lockedChannels ?: 0}",
                     modifier = Modifier.weight(1f),
                 )
+                StatTile(
+                    label = "Kept alive",
+                    value = "${state.statistics?.keepAliveChannels ?: 0}",
+                    modifier = Modifier.weight(1f),
+                )
             }
         }
 
-        SectionTabs(tabs = Tabs, selectedId = state.section, onSelect = viewModel::setSection)
+        SectionTabs(tabs = tabs, selectedId = state.section, onSelect = viewModel::setSection)
 
         if (state.section == "channels") {
             SectionCard {
@@ -132,7 +154,7 @@ fun CustomVoiceScreen(
                             ) {
                                 Column(modifier = Modifier.weight(1f)) {
                                     Text(
-                                        text = channel.channelId,
+                                        text = state.channelName(channel.channelId),
                                         style = MonospaceStyle,
                                         color = MaterialTheme.colorScheme.onSurface,
                                         maxLines = 1,
@@ -140,6 +162,9 @@ fun CustomVoiceScreen(
                                     )
                                     Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                                         channel.ownerId?.let { TagChip("Owner $it") }
+                                        channel.createdAt?.let {
+                                            TagChip("Created ${it.relativeToNow()}")
+                                        }
                                         channel.lastActive?.let {
                                             TagChip("Active ${it.relativeToNow()}")
                                         }
@@ -200,6 +225,78 @@ fun CustomVoiceScreen(
             return@FeatureScaffold
         }
 
+        if (state.section == "preferences") {
+            SectionCard {
+                SectionCardHeader("User preferences", Icons.Default.Person)
+                Text(
+                    text = "Look up a member to view or change the defaults applied when they create a channel.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    MewdekoTextField(
+                        value = state.prefUserId,
+                        onValueChange = viewModel::setPrefUserId,
+                        label = "Discord user ID",
+                        placeholder = "e.g. 123456789012345678",
+                        numeric = true,
+                        modifier = Modifier.weight(1f),
+                    )
+                    Button(
+                        onClick = viewModel::loadUserPreferences,
+                        enabled = state.prefUserId.isNotBlank() && !state.prefLoading,
+                    ) {
+                        Icon(Icons.Default.Search, contentDescription = null)
+                        Text(
+                            text = if (state.prefLoading) "Loading" else "Load",
+                            modifier = Modifier.padding(start = 4.dp),
+                        )
+                    }
+                }
+                state.prefError?.let { error ->
+                    Text(
+                        text = error,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                }
+                state.userPrefs?.let {
+                    MewdekoTextField(
+                        value = state.prefDraftName,
+                        onValueChange = viewModel::setPrefDraftName,
+                        label = "Default channel name",
+                        placeholder = "Use server default",
+                    )
+                    MewdekoTextField(
+                        value = state.prefDraftUserLimit,
+                        onValueChange = viewModel::setPrefDraftUserLimit,
+                        label = "Default user limit (0-99)",
+                        placeholder = "Server default",
+                        numeric = true,
+                    )
+                    MewdekoTextField(
+                        value = state.prefDraftBitrate,
+                        onValueChange = viewModel::setPrefDraftBitrate,
+                        label = "Default bitrate in kbps (8-384)",
+                        placeholder = "Server default",
+                        numeric = true,
+                    )
+                    Button(
+                        onClick = viewModel::saveUserPreferences,
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Icon(Icons.Default.Save, contentDescription = null)
+                        Text("Save preferences", modifier = Modifier.padding(start = 4.dp))
+                    }
+                }
+            }
+            return@FeatureScaffold
+        }
+
         SectionCard {
             SectionCardHeader("Hub", Icons.Default.Mic)
             DiscordSelectorSingle(
@@ -250,10 +347,10 @@ fun CustomVoiceScreen(
                 label = "Default bitrate",
                 value = state.config.defaultBitrate.toFloat(),
                 onValueChange = { value ->
-                    viewModel.edit { it.copy(defaultBitrate = (value / 1000).toInt() * 1000) }
+                    viewModel.edit { it.copy(defaultBitrate = value.toInt()) }
                 },
-                valueRange = 8000f..384000f,
-                valueLabel = "${state.config.defaultBitrate / 1000} kbps",
+                valueRange = 8f..384f,
+                valueLabel = "${state.config.defaultBitrate} kbps",
             )
         }
 
@@ -340,10 +437,10 @@ fun CustomVoiceScreen(
                 label = "Maximum bitrate",
                 value = state.config.maxBitrate.toFloat(),
                 onValueChange = { value ->
-                    viewModel.edit { it.copy(maxBitrate = (value / 1000).toInt() * 1000) }
+                    viewModel.edit { it.copy(maxBitrate = value.toInt()) }
                 },
-                valueRange = 8000f..384000f,
-                valueLabel = "${state.config.maxBitrate / 1000} kbps",
+                valueRange = 8f..384f,
+                valueLabel = "${state.config.maxBitrate} kbps",
             )
         }
 
@@ -372,19 +469,41 @@ fun CustomVoiceScreen(
     }
 
     if (pendingCleanup) {
-        ConfirmDialog(
-            title = "Clean up idle channels?",
-            message = "Every temporary channel idle for more than 24 hours is deleted.",
-            confirmLabel = "Clean up",
-            onConfirm = { viewModel.cleanup(24) },
-            onDismiss = { pendingCleanup = false },
+        var hoursInactive by remember { mutableStateOf("24") }
+        val hours = hoursInactive.toIntOrNull()?.coerceIn(1, 720)
+        AlertDialog(
+            onDismissRequest = { pendingCleanup = false },
+            title = { Text("Clean up idle channels?") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Text("Every temporary channel idle for longer than this many hours is deleted.")
+                    MewdekoTextField(
+                        value = hoursInactive,
+                        onValueChange = { hoursInactive = it.filter(Char::isDigit).take(3) },
+                        label = "Inactive for (hours)",
+                        numeric = true,
+                        supportingText = "1 to 720 hours",
+                        isError = hours == null,
+                    )
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        hours?.let(viewModel::cleanup)
+                        pendingCleanup = false
+                    },
+                    enabled = hours != null,
+                ) { Text("Clean up") }
+            },
+            dismissButton = { TextButton(onClick = { pendingCleanup = false }) { Text("Cancel") } },
         )
     }
 
     pendingDelete?.let { channel ->
         ConfirmDialog(
             title = "Delete channel?",
-            message = "The temporary channel ${channel.channelId} is removed immediately.",
+            message = "The temporary channel ${state.channelName(channel.channelId)} is removed immediately.",
             onConfirm = { viewModel.deleteChannel(channel.channelId) },
             onDismiss = { pendingDelete = null },
         )

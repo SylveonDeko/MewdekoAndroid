@@ -55,18 +55,20 @@ data class SendableChannel(
     val botCanUseWebhooks: Boolean = false,
     val restriction: String? = null,
 ) {
-    /** Whether a plain embed can actually be delivered here. */
-    val isUsable: Boolean get() = canSend && botCanSend && botCanEmbed
+    /**
+     * Whether the channel can be picked at all.
+     *
+     * A hard block (cannot see, cannot send) makes a channel unusable even for
+     * plain text. Missing Embed Links only blocks a send when the composed
+     * message actually carries an embed, which [SendPanel] checks separately.
+     */
+    val isUsable: Boolean get() = restriction.isNullOrBlank()
 
-    /** Why this channel cannot be posted in, when it cannot. */
-    val blockedReason: String?
-        get() = when {
-            isUsable -> null
-            restriction?.isNotBlank() == true -> restriction
-            !canSend -> "You cannot post here"
-            !botCanSend -> "The bot cannot post here"
-            else -> "The bot cannot embed here"
-        }
+    /** Why this channel cannot be posted in at all, when it cannot. */
+    val blockedReason: String? get() = restriction
+
+    /** Whether sending through a webhook is available in this channel. */
+    val webhookUsable: Boolean get() = canUseWebhooks && botCanUseWebhooks
 }
 
 /** What the bot reports after delivering a message. */
@@ -80,4 +82,48 @@ data class SendEmbedResult(
     val webhookUsername: String? = null,
     val personaName: String? = null,
     val mentionsSuppressed: Boolean = false,
+) {
+    /** The identity the message was posted under, for the result summary. */
+    val identityLabel: String?
+        get() = personaName ?: webhookUsername?.takeIf { it.isNotBlank() }
+}
+
+/** A chat trigger a button or select option can fire when pressed. */
+@Serializable
+data class EmbedTriggerOption(
+    val id: Int = 0,
+    val trigger: String = "",
+    val response: String = "",
+) {
+    /** Label shown in the trigger picker, falling back when the trigger text is blank. */
+    val displayName: String get() = trigger.takeIf { it.isNotBlank() } ?: "Unnamed trigger"
+}
+
+/** Basic guild info returned alongside a guild's emoji list. */
+@Serializable
+data class EmbedGuildInfo(
+    @Serializable(with = SnowflakeSerializer::class) val id: Snowflake = "",
+    val name: String = "",
+    val iconUrl: String? = null,
+)
+
+/** A guild emoji available for buttons and select options. */
+@Serializable
+data class EmbedEmojiInfo(
+    @Serializable(with = SnowflakeSerializer::class) val id: Snowflake = "",
+    val name: String = "",
+    val animated: Boolean = false,
+    val isAvailable: Boolean? = null,
+    val requireColons: Boolean = false,
+    val url: String = "",
+) {
+    /** The `<:name:id>` or `<a:name:id>` form Discord expects in a message. */
+    val formatted: String get() = "<${if (animated) "a" else ""}:$name:$id>"
+}
+
+/** A guild's emoji list, as returned by the mutual-guild emoji picker endpoint. */
+@Serializable
+data class EmbedGuildEmojis(
+    val guild: EmbedGuildInfo = EmbedGuildInfo(),
+    val emojis: List<EmbedEmojiInfo> = emptyList(),
 )

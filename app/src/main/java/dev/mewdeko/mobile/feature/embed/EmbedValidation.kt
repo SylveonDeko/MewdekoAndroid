@@ -15,7 +15,7 @@ data class ValidationIssue(val level: IssueLevel, val message: String)
  * These are the caps the API rejects on, so the composer reports them before a
  * send rather than surfacing a raw 400.
  */
-private object Limits {
+internal object Limits {
     const val CONTENT = 2000
     const val EMBEDS = 10
     const val TITLE = 256
@@ -116,6 +116,14 @@ fun EmbedMessage.validate(): List<ValidationIssue> {
                     if (component.displayName.length > Limits.SELECT_PLACEHOLDER) {
                         error("$label placeholder is over ${Limits.SELECT_PLACEHOLDER} characters.")
                     }
+                    component.options.forEachIndexed { optionIndex, option ->
+                        if (option.id.isNullOrBlank()) {
+                            error("$label option ${optionIndex + 1} needs a trigger action.")
+                        }
+                        if (option.description.isBlank()) {
+                            error("$label option ${optionIndex + 1} needs a description.")
+                        }
+                    }
                 }
 
                 component.displayName.isBlank() -> error("$label has a button with no label.")
@@ -124,6 +132,9 @@ fun EmbedMessage.validate(): List<ValidationIssue> {
 
                 component.isLink && component.url.isBlank() ->
                     error("$label link button has no URL.")
+
+                !component.isLink && component.id.isNullOrBlank() ->
+                    error("$label button needs a trigger action.")
             }
         }
     }

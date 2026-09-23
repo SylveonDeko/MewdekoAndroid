@@ -48,12 +48,17 @@ data class AfkState(
     val afkUsers: List<UserWithAfk> = emptyList(),
     val changed: Set<AfkSetting> = emptySet(),
     val isSaving: Boolean = false,
+    val selectedIds: Set<Snowflake> = emptySet(),
+    val expandedIds: Set<Snowflake> = emptySet(),
 ) {
     /** Whether any edit is pending. */
     val hasUnsavedChanges: Boolean get() = changed.isNotEmpty()
 
     /** How many active AFK statuses were set with a timer. */
     val timedAfkCount: Int get() = afkUsers.count { it.afkStatus?.wasTimed == true }
+
+    /** Whether every currently-AFK user is selected. */
+    val allSelected: Boolean get() = afkUsers.isNotEmpty() && selectedIds.size == afkUsers.size
 }
 
 /** Loads, edits, and persists AFK configuration plus the per-guild AFK user list. */
@@ -112,6 +117,8 @@ class AfkViewModel @Inject constructor(
                     availableChannels = channels.await().sortedBy { channel -> channel.name.lowercase() },
                     afkUsers = users.await().filter { user -> user.hasActiveAfk },
                     changed = emptySet(),
+                    selectedIds = emptySet(),
+                    expandedIds = emptySet(),
                 )
             }
         }
@@ -196,8 +203,30 @@ class AfkViewModel @Inject constructor(
     }
 
     /** Clears the AFK status of every currently-AFK member. */
-    fun clearAll() = viewModelScope.launch {
-        val ids = _state.value.afkUsers.map { it.userId }
+    fun clearAll() = clearIds(_state.value.afkUsers.map { it.userId })
+
+    /** Clears the AFK status of only the selected members. */
+    fun clearSelected() = clearIds(_state.value.selectedIds.toList())
+
+    /** Toggles whether a single AFK member is selected for a bulk action. */
+    fun toggleSelected(userId: Snowflake) = _state.update {
+        val next = if (userId in it.selectedIds) it.selectedIds - userId else it.selectedIds + userId
+        it.copy(selectedIds = next)
+    }
+
+    /** Selects every currently-AFK member, or clears the selection if all are already selected. */
+    fun toggleSelectAll() = _state.update {
+        if (it.allSelected) it.copy(selectedIds = emptySet())
+        else it.copy(selectedIds = it.afkUsers.map { user -> user.userId }.toSet())
+    }
+
+    /** Expands or collapses the full-detail view for one AFK member's row. */
+    fun toggleExpanded(userId: Snowflake) = _state.update {
+        val next = if (userId in it.expandedIds) it.expandedIds - userId else it.expandedIds + userId
+        it.copy(expandedIds = next)
+    }
+
+    private fun clearIds(ids: List<Snowflake>) = viewModelScope.launch {
         if (ids.isEmpty()) return@launch
         var cleared = 0
         ids.forEach { id ->
@@ -206,7 +235,12 @@ class AfkViewModel @Inject constructor(
             }.isSuccess
             if (ok) cleared++
         }
-        _state.update { it.copy(afkUsers = it.afkUsers.filterNot { user -> user.userId in ids }) }
+        _state.update {
+            it.copy(
+                afkUsers = it.afkUsers.filterNot { user -> user.userId in ids },
+                selectedIds = it.selectedIds - ids.toSet(),
+            )
+        }
         postStatus(
             if (cleared == ids.size) {
                 StatusMessage.success(

@@ -2,11 +2,9 @@ package dev.mewdeko.mobile.feature.birthday
 
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Cake
@@ -42,6 +40,7 @@ import dev.mewdeko.mobile.core.ui.ConfirmDialog
 import dev.mewdeko.mobile.core.ui.DiscordSelectorSingle
 import dev.mewdeko.mobile.core.ui.EmptyState
 import dev.mewdeko.mobile.core.ui.FeatureScaffold
+import dev.mewdeko.mobile.core.ui.InfoRow
 import dev.mewdeko.mobile.core.ui.SectionCard
 import dev.mewdeko.mobile.core.ui.SectionCardHeader
 import dev.mewdeko.mobile.core.ui.SelectorKind
@@ -117,11 +116,23 @@ fun BirthdayScreen(
         SectionCard {
             SectionCardHeader("Features", Icons.Default.Settings)
             BirthdayFeature.entries.forEach { feature ->
+                val requiresRole = feature == BirthdayFeature.BIRTHDAY_ROLE ||
+                    feature == BirthdayFeature.PING_ROLE
+                val roleConfigured = when (feature) {
+                    BirthdayFeature.BIRTHDAY_ROLE -> state.roleId != null
+                    BirthdayFeature.PING_ROLE -> state.pingRoleId != null
+                    else -> true
+                }
                 SwitchRow(
                     title = feature.label,
-                    subtitle = feature.blurb,
+                    subtitle = if (requiresRole && !roleConfigured) {
+                        "Select a role below first"
+                    } else {
+                        feature.blurb
+                    },
                     checked = feature.isEnabled(state.enabledFeatures),
                     onCheckedChange = { viewModel.toggleFeature(feature) },
+                    enabled = roleConfigured,
                 )
             }
         }
@@ -187,6 +198,31 @@ fun BirthdayScreen(
         }
 
         SectionCard {
+            SectionCardHeader("Current configuration", Icons.Default.Cake)
+            InfoRow(
+                label = "Channel",
+                value = state.availableChannels.find { it.id == state.channelId }?.name?.let { "#$it" }
+                    ?: "Not set",
+            )
+            InfoRow(
+                label = "Birthday role",
+                value = state.availableRoles.find { it.id == state.roleId }?.name ?: "Not set",
+            )
+            InfoRow(
+                label = "Ping role",
+                value = state.availableRoles.find { it.id == state.pingRoleId }?.name ?: "Not set",
+            )
+            InfoRow(label = "Timezone", value = state.timezone)
+            InfoRow(
+                label = "Active features",
+                value = BirthdayFeature.entries
+                    .filter { it.isEnabled(state.enabledFeatures) }
+                    .joinToString(", ") { it.label }
+                    .ifEmpty { "None" },
+            )
+        }
+
+        SectionCard {
             SectionCardHeader("Today", Icons.Default.Today)
             if (state.todays.isEmpty()) {
                 EmptyState("No birthdays today.", icon = Icons.Default.Cake)
@@ -203,7 +239,7 @@ fun BirthdayScreen(
                     .horizontalScroll(rememberScrollState()),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                listOf(7, 14, 30, 90).forEach { days ->
+                listOf(7, 14, 30).forEach { days ->
                     FilterChip(
                         selected = state.upcomingDays == days,
                         onClick = { viewModel.setUpcomingDays(days) },
@@ -250,7 +286,11 @@ private fun BirthdayRow(user: BirthdayUserDetail) {
         },
         supportingContent = {
             Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                user.birthday?.let { TagChip(it.shortDate(), icon = Icons.Default.Cake) }
+                if (user.birthdayAnnouncementsEnabled) {
+                    user.birthday?.let { TagChip(it.shortDate(), icon = Icons.Default.Cake) }
+                } else {
+                    TagChip("Private", icon = Icons.Default.Cake)
+                }
                 user.daysUntil?.let { days ->
                     TagChip(
                         when {
@@ -269,13 +309,11 @@ private fun BirthdayRow(user: BirthdayUserDetail) {
             Avatar(url = user.avatarUrl, contentDescription = user.displayName)
         },
         trailingContent = {
-            if (!user.birthdayAnnouncementsEnabled) {
-                Text(
-                    text = "Silent",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
+            Text(
+                text = if (user.birthdayAnnouncementsEnabled) "Public" else "Private",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
         },
         colors = ListItemDefaults.colors(containerColor = Color.Transparent),
         modifier = Modifier.padding(vertical = 2.dp),

@@ -3,6 +3,7 @@ package dev.mewdeko.mobile.feature.rolestates
 import androidx.lifecycle.SavedStateHandle
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dev.mewdeko.mobile.core.auth.SessionHolder
+import dev.mewdeko.mobile.core.model.GuildMember
 import dev.mewdeko.mobile.core.model.GuildRole
 import dev.mewdeko.mobile.core.model.Snowflake
 import dev.mewdeko.mobile.core.model.SnowflakeSerializer
@@ -70,6 +71,7 @@ data class RoleStatesState(
     val loadedSettings: RoleStateSettings = RoleStateSettings(),
     val users: List<UserRoleStateRecord> = emptyList(),
     val availableRoles: List<GuildRole> = emptyList(),
+    val members: List<GuildMember> = emptyList(),
     val query: String = "",
 ) {
     /** Whether any editable setting differs from what the server has. */
@@ -134,6 +136,14 @@ class RoleStatesViewModel @Inject constructor(
                     )
                 }.getOrDefault(emptyList())
             }
+            val members = async {
+                runCatching {
+                    api.send(
+                        Endpoint("api/ClientOperations/members/$guildId"),
+                        ListSerializer(GuildMember.serializer()),
+                    )
+                }.getOrDefault(emptyList())
+            }
 
             val snapshot = settings.await()
             _state.update {
@@ -144,6 +154,9 @@ class RoleStatesViewModel @Inject constructor(
                     availableRoles = roles.await()
                         .filter { role -> role.id != guildId }
                         .sortedBy { role -> role.name.lowercase() },
+                    members = members.await().sortedBy { member ->
+                        member.displayName.ifBlank { member.username }.lowercase()
+                    },
                 )
             }
         }
@@ -161,6 +174,15 @@ class RoleStatesViewModel @Inject constructor(
      */
     fun setDeniedRoles(ids: List<Snowflake>) = _state.update {
         it.copy(settings = it.settings.copy(deniedRoles = ids.joinToString(",")))
+    }
+
+    /**
+     * Stages the members excluded from being saved.
+     *
+     * Comma-joined for the same reason as [setDeniedRoles].
+     */
+    fun setDeniedUsers(ids: List<Snowflake>) = _state.update {
+        it.copy(settings = it.settings.copy(deniedUsers = ids.joinToString(",")))
     }
 
     /** Stages whether auto-assign roles are skipped when restoring. */
@@ -190,19 +212,24 @@ class RoleStatesViewModel @Inject constructor(
         load(refreshing = true)
     }
 
-    /** Writes the staged settings. */
+    /**
+     * Writes the staged settings.
+     *
+     * The controller's `UpdateSettings` action returns a bare `Ok()` with no
+     * body, so the response must be ignored rather than decoded: decoding an
+     * empty body as [RoleStateSettings] would silently yield all-default
+     * values and overwrite the locally staged settings with them.
+     */
     fun saveSettings() = launchAction("Failed to save settings.") {
         val payload = _state.value.settings.copy(guildId = guildId)
-        val updated = api.send(
+        api.sendIgnoringBody(
             Endpoint(
                 "api/RoleStates/$guildId/settings",
                 HttpMethod.POST,
                 MewdekoJson.encodeToString(payload),
-            ),
-            RoleStateSettings.serializer(),
+            )
         )
-        _state.update { it.copy(settings = updated, loadedSettings = updated) }
-        postSuccess("Settings saved.")
+        _state.update { it.copy(settings = payload, loadedSettings = payload) }
     }
 
     /** Snapshots every current member's roles at once. */
@@ -234,6 +261,36 @@ class RoleStatesViewModel @Inject constructor(
             load(refreshing = true)
         }
 
+    /** Adds roles to a member's saved state without overwriting the rest. */
+    fun addRolesToUser(userId: Snowflake, roleIds: List<Snowflake>) =
+        launchAction("Failed to add roles.") {
+            val numeric = roleIds.mapNotNull { it.toLongOrNull() }
+            api.sendIgnoringBody(
+                Endpoint(
+                    "api/RoleStates/$guildId/user/$userId/roles",
+                    HttpMethod.POST,
+                    MewdekoJson.encodeToString(numeric),
+                )
+            )
+            postSuccess("Roles added.")
+            load(refreshing = true)
+        }
+
+    /** Removes roles from a member's saved state. */
+    fun removeRolesFromUser(userId: Snowflake, roleIds: List<Snowflake>) =
+        launchAction("Failed to remove roles.") {
+            val numeric = roleIds.mapNotNull { it.toLongOrNull() }
+            api.sendIgnoringBody(
+                Endpoint(
+                    "api/RoleStates/$guildId/user/$userId/roles",
+                    HttpMethod.DELETE,
+                    MewdekoJson.encodeToString(numeric),
+                )
+            )
+            postSuccess("Roles removed.")
+            load(refreshing = true)
+        }
+
     /** Copies one member's saved role state onto another member. */
     fun copyRoleState(from: Snowflake, to: Snowflake) =
         launchAction("Failed to copy role state.") {
@@ -241,6 +298,7 @@ class RoleStatesViewModel @Inject constructor(
                 Endpoint("api/RoleStates/$guildId/user/$from/apply/$to", HttpMethod.POST)
             )
             postSuccess("Role state copied.")
+            load(refreshing = true)
         }
 
     /** Discards one member's saved roles. */

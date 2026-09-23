@@ -1,6 +1,7 @@
 package dev.mewdeko.mobile.feature.customvoice
 
 import androidx.lifecycle.SavedStateHandle
+import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dev.mewdeko.mobile.core.auth.SessionHolder
 import dev.mewdeko.mobile.core.model.GuildRole
@@ -19,10 +20,14 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.launch
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.builtins.ListSerializer
 import java.time.Instant
 import javax.inject.Inject
+
+/** Regex a Discord snowflake user id must match. */
+private val UserIdPattern = Regex("\\d{15,22}")
 
 /** Configuration for user-owned temporary voice channels. */
 @Serializable
@@ -32,7 +37,7 @@ data class CustomVoiceConfig(
     @Serializable(with = SnowflakeSerializer::class) val channelCategoryId: Snowflake? = null,
     val defaultNameFormat: String = "{username}'s Channel",
     val defaultUserLimit: Int = 0,
-    val defaultBitrate: Int = 64000,
+    val defaultBitrate: Int = 64,
     val deleteWhenEmpty: Boolean = true,
     val emptyChannelTimeout: Int = 1,
     val allowMultipleChannels: Boolean = false,
@@ -42,7 +47,7 @@ data class CustomVoiceConfig(
     val allowLocking: Boolean = true,
     val allowUserManagement: Boolean = true,
     val maxUserLimit: Int = 99,
-    val maxBitrate: Int = 96000,
+    val maxBitrate: Int = 96,
     val persistUserPreferences: Boolean = true,
     val autoPermission: Boolean = true,
     @Serializable(with = SnowflakeSerializer::class) val customVoiceAdminRoleId: Snowflake? = null,
@@ -73,6 +78,24 @@ data class CustomVoiceStatistics(
     @Serializable(with = SnowflakeSerializer::class) val categoryId: Snowflake? = null,
 )
 
+/** Result of a bulk cleanup of inactive channels. */
+@Serializable
+data class CustomVoiceCleanupResult(
+    val success: Boolean = false,
+    val deletedChannels: Int = 0,
+    val message: String = "",
+)
+
+/** A member's saved custom voice channel preferences. */
+@Serializable
+data class CustomVoiceUserPreference(
+    @Serializable(with = SnowflakeSerializer::class) val userId: Snowflake = "0",
+    @Serializable(with = SnowflakeSerializer::class) val guildId: Snowflake = "0",
+    val defaultName: String? = null,
+    val defaultUserLimit: Int? = null,
+    val defaultBitrate: Int? = null,
+)
+
 /** Custom voice screen state. */
 data class CustomVoiceState(
     val config: CustomVoiceConfig = CustomVoiceConfig(),
@@ -83,9 +106,23 @@ data class CustomVoiceState(
     val categories: List<TextChannelLite> = emptyList(),
     val availableRoles: List<GuildRole> = emptyList(),
     val section: String = "settings",
+    val prefUserId: String = "",
+    val prefLoading: Boolean = false,
+    val prefError: String? = null,
+    val userPrefs: CustomVoiceUserPreference? = null,
+    val prefDraftName: String = "",
+    val prefDraftUserLimit: String = "",
+    val prefDraftBitrate: String = "",
 ) {
     /** Whether the configuration differs from what the server has. */
     val hasUnsavedConfig: Boolean get() = config != loadedConfig
+
+    /** Whether custom voice is configured for this guild. */
+    val isEnabled: Boolean get() = statistics?.enabled ?: config.enabled
+
+    /** Resolves a channel id to its display name, falling back to the raw id. */
+    fun channelName(channelId: Snowflake): String =
+        voiceChannels.firstOrNull { it.id == channelId }?.name ?: channelId
 }
 
 /** User-owned temporary voice channels. */
@@ -132,8 +169,8 @@ class CustomVoiceViewModel @Inject constructor(
                     )
                 }.getOrNull()
             }
-            val voice = async { channelsOfType(2) }
-            val categories = async { channelsOfType(4) }
+            val voice = async { channelsOfType(1) }
+            val categories = async { channelsOfType(2) }
             val roles = async {
                 runCatching {
                     api.send(
@@ -223,13 +260,14 @@ class CustomVoiceViewModel @Inject constructor(
 
     /** Deletes every channel idle for longer than [hoursInactive]. */
     fun cleanup(hoursInactive: Int) = launchAction("Failed to run cleanup.") {
-        api.sendIgnoringBody(
+        val result = api.send(
             Endpoint(
                 "api/CustomVoice/$guildId/cleanup?hoursInactive=$hoursInactive",
                 HttpMethod.DELETE,
-            )
+            ),
+            CustomVoiceCleanupResult.serializer(),
         )
-        postSuccess("Cleanup complete.")
+        postSuccess("Cleaned up ${result.deletedChannels} inactive channel(s).")
         load(refreshing = true)
     }
 
@@ -239,7 +277,7 @@ class CustomVoiceViewModel @Inject constructor(
             api.sendIgnoringBody(
                 Endpoint(
                     "api/CustomVoice/$guildId/channels/$channelId",
-                    HttpMethod.PATCH,
+                    HttpMethod.PUT,
                     jsonBody("isLocked" to isLocked, "keepAlive" to keepAlive),
                 )
             )
@@ -254,6 +292,85 @@ class CustomVoiceViewModel @Inject constructor(
                 )
             }
         }
+
+    /** Updates the staged user id in the preferences lookup form. */
+    fun setPrefUserId(value: String) =
+        _state.update { it.copy(prefUserId = value.filter(Char::isDigit).take(22), prefError = null) }
+
+    /** Updates the staged preferred channel name for the looked-up member. */
+    fun setPrefDraftName(value: String) = _state.update { it.copy(prefDraftName = value) }
+
+    /** Updates the staged preferred user limit for the looked-up member. */
+    fun setPrefDraftUserLimit(value: String) =
+        _state.update { it.copy(prefDraftUserLimit = value.filter(Char::isDigit).take(2)) }
+
+    /** Updates the staged preferred bitrate for the looked-up member. */
+    fun setPrefDraftBitrate(value: String) =
+        _state.update { it.copy(prefDraftBitrate = value.filter(Char::isDigit).take(3)) }
+
+    /** Looks up the currently entered member's saved custom voice preferences. */
+    fun loadUserPreferences() = viewModelScope.launch {
+        val id = _state.value.prefUserId.trim()
+        if (!UserIdPattern.matches(id)) {
+            _state.update { it.copy(prefError = "Enter a valid Discord user ID.", userPrefs = null) }
+            return@launch
+        }
+        _state.update { it.copy(prefLoading = true, prefError = null) }
+        runCatching {
+            api.send(
+                Endpoint("api/CustomVoice/$guildId/user-preferences/$id"),
+                CustomVoiceUserPreference.serializer(),
+            )
+        }.onSuccess { prefs ->
+            _state.update {
+                it.copy(
+                    prefLoading = false,
+                    userPrefs = prefs,
+                    prefDraftName = prefs.defaultName.orEmpty(),
+                    prefDraftUserLimit = prefs.defaultUserLimit?.toString().orEmpty(),
+                    prefDraftBitrate = prefs.defaultBitrate?.toString().orEmpty(),
+                )
+            }
+        }.onFailure {
+            _state.update {
+                it.copy(
+                    prefLoading = false,
+                    userPrefs = null,
+                    prefError = "No preferences found for that user, or the lookup failed.",
+                )
+            }
+        }
+    }
+
+    /** Writes the staged preference edits for the looked-up member. */
+    fun saveUserPreferences() = launchAction("Failed to save preferences.") {
+        val prefs = _state.value.userPrefs ?: return@launchAction
+        val current = _state.value
+        val name = current.prefDraftName.trim().ifBlank { null }
+        val userLimit = current.prefDraftUserLimit.toIntOrNull()?.coerceIn(0, 99)
+        val bitrate = current.prefDraftBitrate.toIntOrNull()?.coerceIn(8, 384)
+        api.sendIgnoringBody(
+            Endpoint(
+                "api/CustomVoice/$guildId/user-preferences/${prefs.userId}",
+                HttpMethod.PUT,
+                jsonBody(
+                    "defaultName" to name,
+                    "defaultUserLimit" to userLimit,
+                    "defaultBitrate" to bitrate,
+                ),
+            ),
+        )
+        _state.update {
+            it.copy(
+                userPrefs = prefs.copy(
+                    defaultName = name,
+                    defaultUserLimit = userLimit,
+                    defaultBitrate = bitrate,
+                ),
+            )
+        }
+        postSuccess("Preferences saved.")
+    }
 
     private suspend fun channelsOfType(type: Int): List<TextChannelLite> = runCatching {
         api.send(

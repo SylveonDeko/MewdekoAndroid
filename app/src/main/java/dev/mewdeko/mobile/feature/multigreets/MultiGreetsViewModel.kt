@@ -10,6 +10,7 @@ import dev.mewdeko.mobile.core.model.TextChannelLite
 import dev.mewdeko.mobile.core.net.ApiClient
 import dev.mewdeko.mobile.core.net.Endpoint
 import dev.mewdeko.mobile.core.net.HttpMethod
+import dev.mewdeko.mobile.core.net.jsonBody
 import dev.mewdeko.mobile.core.net.jsonBool
 import dev.mewdeko.mobile.core.net.jsonInt
 import dev.mewdeko.mobile.core.net.jsonString
@@ -162,19 +163,29 @@ class MultiGreetsViewModel @Inject constructor(
     /**
      * Sets how long the greeting survives before deletion.
      *
-     * This endpoint expects an `hh:mm:ss` string rather than a raw count,
-     * unlike the equivalent role-greet route.
+     * The endpoint parses [text] with `StoopidTime.FromInput`, so it takes a
+     * free-form duration string such as `"30s"` or `"1m30s"`, not a raw
+     * second count or an `hh:mm:ss` string.
      */
-    fun updateDeleteTime(id: Int, seconds: Int) = launchAction("Failed to update delete time.") {
-        val formatted = "%02d:%02d:%02d".format(seconds / 3600, (seconds % 3600) / 60, seconds % 60)
-        put(id, "delete-time", jsonString(formatted))
-        _state.update { current ->
-            current.copy(
-                greets = current.greets.map { if (it.id == id) it.copy(deleteTime = seconds) else it },
-            )
-        }
+    fun updateDeleteTime(id: Int, text: String) = launchAction("Failed to update delete time.") {
+        put(id, "delete-time", jsonString(text))
         postSuccess("Delete time updated.")
+        load(refreshing = true)
     }
+
+    /**
+     * Sets the greet's webhook name and optional avatar image URL.
+     *
+     * The bot creates a new webhook in the greet's channel and stores its
+     * URL. Passing a blank [name] is rejected by the endpoint; there is no
+     * dedicated "clear webhook" action in the dashboard either.
+     */
+    fun setWebhook(id: Int, name: String, avatarUrl: String?) =
+        launchAction("Failed to update webhook.") {
+            put(id, "webhook", jsonBody("name" to name, "avatarUrl" to avatarUrl?.ifBlank { null }))
+            postSuccess("Webhook updated.")
+            load(refreshing = true)
+        }
 
     /** Sets whether bots also receive this greeting. */
     fun setGreetBots(id: Int, value: Boolean) = launchAction("Failed to update setting.") {

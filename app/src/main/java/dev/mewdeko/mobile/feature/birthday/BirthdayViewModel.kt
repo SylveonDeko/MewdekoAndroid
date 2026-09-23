@@ -5,7 +5,6 @@ import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dev.mewdeko.mobile.core.auth.SessionHolder
 import dev.mewdeko.mobile.core.model.EmbedMessage
-import dev.mewdeko.mobile.core.model.GuildRole
 import dev.mewdeko.mobile.core.model.Snowflake
 import dev.mewdeko.mobile.core.model.TextChannelLite
 import dev.mewdeko.mobile.core.net.ApiClient
@@ -38,7 +37,7 @@ data class BirthdayState(
     val message: EmbedMessage = EmbedMessage(),
     val enabledFeatures: Int = 0,
     val availableChannels: List<TextChannelLite> = emptyList(),
-    val availableRoles: List<GuildRole> = emptyList(),
+    val availableRoles: List<BirthdayRole> = emptyList(),
     val allUsers: List<BirthdayUserDetail> = emptyList(),
     val todays: List<BirthdayUserDetail> = emptyList(),
     val upcoming: List<BirthdayUserDetail> = emptyList(),
@@ -94,7 +93,7 @@ class BirthdayViewModel @Inject constructor(
                 runCatching {
                     api.send(
                         Endpoint("api/ClientOperations/roles/$guildId"),
-                        ListSerializer(GuildRole.serializer()),
+                        ListSerializer(BirthdayRole.serializer()),
                     )
                 }.getOrDefault(emptyList())
             }
@@ -110,7 +109,9 @@ class BirthdayViewModel @Inject constructor(
                     message = EmbedMessage.parse(cfg?.birthdayMessage),
                     enabledFeatures = cfg?.enabledFeatures ?: 0,
                     availableChannels = channels.await().sortedBy { channel -> channel.name.lowercase() },
-                    availableRoles = roles.await().sortedBy { role -> role.name.lowercase() },
+                    availableRoles = roles.await()
+                        .filter { role -> role.id != guildId && !role.managed && !role.name.startsWith("@") }
+                        .sortedBy { role -> role.name.lowercase() },
                     allUsers = users.await(),
                     todays = today.await(),
                     upcoming = upcoming.await(),
@@ -154,7 +155,9 @@ class BirthdayViewModel @Inject constructor(
             put("birthdayChannelId", current.channelId.asJson())
             put("birthdayRoleId", current.roleId.asJson())
             put("birthdayPingRoleId", current.pingRoleId.asJson())
-            put("birthdayMessage", JsonPrimitive(current.message.serialize()))
+            put("birthdayMessage", current.message.serialize().let { serialized ->
+                if (serialized == "-") JsonNull else JsonPrimitive(serialized)
+            })
             put("birthdayReminderDays", JsonPrimitive(current.reminderDays))
             put("defaultTimezone", JsonPrimitive(current.timezone))
         }

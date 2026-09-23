@@ -9,8 +9,13 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Bolt
+import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.EmojiEmotions
 import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowLeft
+import androidx.compose.material.icons.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.SmartButton
 import androidx.compose.material.icons.filled.UnfoldMore
@@ -21,9 +26,13 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.mewdeko.mobile.core.model.ComponentOption
 import dev.mewdeko.mobile.core.model.EmbedMessage
 import dev.mewdeko.mobile.core.model.MessageComponent
@@ -49,13 +58,16 @@ private val ButtonStyles = listOf(
  * Edits the buttons and select menus attached to a message.
  *
  * Components are stored flat with a row index, so this groups them into rows
- * for editing and writes them back flattened.
+ * for editing and writes them back flattened. Trigger and emoji options come
+ * from the shared embed library, loaded once per guild.
  */
 @Composable
 fun ComponentEditor(
     message: EmbedMessage,
     onMessageChange: (EmbedMessage) -> Unit,
+    viewModel: EmbedLibraryViewModel = hiltViewModel(),
 ) {
+    val library by viewModel.library.collectAsStateWithLifecycle()
     val rows = message.rows
 
     fun replaceAll(updated: List<List<MessageComponent>>) {
@@ -92,6 +104,16 @@ fun ComponentEditor(
                     Row {
                         IconButton(
                             onClick = {
+                                if (rows.size >= MessageComponent.MaxRows) return@IconButton
+                                val duplicated = row.map { it.copy() }
+                                val moved = rows.toMutableList()
+                                moved.add(rowIndex + 1, duplicated)
+                                replaceAll(moved)
+                            },
+                            enabled = rows.size < MessageComponent.MaxRows,
+                        ) { Icon(Icons.Default.ContentCopy, contentDescription = "Duplicate row") }
+                        IconButton(
+                            onClick = {
                                 val moved = rows.toMutableList()
                                 moved.add(rowIndex - 1, moved.removeAt(rowIndex))
                                 replaceAll(moved)
@@ -124,6 +146,13 @@ fun ComponentEditor(
             row.forEachIndexed { itemIndex, component ->
                 ComponentCard(
                     component = component,
+                    triggers = library.chatTriggers,
+                    emojis = library.emojiGroups,
+                    canMoveLeft = itemIndex > 0,
+                    canMoveRight = itemIndex < row.lastIndex,
+                    canMoveToPreviousRow = rowIndex > 0,
+                    canMoveToNextRow = rowIndex < rows.lastIndex ||
+                        (rowIndex == rows.lastIndex && rows.size < MessageComponent.MaxRows),
                     onChange = { updated ->
                         replaceAll(
                             rows.mapIndexed { i, r ->
@@ -132,11 +161,57 @@ fun ComponentEditor(
                             }
                         )
                     },
+                    onDuplicate = {
+                        if (component.isSelect || row.size >= MessageComponent.MaxButtonsPerRow) return@ComponentCard
+                        val duplicated = component.copy()
+                        replaceAll(
+                            rows.mapIndexed { i, r ->
+                                if (i != rowIndex) r
+                                else r.toMutableList().apply { add(itemIndex + 1, duplicated) }
+                            }
+                        )
+                    },
                     onRemove = {
                         val trimmed = rows.mapIndexed { i, r ->
                             if (i != rowIndex) r else r.filterIndexed { j, _ -> j != itemIndex }
                         }.filter { it.isNotEmpty() }
                         replaceAll(trimmed)
+                    },
+                    onMoveLeft = {
+                        val reordered = row.toMutableList()
+                        val tmp = reordered[itemIndex]
+                        reordered[itemIndex] = reordered[itemIndex - 1]
+                        reordered[itemIndex - 1] = tmp
+                        replaceAll(rows.mapIndexed { i, r -> if (i == rowIndex) reordered else r })
+                    },
+                    onMoveRight = {
+                        val reordered = row.toMutableList()
+                        val tmp = reordered[itemIndex]
+                        reordered[itemIndex] = reordered[itemIndex + 1]
+                        reordered[itemIndex + 1] = tmp
+                        replaceAll(rows.mapIndexed { i, r -> if (i == rowIndex) reordered else r })
+                    },
+                    onMoveToPreviousRow = {
+                        val source = row.filterIndexed { j, _ -> j != itemIndex }
+                        val updated = rows.mapIndexed { i, r ->
+                            when (i) {
+                                rowIndex -> source
+                                rowIndex - 1 -> r + component
+                                else -> r
+                            }
+                        }.filter { it.isNotEmpty() }
+                        replaceAll(updated)
+                    },
+                    onMoveToNextRow = {
+                        val source = row.filterIndexed { j, _ -> j != itemIndex }
+                        val mutableRows = rows.toMutableList()
+                        mutableRows[rowIndex] = source
+                        if (rowIndex == rows.lastIndex) {
+                            mutableRows.add(listOf(component))
+                        } else {
+                            mutableRows[rowIndex + 1] = mutableRows[rowIndex + 1] + component
+                        }
+                        replaceAll(mutableRows.filter { it.isNotEmpty() })
                     },
                 )
             }
@@ -202,8 +277,19 @@ private fun AddRowButtons(canAdd: Boolean, onAdd: (Boolean) -> Unit) {
 @Composable
 private fun ComponentCard(
     component: MessageComponent,
+    triggers: List<EmbedTriggerOption>,
+    emojis: List<EmbedGuildEmojis>,
+    canMoveLeft: Boolean,
+    canMoveRight: Boolean,
+    canMoveToPreviousRow: Boolean,
+    canMoveToNextRow: Boolean,
     onChange: (MessageComponent) -> Unit,
+    onDuplicate: () -> Unit,
     onRemove: () -> Unit,
+    onMoveLeft: () -> Unit,
+    onMoveRight: () -> Unit,
+    onMoveToPreviousRow: () -> Unit,
+    onMoveToNextRow: () -> Unit,
 ) {
     Surface(
         shape = MaterialTheme.shapes.medium,
@@ -233,6 +319,26 @@ private fun ComponentCard(
                         )
                     }
                 }
+            }
+
+            Row(horizontalArrangement = Arrangement.spacedBy(0.dp)) {
+                if (!component.isSelect) {
+                    IconButton(onClick = onMoveLeft, enabled = canMoveLeft) {
+                        Icon(Icons.Default.KeyboardArrowLeft, contentDescription = "Move left in row")
+                    }
+                    IconButton(onClick = onMoveRight, enabled = canMoveRight) {
+                        Icon(Icons.Default.KeyboardArrowRight, contentDescription = "Move right in row")
+                    }
+                }
+                IconButton(onClick = onMoveToPreviousRow, enabled = canMoveToPreviousRow) {
+                    Icon(Icons.Default.KeyboardArrowUp, contentDescription = "Move to previous row")
+                }
+                IconButton(onClick = onMoveToNextRow, enabled = canMoveToNextRow) {
+                    Icon(Icons.Default.KeyboardArrowDown, contentDescription = "Move to next row")
+                }
+                IconButton(onClick = onDuplicate, enabled = !component.isSelect) {
+                    Icon(Icons.Default.ContentCopy, contentDescription = "Duplicate component")
+                }
                 IconButton(onClick = onRemove) {
                     Icon(
                         Icons.Default.Delete,
@@ -246,12 +352,21 @@ private fun ComponentCard(
                 value = component.displayName,
                 onValueChange = { onChange(component.copy(displayName = it)) },
                 label = if (component.isSelect) "Placeholder" else "Label",
+                supportingText = if (component.isSelect) {
+                    "${component.displayName.length}/150"
+                } else {
+                    "${component.displayName.length}/80"
+                },
+                isError = if (component.isSelect) {
+                    component.displayName.length > 150
+                } else {
+                    component.displayName.length > 80
+                },
             )
-            MewdekoTextField(
+            EmojiField(
                 value = component.emoji,
-                onValueChange = { onChange(component.copy(emoji = it)) },
-                label = "Emoji",
-                placeholder = "Optional",
+                emojis = emojis,
+                onChange = { onChange(component.copy(emoji = it)) },
             )
 
             if (component.isSelect) {
@@ -267,7 +382,7 @@ private fun ComponentCard(
                     onValueChange = { onChange(component.copy(maxOptions = it.toInt())) },
                     valueRange = 1f..component.options.size.coerceAtLeast(1).toFloat(),
                 )
-                OptionList(component, onChange)
+                OptionList(component, triggers, emojis, onChange)
             } else {
                 DiscordSelectorSingle(
                     kind = SelectorKind.Custom(Icons.Default.SmartButton),
@@ -287,13 +402,10 @@ private fun ComponentCard(
                         placeholder = "https://example.com",
                     )
                 } else {
-                    MewdekoTextField(
-                        value = component.id.orEmpty(),
-                        onValueChange = {
-                            onChange(component.copy(id = it.takeIf { v -> v.isNotBlank() }))
-                        },
-                        label = "Custom id",
-                        supportingText = "Matched by chat triggers when the button is pressed.",
+                    TriggerField(
+                        selectedId = component.id,
+                        triggers = triggers,
+                        onSelect = { onChange(component.copy(id = it)) },
                     )
                 }
             }
@@ -301,9 +413,75 @@ private fun ComponentCard(
     }
 }
 
+/** Picks the chat trigger a button or select option fires when chosen. */
+@Composable
+private fun TriggerField(
+    selectedId: String?,
+    triggers: List<EmbedTriggerOption>,
+    onSelect: (String?) -> Unit,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        DiscordSelectorSingle(
+            kind = SelectorKind.Custom(Icons.Default.Bolt),
+            options = triggers.map { SelectorOption(it.id.toString(), it.displayName, it.response.take(60)) },
+            placeholder = "Select a trigger",
+            selectedId = selectedId,
+            onSelect = onSelect,
+            label = "Trigger action",
+        )
+        if (triggers.isEmpty()) {
+            Text(
+                "This guild has no chat triggers yet; create one first to link it here.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
+/**
+ * A manual emoji field with an optional picker over custom emojis from every
+ * mutual guild, each option labelled with its source guild's name.
+ */
+@Composable
+private fun EmojiField(
+    value: String,
+    emojis: List<EmbedGuildEmojis>,
+    onChange: (String) -> Unit,
+) {
+    val flat = remember(emojis) {
+        emojis.flatMap { group -> group.emojis.map { group.guild.name to it } }
+    }
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        MewdekoTextField(
+            value = value,
+            onValueChange = onChange,
+            label = "Emoji",
+            placeholder = "Optional, e.g. 🔥",
+        )
+        if (flat.isNotEmpty()) {
+            val selectedId = flat.firstOrNull { (_, emoji) -> emoji.formatted == value }?.second?.id
+            DiscordSelectorSingle(
+                kind = SelectorKind.Custom(Icons.Default.EmojiEmotions),
+                options = flat.map { (guildName, emoji) ->
+                    SelectorOption(emoji.id, emoji.name, subtitle = guildName)
+                },
+                placeholder = "Server emoji",
+                selectedId = selectedId,
+                onSelect = { id ->
+                    onChange(flat.firstOrNull { (_, emoji) -> emoji.id == id }?.second?.formatted.orEmpty())
+                },
+                label = "Server emoji",
+            )
+        }
+    }
+}
+
 @Composable
 private fun OptionList(
     component: MessageComponent,
+    triggers: List<EmbedTriggerOption>,
+    emojis: List<EmbedGuildEmojis>,
     onChange: (MessageComponent) -> Unit,
 ) {
     Text(
@@ -327,6 +505,20 @@ private fun OptionList(
                         style = MaterialTheme.typography.labelMedium,
                         modifier = Modifier.weight(1f),
                     )
+                    IconButton(
+                        onClick = {
+                            if (component.options.size >= MessageComponent.MaxOptions) return@IconButton
+                            val duplicated = option.copy()
+                            onChange(
+                                component.copy(
+                                    options = component.options.toMutableList()
+                                        .apply { add(index + 1, duplicated) },
+                                )
+                            )
+                        }
+                    ) {
+                        Icon(Icons.Default.ContentCopy, contentDescription = "Duplicate option")
+                    }
                     IconButton(
                         onClick = {
                             onChange(
@@ -355,17 +547,25 @@ private fun OptionList(
                     value = option.name,
                     onValueChange = { value -> edit { it.copy(name = value) } },
                     label = "Label",
+                    supportingText = "${option.name.length}/100",
+                    isError = option.name.length > 100,
                 )
                 MewdekoTextField(
                     value = option.description,
                     onValueChange = { value -> edit { it.copy(description = value) } },
                     label = "Description",
+                    supportingText = "${option.description.length}/100",
+                    isError = option.description.length > 100,
                 )
-                MewdekoTextField(
+                EmojiField(
                     value = option.emoji,
-                    onValueChange = { value -> edit { it.copy(emoji = value) } },
-                    label = "Emoji",
-                    placeholder = "Optional",
+                    emojis = emojis,
+                    onChange = { value -> edit { it.copy(emoji = value) } },
+                )
+                TriggerField(
+                    selectedId = option.id,
+                    triggers = triggers,
+                    onSelect = { value -> edit { it.copy(id = value) } },
                 )
             }
         }

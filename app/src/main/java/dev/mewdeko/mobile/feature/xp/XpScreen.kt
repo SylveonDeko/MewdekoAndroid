@@ -11,6 +11,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Block
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.History
+import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Leaderboard
 import androidx.compose.material.icons.filled.Paid
 import androidx.compose.material.icons.filled.Save
@@ -32,7 +34,6 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -64,10 +65,12 @@ import dev.mewdeko.mobile.core.ui.clickableRow
 import dev.mewdeko.mobile.feature.embed.EmbedMessageEditor
 import dev.mewdeko.mobile.navigation.GuildRouteArgs
 import dev.mewdeko.mobile.util.compact
+import dev.mewdeko.mobile.util.relativeToNow
 
 private val Tabs = listOf(
     SectionTab("leaderboard", "Leaders", Icons.Default.Leaderboard),
     SectionTab("rewards", "Rewards", Icons.Default.WorkspacePremium),
+    SectionTab("template", "Card", Icons.Default.Image),
     SectionTab("settings", "Settings", Icons.Default.Tune),
     SectionTab("exclusions", "Excluded", Icons.Default.Block),
 )
@@ -88,6 +91,7 @@ fun XpScreen(
     var adjustingMember by remember { mutableStateOf<String?>(null) }
     var pendingRemoveRole by remember { mutableStateOf<XpRoleRewardModel?>(null) }
     var pendingRemoveCurrency by remember { mutableStateOf<XpCurrencyRewardModel?>(null) }
+    var pendingResetMember by remember { mutableStateOf<Pair<String, Boolean>?>(null) }
 
     FeatureScaffold(
         title = "XP System",
@@ -99,11 +103,17 @@ fun XpScreen(
         onRefresh = { viewModel.load(refreshing = true) },
         onRetry = { viewModel.load() },
         floatingActionButton = {
-            if (state.hasUnsavedSettings) {
+            if (state.hasUnsavedSettings && state.section == "settings") {
                 ExtendedFloatingActionButton(
                     onClick = viewModel::saveSettings,
                     icon = { Icon(Icons.Default.Save, contentDescription = null) },
                     text = { Text("Save settings") },
+                )
+            } else if (state.hasUnsavedTemplate && state.section == "template") {
+                ExtendedFloatingActionButton(
+                    onClick = viewModel::saveTemplate,
+                    icon = { Icon(Icons.Default.Save, contentDescription = null) },
+                    text = { Text("Save card") },
                 )
             }
         },
@@ -133,6 +143,23 @@ fun XpScreen(
                     value = "${state.serverStats?.highestLevel ?: 0}",
                     modifier = Modifier.weight(1f),
                 )
+            }
+        }
+
+        val recentActivity = state.serverStats?.recentActivity.orEmpty()
+        if (recentActivity.isNotEmpty()) {
+            SectionCard {
+                SectionCardHeader("Recent XP activity", Icons.Default.History)
+                recentActivity.forEach { entry ->
+                    ListItem(
+                        leadingContent = {
+                            Avatar(url = entry.avatarUrl, contentDescription = entry.username, size = 32)
+                        },
+                        headlineContent = { Text(entry.username) },
+                        supportingContent = { Text(entry.timestamp.relativeToNow()) },
+                        colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+                    )
+                }
             }
         }
 
@@ -283,7 +310,7 @@ fun XpScreen(
                         options = XpCurveType.entries.map {
                             SelectorOption(it.raw.toString(), it.label)
                         },
-                        placeholder = "Standard",
+                        placeholder = "Default",
                         label = "Level curve",
                         selectedId = state.settings.xpCurveType.toString(),
                         onSelect = { raw ->
@@ -353,6 +380,8 @@ fun XpScreen(
                     )
                 }
             }
+
+            "template" -> XpTemplateTab(state = state, viewModel = viewModel)
 
             "exclusions" -> {
                 SectionCard {
@@ -491,19 +520,18 @@ fun XpScreen(
     }
 
     if (showAddRoleReward) {
-        var level by remember { mutableIntStateOf(5) }
+        var level by remember { mutableStateOf("5") }
         var roleId by remember { mutableStateOf<String?>(null) }
         AlertDialog(
             onDismissRequest = { showAddRoleReward = false },
             title = { Text("Add role reward") },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    SliderRow(
+                    MewdekoTextField(
+                        value = level,
+                        onValueChange = { level = it.filter(Char::isDigit) },
                         label = "Level",
-                        value = level.toFloat(),
-                        onValueChange = { level = it.toInt().coerceAtLeast(1) },
-                        valueRange = 1f..200f,
-                        valueLabel = "$level",
+                        numeric = true,
                     )
                     DiscordSelectorSingle(
                         kind = SelectorKind.Role,
@@ -518,7 +546,8 @@ fun XpScreen(
             confirmButton = {
                 Button(
                     onClick = {
-                        roleId?.let { viewModel.addRoleReward(level, it) }
+                        val safeLevel = level.toIntOrNull()?.coerceAtLeast(1) ?: 1
+                        roleId?.let { viewModel.addRoleReward(safeLevel, it) }
                         showAddRoleReward = false
                     },
                     enabled = roleId != null,
@@ -531,19 +560,18 @@ fun XpScreen(
     }
 
     if (showAddCurrencyReward) {
-        var level by remember { mutableIntStateOf(5) }
+        var level by remember { mutableStateOf("5") }
         var amount by remember { mutableStateOf("100") }
         AlertDialog(
             onDismissRequest = { showAddCurrencyReward = false },
             title = { Text("Add currency reward") },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    SliderRow(
+                    MewdekoTextField(
+                        value = level,
+                        onValueChange = { level = it.filter(Char::isDigit) },
                         label = "Level",
-                        value = level.toFloat(),
-                        onValueChange = { level = it.toInt().coerceAtLeast(1) },
-                        valueRange = 1f..200f,
-                        valueLabel = "$level",
+                        numeric = true,
                     )
                     MewdekoTextField(
                         value = amount,
@@ -556,7 +584,8 @@ fun XpScreen(
             confirmButton = {
                 Button(
                     onClick = {
-                        viewModel.addCurrencyReward(level, amount.toIntOrNull() ?: 0)
+                        val safeLevel = level.toIntOrNull()?.coerceAtLeast(1) ?: 1
+                        viewModel.addCurrencyReward(safeLevel, amount.toIntOrNull() ?: 0)
                         showAddCurrencyReward = false
                     },
                     enabled = amount.isNotBlank(),
@@ -597,9 +626,19 @@ fun XpScreen(
                             modifier = Modifier.weight(1f),
                         ) { Text("Set") }
                     }
+                    var alsoResetBonus by remember(memberId) { mutableStateOf(true) }
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickableRow { alsoResetBonus = !alsoResetBonus },
+                    ) {
+                        Checkbox(checked = alsoResetBonus, onCheckedChange = { alsoResetBonus = it })
+                        Text("Also reset bonus XP")
+                    }
                     OutlinedButton(
                         onClick = {
-                            viewModel.resetUserXp(memberId, resetBonus = true)
+                            pendingResetMember = memberId to alsoResetBonus
                             adjustingMember = null
                         },
                         modifier = Modifier.fillMaxWidth(),
@@ -620,7 +659,7 @@ fun XpScreen(
             message = "@${reward.roleName ?: reward.roleId.orEmpty()} is no longer granted at " +
                 "level ${reward.level}.",
             confirmLabel = "Remove",
-            onConfirm = { viewModel.removeRoleReward(reward.id) },
+            onConfirm = { viewModel.removeRoleReward(reward.level) },
             onDismiss = { pendingRemoveRole = null },
         )
     }
@@ -630,8 +669,22 @@ fun XpScreen(
             title = "Remove currency reward?",
             message = "${reward.amount} currency is no longer paid at level ${reward.level}.",
             confirmLabel = "Remove",
-            onConfirm = { viewModel.removeCurrencyReward(reward.id) },
+            onConfirm = { viewModel.removeCurrencyReward(reward.level) },
             onDismiss = { pendingRemoveCurrency = null },
+        )
+    }
+
+    pendingResetMember?.let { (memberId, alsoResetBonus) ->
+        ConfirmDialog(
+            title = "Reset this member's XP?",
+            message = if (alsoResetBonus) {
+                "Their total and bonus XP both return to zero. This can't be undone."
+            } else {
+                "Their total XP returns to zero; bonus XP is kept. This can't be undone."
+            },
+            confirmLabel = "Reset",
+            onConfirm = { viewModel.resetUserXp(memberId, resetBonus = alsoResetBonus) },
+            onDismiss = { pendingResetMember = null },
         )
     }
 }

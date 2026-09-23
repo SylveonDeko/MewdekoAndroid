@@ -2,9 +2,12 @@ package dev.mewdeko.mobile.feature.settings
 
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ChatBubble
+import androidx.compose.material.icons.filled.Forum
+import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.Save
 import androidx.compose.material.icons.filled.Tag
 import androidx.compose.material.icons.filled.Tune
+import androidx.compose.material.icons.filled.VolumeOff
 import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -20,10 +23,44 @@ import dev.mewdeko.mobile.core.ui.SectionCard
 import dev.mewdeko.mobile.core.ui.SectionCardHeader
 import dev.mewdeko.mobile.core.ui.SelectorKind
 import dev.mewdeko.mobile.core.ui.SelectorOption
-import dev.mewdeko.mobile.core.ui.SliderRow
 import dev.mewdeko.mobile.core.ui.SwitchRow
 import dev.mewdeko.mobile.feature.embed.EmbedMessageEditor
 import dev.mewdeko.mobile.navigation.GuildRouteArgs
+
+/**
+ * Locales the bot ships response strings for. The empty id means "bot default", mirroring
+ * the dashboard's language selector.
+ */
+private val languageOptions = listOf(
+    SelectorOption("", "Bot default"),
+    SelectorOption("en-US", "English"),
+    SelectorOption("ar", "العربية (Arabic)"),
+    SelectorOption("cs-CZ", "Čeština (Czech)"),
+    SelectorOption("da-DK", "Dansk (Danish)"),
+    SelectorOption("de-DE", "Deutsch (German)"),
+    SelectorOption("es-ES", "Español (Spanish)"),
+    SelectorOption("fr-FR", "Français (French)"),
+    SelectorOption("he-IL", "עברית (Hebrew)"),
+    SelectorOption("hi-IN", "हिन्दी (Hindi)"),
+    SelectorOption("hu-HU", "Magyar (Hungarian)"),
+    SelectorOption("id-ID", "Bahasa Indonesia"),
+    SelectorOption("it-IT", "Italiano (Italian)"),
+    SelectorOption("ja-JP", "日本語 (Japanese)"),
+    SelectorOption("ko-KR", "한국어 (Korean)"),
+    SelectorOption("nb-NO", "Norsk (Norwegian)"),
+    SelectorOption("nl-NL", "Nederlands (Dutch)"),
+    SelectorOption("pl-PL", "Polski (Polish)"),
+    SelectorOption("pt-BR", "Português (Brazil)"),
+    SelectorOption("ro-RO", "Română (Romanian)"),
+    SelectorOption("ru-RU", "Русский (Russian)"),
+    SelectorOption("sr-RS", "Srpski (Serbian)"),
+    SelectorOption("sv-SE", "Svenska (Swedish)"),
+    SelectorOption("tr-TR", "Türkçe (Turkish)"),
+    SelectorOption("uk-UA", "Українська (Ukrainian)"),
+    SelectorOption("zh-CN", "简体中文 (Chinese, Simplified)"),
+    SelectorOption("zh-TW", "繁體中文 (Chinese, Traditional)"),
+    SelectorOption("owo", "OwO"),
+)
 
 /** Per-guild bot configuration. */
 @Composable
@@ -106,13 +143,54 @@ fun SettingsScreen(
                 selectedId = state.warningLogChannelId,
                 onSelect = viewModel::setWarningLogChannel,
             )
-            SliderRow(
-                label = "Warning expiry",
-                value = state.warnExpireHours.toFloat(),
-                onValueChange = { viewModel.setWarnExpireHours((it / 24).toInt() * 24) },
-                valueRange = 0f..8760f,
-                valueLabel = if (state.warnExpireHours == 0) "Never"
-                else "${state.warnExpireHours / 24}d",
+            MewdekoTextField(
+                value = state.warnExpireHours.toString(),
+                onValueChange = { raw ->
+                    viewModel.setWarnExpireHours(raw.filter(Char::isDigit).take(9).toIntOrNull() ?: 0)
+                },
+                label = "Warning expiry (hours)",
+                numeric = true,
+                supportingText = "0 = never",
+            )
+            DiscordSelectorSingle(
+                kind = SelectorKind.Custom(Icons.Default.Language),
+                options = languageOptions,
+                placeholder = "Bot default",
+                label = "Language",
+                selectedId = state.locale,
+                onSelect = { viewModel.setLocale(it.orEmpty()) },
+            )
+        }
+
+        SectionCard {
+            SectionCardHeader("Mute role", Icons.Default.VolumeOff)
+            MewdekoTextField(
+                value = state.muteRoleName,
+                onValueChange = { viewModel.setMuteRoleName(it.take(100)) },
+                label = "Mute role name",
+                placeholder = "Muted",
+                supportingText = "Applied by mute commands and punishments. Created automatically if missing.",
+            )
+            SwitchRow(
+                title = "Remove all other roles while muted",
+                checked = state.removeRolesOnMute,
+                onCheckedChange = viewModel::setRemoveRolesOnMute,
+            )
+        }
+
+        SectionCard {
+            SectionCardHeader("Chat utilities", Icons.Default.Forum)
+            SwitchRow(
+                title = "Message sniping",
+                subtitle = "Let members recover recently deleted or edited messages",
+                checked = state.snipeset,
+                onCheckedChange = viewModel::setSnipeset,
+            )
+            SwitchRow(
+                title = "Message link previews",
+                subtitle = "Show the contents of Discord message links when posted",
+                checked = state.previewLinks,
+                onCheckedChange = viewModel::setPreviewLinks,
             )
         }
 

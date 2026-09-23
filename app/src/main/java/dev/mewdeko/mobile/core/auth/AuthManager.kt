@@ -31,7 +31,7 @@ private const val TAG = "MewdekoAuth"
 /** Errors surfaced by [AuthManager]. */
 sealed class AuthError(message: String) : Exception(message) {
     /** No active server has been selected. */
-    data object NotConfigured : AuthError("No server configured")
+    data class NotConfigured : AuthError("No server configured")
 
     /** The dashboard rejected the authorization code exchange. */
     data class LoginFailed(val status: Int, val body: String) : AuthError("Login failed ($status): $body")
@@ -40,7 +40,7 @@ sealed class AuthError(message: String) : Exception(message) {
     data class RefreshFailed(val status: Int) : AuthError("Refresh failed ($status)")
 
     /** No tokens are stored for the active server. */
-    data object MissingTokens : AuthError("No stored credentials")
+    data class MissingTokens : AuthError("No stored credentials")
 }
 
 /** A freshly minted access/refresh token pair plus, on initial login, the user. */
@@ -127,8 +127,8 @@ class AuthManager @Inject constructor(
 
     /** Returns a valid access token, refreshing it when near expiry. */
     suspend fun currentAccessToken(): String {
-        val id = lock.withLock { serverId } ?: throw AuthError.NotConfigured
-        val tokens = store.loadTokens(id) ?: throw AuthError.MissingTokens
+        val id = lock.withLock { serverId } ?: throw AuthError.NotConfigured()
+        val tokens = store.loadTokens(id) ?: throw AuthError.MissingTokens()
         val secondsLeft = tokens.accessExpiresAt.epochSecond - Instant.now().epochSecond
         if (secondsLeft > earlyRefreshSlack) return tokens.accessToken
         return refresh().accessToken
@@ -159,7 +159,7 @@ class AuthManager @Inject constructor(
      */
     suspend fun signInWithDemoCode(code: String): MobileUser {
         val (base, id) = lock.withLock { baseUrl to serverId }
-        if (base == null || id == null) throw AuthError.NotConfigured
+        if (base == null || id == null) throw AuthError.NotConfigured()
 
         val response = http.post("$base/api/mobile/auth/demo") {
             contentType(ContentType.Application.Json)
@@ -184,7 +184,7 @@ class AuthManager @Inject constructor(
     /** Exchanges an authorization code for tokens and returns the signed-in user. */
     suspend fun signIn(authorization: OAuthResult): MobileUser {
         val (base, id) = lock.withLock { baseUrl to serverId }
-        if (base == null || id == null) throw AuthError.NotConfigured
+        if (base == null || id == null) throw AuthError.NotConfigured()
 
         val response = http.post("$base/api/mobile/auth/login") {
             contentType(ContentType.Application.Json)
@@ -236,8 +236,8 @@ class AuthManager @Inject constructor(
 
     private suspend fun performRefresh(): StoredTokens {
         val (base, id) = lock.withLock { baseUrl to serverId }
-        if (base == null || id == null) throw AuthError.NotConfigured
-        val existing = store.loadTokens(id) ?: throw AuthError.MissingTokens
+        if (base == null || id == null) throw AuthError.NotConfigured()
+        val existing = store.loadTokens(id) ?: throw AuthError.MissingTokens()
 
         val response = http.post("$base/api/mobile/auth/refresh") {
             contentType(ContentType.Application.Json)

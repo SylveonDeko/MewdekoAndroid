@@ -12,10 +12,12 @@ import dev.mewdeko.mobile.core.model.TextChannelLite
 import dev.mewdeko.mobile.core.net.ApiClient
 import dev.mewdeko.mobile.core.net.Endpoint
 import dev.mewdeko.mobile.core.net.HttpMethod
+import dev.mewdeko.mobile.core.net.MewdekoJson
 import dev.mewdeko.mobile.core.net.MusicSocket
 import dev.mewdeko.mobile.core.net.MusicSocketEvent
 import dev.mewdeko.mobile.core.net.jsonBody
 import dev.mewdeko.mobile.core.net.jsonBool
+import dev.mewdeko.mobile.core.net.normalizeKeys
 import dev.mewdeko.mobile.core.ui.FeatureViewModel
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
@@ -28,6 +30,8 @@ import kotlinx.coroutines.launch
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.builtins.ListSerializer
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.decodeFromJsonElement
 import java.net.URLEncoder
 import javax.inject.Inject
 
@@ -53,7 +57,41 @@ data class MusicPlayerSettingModel(
     @SerialName("playerRepeat") val playerRepeat: Int = 0,
     @SerialName("autoPlay") val autoPlay: Int = 0,
     @SerialName("autoDisconnect") val autoDisconnect: Int = 0,
+    @SerialName("musicChannelId")
+    @Serializable(with = SnowflakeSerializer::class)
+    val musicChannelId: Snowflake? = null,
+    @SerialName("djRoleId")
+    @Serializable(with = SnowflakeSerializer::class)
+    val djRoleId: Snowflake? = null,
+    @SerialName("voteSkipEnabled") val voteSkipEnabled: Boolean = false,
+    @SerialName("voteSkipThreshold") val voteSkipThreshold: Int = 50,
 )
+
+/** Which of the eight Lavalink audio filters are currently active. */
+@Serializable
+data class MusicFilterState(
+    val bassBoost: Boolean = false,
+    val nightcore: Boolean = false,
+    val vaporwave: Boolean = false,
+    val karaoke: Boolean = false,
+    val tremolo: Boolean = false,
+    val vibrato: Boolean = false,
+    val rotation: Boolean = false,
+    val distortion: Boolean = false,
+) {
+    /** Reads the active state of a filter by its API key. */
+    fun isActive(key: String): Boolean = when (key) {
+        "bassboost" -> bassBoost
+        "nightcore" -> nightcore
+        "vaporwave" -> vaporwave
+        "karaoke" -> karaoke
+        "tremolo" -> tremolo
+        "vibrato" -> vibrato
+        "rotation" -> rotation
+        "distortion" -> distortion
+        else -> false
+    }
+}
 
 /** One voice channel wired up for text-to-speech. */
 @Serializable
@@ -101,13 +139,16 @@ data class TtsBlockedUser(
 /** Music screen state. */
 data class MusicState(
     val player: MusicStatus? = null,
+    val filters: MusicFilterState = MusicFilterState(),
     val settings: MusicPlayerSettingModel = MusicPlayerSettingModel(),
     val searchQuery: String = "",
     val searchResults: List<MusicSearchResult> = emptyList(),
     val isSearching: Boolean = false,
     val tts: TtsSettingsResponse = TtsSettingsResponse(),
-    val ttsVoices: List<TtsVoice> = emptyList(),
+    val ttsVoiceResults: List<TtsVoice> = emptyList(),
+    val isSearchingVoices: Boolean = false,
     val ttsBlocked: List<TtsBlockedUser> = emptyList(),
+    val linkChannels: List<Snowflake> = emptyList(),
     val voiceChannels: List<TextChannelLite> = emptyList(),
     val textChannels: List<TextChannelLite> = emptyList(),
     val availableRoles: List<GuildRole> = emptyList(),
@@ -116,6 +157,16 @@ data class MusicState(
 ) {
     /** The queue behind the current track. */
     val queue: List<dev.mewdeko.mobile.core.model.QueueTrack> get() = player?.queue.orEmpty()
+
+    /**
+     * The repeat mode to show on the live repeat button.
+     *
+     * The player snapshot (from polling or the socket) reflects changes made
+     * from Discord itself, while [settings] only updates from this app's own
+     * load or [MusicViewModel.setRepeat] calls. Preferring the live player
+     * value keeps the button in sync with the actual player state.
+     */
+    val effectiveRepeatMode: Int get() = player?.repeatMode ?: settings.playerRepeat
 }
 
 /** The Lavalink-backed music player and its text-to-speech settings. */
@@ -142,14 +193,7 @@ class MusicViewModel @Inject constructor(
     /** Reloads the player snapshot, settings, and TTS configuration. */
     fun load(refreshing: Boolean = false) = launchLoad(refreshing) {
         coroutineScope {
-            val player = async {
-                runCatching {
-                    api.send(
-                        Endpoint("api/Music/$guildId/status?userId=$userId"),
-                        MusicStatus.serializer(),
-                    )
-                }.getOrNull()
-            }
+            val status = async { fetchStatusWithFilters() }
             val settings = async {
                 runCatching {
                     api.send(
@@ -166,19 +210,19 @@ class MusicViewModel @Inject constructor(
                     )
                 }.getOrDefault(TtsSettingsResponse())
             }
-            val voices = async {
-                runCatching {
-                    api.send(
-                        Endpoint("api/Music/$guildId/tts/voices?search="),
-                        ListSerializer(TtsVoice.serializer()),
-                    )
-                }.getOrDefault(emptyList())
-            }
             val blocked = async {
                 runCatching {
                     api.send(
                         Endpoint("api/Music/$guildId/tts/blocked"),
                         ListSerializer(TtsBlockedUser.serializer()),
+                    )
+                }.getOrDefault(emptyList())
+            }
+            val linkChannels = async {
+                runCatching {
+                    api.send(
+                        Endpoint("api/Music/$guildId/linkchannels"),
+                        ListSerializer(SnowflakeSerializer),
                     )
                 }.getOrDefault(emptyList())
             }
@@ -200,13 +244,16 @@ class MusicViewModel @Inject constructor(
                 }.getOrDefault(emptyList())
             }
 
+            val (player, filters) = status.await()
+
             _state.update {
                 it.copy(
-                    player = player.await(),
+                    player = player,
+                    filters = filters,
                     settings = settings.await(),
                     tts = tts.await(),
-                    ttsVoices = voices.await(),
                     ttsBlocked = blocked.await(),
+                    linkChannels = linkChannels.await(),
                     voiceChannels = voiceChannels.await()
                         .sortedBy { channel -> channel.name.lowercase() },
                     textChannels = textChannels.await()
@@ -234,12 +281,12 @@ class MusicViewModel @Inject constructor(
     /** Shuffles the queue. */
     fun shuffle() = command("shuffle", "Failed to shuffle.")
 
-    /** Sets the player volume, 0 to 100. */
+    /** Sets the live player volume, 0 to 100. */
     fun setVolume(volume: Int) = launchAction("Failed to set volume.") {
         api.sendIgnoringBody(
             Endpoint("api/Music/$guildId/volume/${volume.coerceIn(0, 100)}", HttpMethod.POST)
         )
-        _state.update { it.copy(settings = it.settings.copy(volume = volume)) }
+        refreshPlayer()
     }
 
     /** Seeks the current track to [seconds]. */
@@ -249,10 +296,15 @@ class MusicViewModel @Inject constructor(
         )
     }
 
-    /** Sets the repeat mode: 0 off, 1 track, 2 queue. */
+    /** Sets the live repeat mode: 0 off, 1 track, 2 queue. */
     fun setRepeat(mode: Int) = launchAction("Failed to set repeat mode.") {
         api.sendIgnoringBody(Endpoint("api/Music/$guildId/repeat/$mode", HttpMethod.POST))
-        _state.update { it.copy(settings = it.settings.copy(playerRepeat = mode)) }
+        _state.update {
+            it.copy(
+                settings = it.settings.copy(playerRepeat = mode),
+                player = it.player?.copy(repeatMode = mode),
+            )
+        }
     }
 
     /** Queues a track or playlist by search term or URL. */
@@ -279,7 +331,6 @@ class MusicViewModel @Inject constructor(
     /** Empties the queue. */
     fun clearQueue() = launchAction("Failed to clear queue.") {
         api.sendIgnoringBody(Endpoint("api/Music/$guildId/queue", HttpMethod.DELETE))
-        postSuccess("Queue cleared.")
         refreshPlayer()
     }
 
@@ -288,6 +339,7 @@ class MusicViewModel @Inject constructor(
         api.sendIgnoringBody(
             Endpoint("api/Music/$guildId/filter/$name", HttpMethod.POST, jsonBool(enable))
         )
+        refreshPlayer()
     }
 
     /** Runs a search against the music source. */
@@ -320,11 +372,14 @@ class MusicViewModel @Inject constructor(
                         "PlayerRepeat" to settings.playerRepeat,
                         "AutoPlay" to settings.autoPlay,
                         "AutoDisconnect" to settings.autoDisconnect,
+                        "MusicChannelId" to (settings.musicChannelId?.toLongOrNull() ?: 0L),
+                        "DjRoleId" to (settings.djRoleId?.toLongOrNull() ?: 0L),
+                        "VoteSkipEnabled" to settings.voteSkipEnabled,
+                        "VoteSkipThreshold" to settings.voteSkipThreshold,
                     ),
                 )
             )
             _state.update { it.copy(settings = settings) }
-            postSuccess("Settings saved.")
         }
 
     /** Writes the guild's text-to-speech settings. */
@@ -335,37 +390,50 @@ class MusicViewModel @Inject constructor(
                     "api/Music/$guildId/tts/settings",
                     HttpMethod.POST,
                     jsonBody(
-                        "ttsVolume" to settings.ttsVolume,
-                        "ttsSpeed" to settings.ttsSpeed,
-                        "ttsDefaultVoice" to settings.ttsDefaultVoice,
-                        "ttsReplyContext" to settings.ttsReplyContext,
-                        "ttsAttachmentNarration" to settings.ttsAttachmentNarration,
-                        "ttsConsecutiveGrouping" to settings.ttsConsecutiveGrouping,
-                        "ttsMaxQueueSize" to settings.ttsMaxQueueSize,
-                        "ttsRoleId" to settings.ttsRoleId?.toLongOrNull(),
+                        "Volume" to settings.ttsVolume,
+                        "Speed" to settings.ttsSpeed,
+                        "DefaultVoice" to settings.ttsDefaultVoice,
+                        "ReplyContext" to settings.ttsReplyContext,
+                        "AttachmentNarration" to settings.ttsAttachmentNarration,
+                        "ConsecutiveGrouping" to settings.ttsConsecutiveGrouping,
+                        "MaxQueueSize" to settings.ttsMaxQueueSize,
+                        "RoleId" to (settings.ttsRoleId?.toLongOrNull() ?: 0L),
                     ),
                 )
             )
             _state.update { it.copy(tts = settings) }
-            postSuccess("TTS settings saved.")
         }
 
-    /** Enables text-to-speech in a voice channel. */
-    fun addTtsChannel(voiceChannelId: Snowflake, linkedTextChannelId: Snowflake?) =
-        launchAction("Failed to add TTS channel.") {
+    /** Creates or updates the text-to-speech configuration for a voice channel. */
+    fun upsertTtsChannel(entry: TtsVoiceChannelEntry, reloadAfter: Boolean = false) =
+        launchAction("Failed to save TTS channel.") {
             api.sendIgnoringBody(
                 Endpoint(
                     "api/Music/$guildId/tts/vc",
                     HttpMethod.POST,
                     jsonBody(
-                        "voiceChannelId" to (voiceChannelId.toLongOrNull() ?: 0L),
-                        "linkedTextChannelId" to linkedTextChannelId?.toLongOrNull(),
-                        "enabled" to true,
+                        "voiceChannelId" to (entry.voiceChannelId?.toLongOrNull() ?: 0L),
+                        "enabled" to entry.enabled,
+                        "linkedTextChannelId" to entry.linkedTextChannelId?.toLongOrNull(),
+                        "announceJoinLeave" to entry.announceJoinLeave,
+                        "joinFormat" to entry.joinFormat,
+                        "leaveFormat" to entry.leaveFormat,
                     ),
                 )
             )
-            postSuccess("TTS channel added.")
-            load(refreshing = true)
+            if (reloadAfter) {
+                load(refreshing = true)
+            } else {
+                _state.update {
+                    it.copy(
+                        tts = it.tts.copy(
+                            voiceChannels = it.tts.voiceChannels.map { existing ->
+                                if (existing.voiceChannelId == entry.voiceChannelId) entry else existing
+                            },
+                        ),
+                    )
+                }
+            }
         }
 
     /** Disables text-to-speech in a voice channel. */
@@ -393,15 +461,46 @@ class MusicViewModel @Inject constructor(
             load(refreshing = true)
         }
 
-    /** Re-fetches the player snapshot without touching the rest of the screen. */
-    fun refreshPlayer() = viewModelScope.launch {
-        val player = runCatching {
+    /** Searches the Flowery TTS voice catalog by name, language, gender, or source. */
+    fun searchTtsVoices(query: String) = viewModelScope.launch {
+        if (query.isBlank()) {
+            _state.update { it.copy(ttsVoiceResults = emptyList()) }
+            return@launch
+        }
+        _state.update { it.copy(isSearchingVoices = true) }
+        val encoded = URLEncoder.encode(query, "UTF-8")
+        val results = runCatching {
             api.send(
-                Endpoint("api/Music/$guildId/status?userId=$userId"),
-                MusicStatus.serializer(),
+                Endpoint("api/Music/$guildId/tts/voices?search=$encoded"),
+                ListSerializer(TtsVoice.serializer()),
             )
-        }.getOrNull() ?: return@launch
-        _state.update { it.copy(player = player) }
+        }.getOrDefault(emptyList())
+        _state.update { it.copy(ttsVoiceResults = results, isSearchingVoices = false) }
+    }
+
+    /** Enables automatic music link conversion for a channel. */
+    fun addLinkChannel(channelId: Snowflake) = launchAction("Failed to enable music link conversion.") {
+        val ids = api.send(
+            Endpoint("api/Music/$guildId/linkchannels/$channelId", HttpMethod.POST),
+            ListSerializer(SnowflakeSerializer),
+        )
+        _state.update { it.copy(linkChannels = ids) }
+    }
+
+    /** Disables automatic music link conversion for a channel. */
+    fun removeLinkChannel(channelId: Snowflake) = launchAction("Failed to disable music link conversion.") {
+        val ids = api.send(
+            Endpoint("api/Music/$guildId/linkchannels/$channelId", HttpMethod.DELETE),
+            ListSerializer(SnowflakeSerializer),
+        )
+        _state.update { it.copy(linkChannels = ids) }
+    }
+
+    /** Re-fetches the player snapshot and audio filter state without touching the rest of the screen. */
+    fun refreshPlayer() = viewModelScope.launch {
+        val (player, filters) = fetchStatusWithFilters()
+        if (player == null) return@launch
+        _state.update { it.copy(player = player, filters = filters) }
     }
 
     /**
@@ -440,6 +539,29 @@ class MusicViewModel @Inject constructor(
             ListSerializer(TextChannelLite.serializer()),
         )
     }.getOrDefault(emptyList())
+
+    /**
+     * Fetches the player status and decodes the accompanying `filters` object
+     * alongside it, since [MusicStatus] carries no such field of its own.
+     */
+    private suspend fun fetchStatusWithFilters(): Pair<MusicStatus?, MusicFilterState> {
+        val result: Pair<MusicStatus?, MusicFilterState> = runCatching {
+            val raw = api.sendRaw(
+                Endpoint("api/Music/$guildId/status?userId=$userId")
+            ).normalizeKeys()
+            val obj = raw as? JsonObject
+            if (obj == null) {
+                null to MusicFilterState()
+            } else {
+                val status = MewdekoJson.decodeFromJsonElement(MusicStatus.serializer(), obj)
+                val filters = (obj["filters"] as? JsonObject)?.let {
+                    MewdekoJson.decodeFromJsonElement(MusicFilterState.serializer(), it)
+                } ?: MusicFilterState()
+                status to filters
+            }
+        }.getOrDefault(null to MusicFilterState())
+        return result
+    }
 
     override fun onCleared() {
         super.onCleared()

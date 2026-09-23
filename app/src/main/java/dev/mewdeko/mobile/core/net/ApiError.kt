@@ -4,7 +4,7 @@ package dev.mewdeko.mobile.core.net
 sealed class ApiError(message: String, cause: Throwable? = null) : Exception(message, cause) {
 
     /** No dashboard base URL has been selected yet. */
-    data object NotConfigured : ApiError("No dashboard configured")
+    data class NotConfigured : ApiError("No dashboard configured")
 
     /** The server rejected the request with a non-2xx status. */
     data class Http(val status: Int, val body: String) : ApiError("HTTP $status: $body")
@@ -16,7 +16,7 @@ sealed class ApiError(message: String, cause: Throwable? = null) : Exception(mes
     data class Transport(val reason: Throwable) : ApiError("Transport failure: ${reason.message}", reason)
 
     /** Authentication failed and could not be recovered by refreshing. */
-    data object Unauthorized : ApiError("Unauthorized")
+    data class Unauthorized : ApiError("Unauthorized")
 }
 
 /** Human-readable text for surfacing an API failure in the UI. */

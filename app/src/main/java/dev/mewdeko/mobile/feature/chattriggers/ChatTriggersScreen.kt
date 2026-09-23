@@ -1,5 +1,7 @@
 package dev.mewdeko.mobile.feature.chattriggers
 
+import android.app.DatePickerDialog
+import android.app.TimePickerDialog
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
@@ -15,6 +17,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Pause
@@ -27,6 +30,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
@@ -37,10 +41,21 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import dev.mewdeko.mobile.core.model.EmbedFooter
+import dev.mewdeko.mobile.core.model.EmbedMessage
+import dev.mewdeko.mobile.core.model.EmbedSpec
+import dev.mewdeko.mobile.core.model.Snowflake
+import dev.mewdeko.mobile.core.model.UrlBox
+import dev.mewdeko.mobile.core.net.InstantParser
+import dev.mewdeko.mobile.core.net.MewdekoJson
 import dev.mewdeko.mobile.core.ui.ConfirmDialog
 import dev.mewdeko.mobile.core.ui.DiscordSelector
 import dev.mewdeko.mobile.core.ui.DiscordSelectorSingle
@@ -58,6 +73,12 @@ import dev.mewdeko.mobile.core.ui.TagChip
 import dev.mewdeko.mobile.feature.embed.LabelledEmbedField
 import dev.mewdeko.mobile.navigation.GuildRouteArgs
 import dev.mewdeko.mobile.util.compact
+import dev.mewdeko.mobile.util.relativeToNow
+import kotlinx.serialization.builtins.ListSerializer
+import kotlinx.serialization.encodeToString
+import java.time.ZoneId
+import java.time.ZonedDateTime
+import java.time.format.DateTimeFormatter
 
 /** Custom keyword reactions. */
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
@@ -116,6 +137,13 @@ fun ChatTriggersScreen(
                         icon = if (state.category == null) Icons.Default.Check else null,
                         onClick = { viewModel.setCategory(null) },
                     )
+                    if (state.hasUngrouped) {
+                        TagChip(
+                            label = "Ungrouped",
+                            icon = if (state.category == ChatTriggersState.UNGROUPED) Icons.Default.Check else null,
+                            onClick = { viewModel.setCategory(ChatTriggersState.UNGROUPED) },
+                        )
+                    }
                     state.categories.forEach { category ->
                         TagChip(
                             label = category,
@@ -125,16 +153,18 @@ fun ChatTriggersScreen(
                     }
                 }
 
-                state.category?.let { category ->
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        TextButton(onClick = { viewModel.setCategoryPaused(category, true) }) {
-                            Text("Pause all")
-                        }
-                        TextButton(onClick = { viewModel.setCategoryPaused(category, false) }) {
-                            Text("Resume all")
+                state.category
+                    ?.takeIf { it != ChatTriggersState.UNGROUPED }
+                    ?.let { category ->
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            TextButton(onClick = { viewModel.setCategoryPaused(category, true) }) {
+                                Text("Pause all")
+                            }
+                            TextButton(onClick = { viewModel.setCategoryPaused(category, false) }) {
+                                Text("Resume all")
+                            }
                         }
                     }
-                }
             }
         }
 
@@ -275,6 +305,7 @@ fun ChatTriggersScreen(
             initial = trigger,
             roleOptions = state.availableRoles.map { SelectorOption(it.id, it.name) },
             channelOptions = state.availableChannels.map { SelectorOption(it.id, it.name) },
+            categoryOptions = state.categories,
             testResult = state.testResults[trigger.id],
             stats = state.stats[trigger.id],
             onTest = { sample -> viewModel.testTrigger(trigger, sample) },
@@ -359,12 +390,13 @@ private fun CounterEditor(
     )
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 private fun ChatTriggerEditor(
     initial: ChatTriggerModel,
     roleOptions: List<SelectorOption>,
     channelOptions: List<SelectorOption>,
+    categoryOptions: List<String>,
     testResult: TriggerTestResult?,
     stats: TriggerStats?,
     onTest: (String) -> Unit,
@@ -374,6 +406,7 @@ private fun ChatTriggerEditor(
 ) {
     var draft by remember(initial.id) { mutableStateOf(initial) }
     var sample by remember(initial.id) { mutableStateOf("") }
+    var regexSample by remember(initial.id) { mutableStateOf("") }
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -393,7 +426,7 @@ private fun ChatTriggerEditor(
                 )
                 TextButton(onClick = onDismiss) { Text("Cancel") }
                 Button(
-                    onClick = { onSave(draft) },
+                    onClick = { onSave(draft.validated()) },
                     enabled = draft.trigger.isNotBlank(),
                 ) { Text("Save") }
             }
@@ -407,6 +440,21 @@ private fun ChatTriggerEditor(
             ) {
                 SectionCard {
                     SectionCardHeader("Trigger", Icons.Default.Bolt)
+                    if (initial.id == 0) {
+                        Text(
+                            text = "Or start from a template:",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            QuickTemplate.entries.forEach { template ->
+                                TagChip(
+                                    label = template.label,
+                                    onClick = { draft = template.instantiate(initial.guildId.orEmpty()) },
+                                )
+                            }
+                        }
+                    }
                     MewdekoTextField(
                         value = draft.trigger,
                         onValueChange = { draft = draft.copy(trigger = it) },
@@ -437,6 +485,54 @@ private fun ChatTriggerEditor(
                 }
 
                 SectionCard {
+                    SectionCardHeader("How it fires", Icons.Default.Bolt)
+                    Text(
+                        text = "At least one must stay on.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    ChatTriggerFireType.entries.forEach { type ->
+                        SwitchRow(
+                            title = type.label,
+                            checked = draft.hasFireType(type),
+                            onCheckedChange = { draft = draft.withFireType(type, it) },
+                        )
+                    }
+                    if (draft.hasFireType(ChatTriggerFireType.INTERACTION)) {
+                        DiscordSelectorSingle(
+                            kind = SelectorKind.Custom(Icons.Default.Bolt),
+                            options = ChatTriggerApplicationCommandType.entries.map {
+                                SelectorOption(it.raw.toString(), it.label)
+                            },
+                            placeholder = "Not a command",
+                            label = "Register as a command",
+                            selectedId = draft.applicationCommandType.toString(),
+                            onSelect = { draft = draft.copy(applicationCommandType = it?.toIntOrNull() ?: 0) },
+                        )
+                        if (draft.commandType != ChatTriggerApplicationCommandType.NONE) {
+                            MewdekoTextField(
+                                value = draft.applicationCommandName.orEmpty(),
+                                onValueChange = {
+                                    draft = draft.copy(applicationCommandName = it.takeIf(String::isNotBlank))
+                                },
+                                label = "Command name",
+                            )
+                            if (draft.commandType == ChatTriggerApplicationCommandType.SLASH) {
+                                MewdekoTextField(
+                                    value = draft.applicationCommandDescription.orEmpty(),
+                                    onValueChange = {
+                                        draft = draft.copy(
+                                            applicationCommandDescription = it.takeIf(String::isNotBlank),
+                                        )
+                                    },
+                                    label = "Command description",
+                                )
+                            }
+                        }
+                    }
+                }
+
+                SectionCard {
                     SectionCardHeader("Matching", Icons.Default.Bolt)
                     SwitchRow(
                         title = "Regular expression",
@@ -444,6 +540,13 @@ private fun ChatTriggerEditor(
                         checked = draft.isRegex,
                         onCheckedChange = { draft = draft.copy(isRegex = it) },
                     )
+                    if (draft.isRegex) {
+                        RegexTester(
+                            pattern = draft.trigger,
+                            sample = regexSample,
+                            onSampleChange = { regexSample = it },
+                        )
+                    }
                     SwitchRow(
                         title = "Match anywhere",
                         subtitle = "Fire when the trigger appears anywhere in a message",
@@ -473,12 +576,21 @@ private fun ChatTriggerEditor(
                     )
                     SwitchRow(
                         title = "Delete the triggering message",
+                        subtitle = if (draft.reactToTrigger) {
+                            "Unavailable while reacting to the message, since there would be " +
+                                "nothing left to react to."
+                        } else null,
                         checked = draft.autoDeleteTrigger,
+                        enabled = !draft.reactToTrigger,
                         onCheckedChange = { draft = draft.copy(autoDeleteTrigger = it) },
                     )
                     SwitchRow(
                         title = "React instead of replying",
+                        subtitle = if (draft.autoDeleteTrigger) {
+                            "Unavailable while deleting the triggering message."
+                        } else null,
                         checked = draft.reactToTrigger,
+                        enabled = !draft.autoDeleteTrigger,
                         onCheckedChange = { draft = draft.copy(reactToTrigger = it) },
                     )
                     SwitchRow(
@@ -505,12 +617,16 @@ private fun ChatTriggerEditor(
                         supportingText = "0 keeps the response.",
                     )
                     MewdekoTextField(
-                        value = draft.additionalResponses.orEmpty(),
+                        value = draft.additionalResponses.orEmpty().replace("@@@", "\n"),
                         onValueChange = {
-                            draft = draft.copy(additionalResponses = it.takeIf(String::isNotBlank))
+                            draft = draft.copy(
+                                additionalResponses = it.replace("\n", "@@@").takeIf(String::isNotBlank),
+                            )
                         },
                         label = "Extra responses",
-                        supportingText = "Separate with @@@. Repeat one to make it more likely.",
+                        singleLine = false,
+                        minLines = 2,
+                        supportingText = "One per line. Repeat one to make it more likely.",
                     )
                     if (draft.extraResponses.isNotEmpty()) {
                         DiscordSelectorSingle(
@@ -525,8 +641,12 @@ private fun ChatTriggerEditor(
                         )
                     }
                     MewdekoTextField(
-                        value = draft.reactions.orEmpty(),
-                        onValueChange = { draft = draft.copy(reactions = it) },
+                        value = draft.reactions.orEmpty().replace("@@@", " "),
+                        onValueChange = {
+                            draft = draft.copy(
+                                reactions = it.replace(Regex("\\s+"), "@@@").takeIf(String::isNotEmpty),
+                            )
+                        },
                         label = "Reactions",
                         placeholder = "🎉 👍",
                         supportingText = "Space-separated emoji added to the triggering message.",
@@ -595,6 +715,10 @@ private fun ChatTriggerEditor(
                         label = "Stop after this many uses",
                         supportingText = "Used ${draft.uses} times so far. 0 means no limit.",
                     )
+                    ExpiryField(
+                        value = draft.expiresAt,
+                        onChange = { draft = draft.copy(expiresAt = it) },
+                    )
                     NumberField(
                         value = draft.minAccountAgeMinutes,
                         onValueChange = { draft = draft.copy(minAccountAgeMinutes = it) },
@@ -606,16 +730,19 @@ private fun ChatTriggerEditor(
                         label = "Minimum time in server (minutes)",
                         supportingText = "These keep brand new accounts from using the trigger.",
                     )
-                    draft.activeWindow?.let { window ->
-                        Text(
-                            text = "Active ${window.summary}",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                        TextButton(onClick = { draft = draft.copy(timeConditions = null) }) {
-                            Text("Clear active hours")
-                        }
-                    }
+                    ActiveHoursSection(
+                        window = draft.activeWindow,
+                        onChange = { window ->
+                            draft = draft.copy(
+                                timeConditions = window?.let {
+                                    MewdekoJson.encodeToString(
+                                        ListSerializer(ActiveWindow.serializer()),
+                                        listOf(it),
+                                    )
+                                },
+                            )
+                        },
+                    )
                 }
 
                 SectionCard {
@@ -659,18 +786,17 @@ private fun ChatTriggerEditor(
                         supportingText = "Read or change one from a response with %counter:name%.",
                     )
                     if (!draft.counterName.isNullOrBlank()) {
-                        NumberField(
-                            value = draft.counterMin?.toInt() ?: 0,
-                            onValueChange = { draft = draft.copy(counterMin = it.toLong()) },
+                        NullableNumberField(
+                            value = draft.counterMin,
+                            onValueChange = { draft = draft.copy(counterMin = it) },
                             label = "At least",
+                            supportingText = "Leave blank for no lower bound. Negative values are allowed.",
                         )
-                        NumberField(
-                            value = draft.counterMax?.toInt() ?: 0,
-                            onValueChange = {
-                                draft = draft.copy(counterMax = it.takeIf { v -> v > 0 }?.toLong())
-                            },
+                        NullableNumberField(
+                            value = draft.counterMax,
+                            onValueChange = { draft = draft.copy(counterMax = it) },
                             label = "At most",
-                            supportingText = "0 means no upper bound.",
+                            supportingText = "Leave blank for no upper bound. Negative values are allowed.",
                         )
                     }
                 }
@@ -713,6 +839,17 @@ private fun ChatTriggerEditor(
                         label = "Category",
                         supportingText = "Group related triggers so you can pause them together.",
                     )
+                    if (categoryOptions.isNotEmpty()) {
+                        FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            categoryOptions.forEach { category ->
+                                TagChip(
+                                    label = category,
+                                    icon = if (draft.category == category) Icons.Default.Check else null,
+                                    onClick = { draft = draft.copy(category = category) },
+                                )
+                            }
+                        }
+                    }
                     NumberField(
                         value = draft.nextTriggerId ?: 0,
                         onValueChange = { draft = draft.copy(nextTriggerId = it.takeIf { v -> v > 0 }) },
@@ -825,4 +962,291 @@ private fun NumberField(
         supportingText = supportingText,
         numeric = true,
     )
+}
+
+/**
+ * A whole-number field that allows a blank box to mean "no bound" and allows a leading minus
+ * sign, unlike [NumberField]. Used for counter bounds, which the bot accepts as null or negative.
+ */
+@Composable
+private fun NullableNumberField(
+    value: Long?,
+    onValueChange: (Long?) -> Unit,
+    label: String,
+    supportingText: String? = null,
+) {
+    MewdekoTextField(
+        value = value?.toString().orEmpty(),
+        onValueChange = { raw ->
+            val filtered = raw.filterIndexed { index, char -> char.isDigit() || (char == '-' && index == 0) }
+            onValueChange(if (filtered.isEmpty() || filtered == "-") null else filtered.toLongOrNull())
+        },
+        label = label,
+        placeholder = "No limit",
+        supportingText = supportingText,
+    )
+}
+
+/** Ensures the trigger about to be saved matches the invariants the bot and dashboard enforce. */
+private fun ChatTriggerModel.validated(): ChatTriggerModel {
+    var next = this
+
+    if (next.validTriggerTypes == 0) {
+        next = next.copy(validTriggerTypes = ChatTriggerFireType.MESSAGE.raw)
+    }
+
+    if (next.commandType == ChatTriggerApplicationCommandType.SLASH &&
+        !next.hasFireType(ChatTriggerFireType.INTERACTION)
+    ) {
+        next = next.withFireType(ChatTriggerFireType.INTERACTION, true)
+    }
+
+    if (next.autoDeleteTrigger && next.reactToTrigger) {
+        next = next.copy(reactToTrigger = false)
+    }
+
+    return next
+}
+
+/** A starting point for a new trigger, applied by [instantiate]. */
+private enum class QuickTemplate(val label: String) {
+    SIMPLE("Simple hello"),
+    ROLE("Role grant"),
+    SLASH("Slash command"),
+    EMBED("Rich embed welcome"),
+}
+
+/** Prefills a blank trigger for [guildId] with this template's fields. */
+private fun QuickTemplate.instantiate(guildId: Snowflake): ChatTriggerModel {
+    val blank = ChatTriggerModel.blank(guildId)
+    return when (this) {
+        QuickTemplate.SIMPLE -> blank.copy(
+            trigger = "hello",
+            response = EmbedMessage(content = "Hello there! 👋").serialize(),
+        )
+
+        QuickTemplate.ROLE -> blank.copy(
+            trigger = "getrole",
+            response = EmbedMessage(content = "Role assigned!").serialize(),
+        )
+
+        QuickTemplate.SLASH -> blank.copy(
+            trigger = "info",
+            response = EmbedMessage(content = "Server information: %server.name%").serialize(),
+            validTriggerTypes = ChatTriggerFireType.INTERACTION.raw,
+            applicationCommandType = ChatTriggerApplicationCommandType.SLASH.raw,
+            applicationCommandName = "info",
+            applicationCommandDescription = "Get server information",
+        )
+
+        QuickTemplate.EMBED -> blank.copy(
+            trigger = "welcome",
+            response = EmbedMessage(
+                content = "Welcome to the server!",
+                embeds = listOf(
+                    EmbedSpec(
+                        title = "Welcome!",
+                        description = "Thanks for joining %server.name%!",
+                        color = "0x5865F2",
+                        thumbnail = UrlBox("%user.avatar%"),
+                        footer = EmbedFooter(text = "Enjoy your stay!"),
+                    ),
+                ),
+            ).serialize(),
+        )
+    }
+}
+
+/**
+ * Checks a regex pattern for validity and, once a sample is typed, highlights every match in it.
+ */
+@Composable
+private fun RegexTester(
+    pattern: String,
+    sample: String,
+    onSampleChange: (String) -> Unit,
+) {
+    val result = remember(pattern) { runCatching { Regex(pattern) } }
+    val highlight = MaterialTheme.colorScheme.primaryContainer
+
+    result.exceptionOrNull()?.let { error ->
+        Text(
+            text = "Invalid pattern: ${error.message.orEmpty()}",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.error,
+        )
+    }
+
+    MewdekoTextField(
+        value = sample,
+        onValueChange = onSampleChange,
+        label = "Test text",
+        supportingText = "Matches highlight below.",
+    )
+
+    val regex = result.getOrNull()
+    if (regex != null && sample.isNotBlank()) {
+        val matches = regex.findAll(sample).toList()
+        Text(
+            text = buildAnnotatedString {
+                var index = 0
+                matches.forEach { match ->
+                    append(sample.substring(index, match.range.first))
+                    withStyle(SpanStyle(background = highlight)) {
+                        append(match.value)
+                    }
+                    index = match.range.last + 1
+                }
+                if (index <= sample.length) append(sample.substring(index))
+            },
+            style = MaterialTheme.typography.bodySmall,
+        )
+        Text(
+            text = if (matches.isEmpty()) "No match." else "${matches.size} match(es).",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
+
+/** Parses a "HH:mm" string into hour/minute, defaulting to 09:00 when it does not parse. */
+private fun String.toHourMinute(): Pair<Int, Int> {
+    val parts = split(":")
+    val hour = parts.getOrNull(0)?.toIntOrNull() ?: 9
+    val minute = parts.getOrNull(1)?.toIntOrNull() ?: 0
+    return hour to minute
+}
+
+/**
+ * Turns a trigger's active window on or off and edits its start, end and weekday selection.
+ *
+ * Only the first stored condition is edited, matching [ChatTriggerModel.activeWindow]; any extra
+ * conditions the bot might hold are left untouched by round-tripping through the same shape.
+ */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun ActiveHoursSection(
+    window: ActiveWindow?,
+    onChange: (ActiveWindow?) -> Unit,
+) {
+    val context = LocalContext.current
+    val current = window ?: ActiveWindow(startTime = "09:00", endTime = "17:00", enabled = true)
+
+    SwitchRow(
+        title = "Only active certain hours",
+        subtitle = "Uses the device's local time zone. An end time before the start time runs overnight.",
+        checked = window != null,
+        onCheckedChange = { onChange(if (it) current else null) },
+    )
+
+    if (window != null) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            OutlinedButton(
+                onClick = {
+                    val (hour, minute) = current.startTime.orEmpty().toHourMinute()
+                    TimePickerDialog(
+                        context,
+                        { _, h, m -> onChange(current.copy(startTime = "%02d:%02d".format(h, m))) },
+                        hour,
+                        minute,
+                        true,
+                    ).show()
+                },
+                modifier = Modifier.weight(1f),
+            ) { Text("From ${current.startTime.orEmpty().ifEmpty { "09:00" }}") }
+            OutlinedButton(
+                onClick = {
+                    val (hour, minute) = current.endTime.orEmpty().toHourMinute()
+                    TimePickerDialog(
+                        context,
+                        { _, h, m -> onChange(current.copy(endTime = "%02d:%02d".format(h, m))) },
+                        hour,
+                        minute,
+                        true,
+                    ).show()
+                },
+                modifier = Modifier.weight(1f),
+            ) { Text("Until ${current.endTime.orEmpty().ifEmpty { "17:00" }}") }
+        }
+
+        Text(
+            text = "On these days",
+            style = MaterialTheme.typography.labelLarge,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            ActiveWindow.DAY_NAMES.forEachIndexed { index, name ->
+                val days = current.daysOfWeek.orEmpty()
+                val selected = index in days
+                TagChip(
+                    label = name,
+                    icon = if (selected) Icons.Default.Check else null,
+                    onClick = {
+                        val next = if (selected) days - index else (days + index).sorted()
+                        onChange(current.copy(daysOfWeek = next.takeIf { it.isNotEmpty() }))
+                    },
+                )
+            }
+        }
+        Text(
+            text = "No days selected means every day.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
+
+/** A date and time picker for [ChatTriggerModel.expiresAt], stored as an ISO instant string. */
+@Composable
+private fun ExpiryField(
+    value: String?,
+    onChange: (String?) -> Unit,
+) {
+    val context = LocalContext.current
+    val parsed = value?.let { InstantParser.parse(it) }
+
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Text(
+            text = "Stop firing after",
+            style = MaterialTheme.typography.labelLarge,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            OutlinedButton(
+                onClick = {
+                    val base = parsed?.let { ZonedDateTime.ofInstant(it, ZoneId.systemDefault()) }
+                        ?: ZonedDateTime.now()
+                    DatePickerDialog(
+                        context,
+                        { _, year, month, day ->
+                            TimePickerDialog(
+                                context,
+                                { _, hour, minute ->
+                                    val zoned = ZonedDateTime.of(
+                                        year, month + 1, day, hour, minute, 0, 0, ZoneId.systemDefault(),
+                                    )
+                                    onChange(DateTimeFormatter.ISO_INSTANT.format(zoned.toInstant()))
+                                },
+                                base.hour,
+                                base.minute,
+                                true,
+                            ).show()
+                        },
+                        base.year,
+                        base.monthValue - 1,
+                        base.dayOfMonth,
+                    ).show()
+                },
+                modifier = Modifier.weight(1f),
+            ) { Text(parsed?.relativeToNow() ?: "Never expires") }
+            if (value != null) {
+                IconButton(onClick = { onChange(null) }) {
+                    Icon(Icons.Default.Close, contentDescription = "Clear expiry")
+                }
+            }
+        }
+    }
 }

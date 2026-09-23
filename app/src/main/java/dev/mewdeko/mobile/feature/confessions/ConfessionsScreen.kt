@@ -9,6 +9,8 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Save
 import androidx.compose.material.icons.filled.Tag
+import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.Icon
@@ -54,6 +56,7 @@ fun ConfessionsScreen(
     val status by viewModel.status.collectAsStateWithLifecycle()
 
     var pendingDelete by remember { mutableStateOf<ConfessionRecord?>(null) }
+    var expandedIds by remember { mutableStateOf(setOf<Int>()) }
     val channelOptions = state.availableChannels.map { SelectorOption(it.id, it.name) }
 
     FeatureScaffold(
@@ -91,6 +94,11 @@ fun ConfessionsScreen(
                 StatTile(
                     label = "Today",
                     value = "${state.stats?.confessionsToday ?: 0}",
+                    modifier = Modifier.weight(1f),
+                )
+                StatTile(
+                    label = "Last #",
+                    value = "${state.stats?.lastConfessionNumber ?: "0"}",
                     modifier = Modifier.weight(1f),
                 )
             }
@@ -160,12 +168,13 @@ fun ConfessionsScreen(
                 EmptyState("No confessions submitted yet.", icon = Icons.Default.Lock)
             } else {
                 state.confessions.forEach { confession ->
+                    val expanded = confession.id in expandedIds
                     ListItem(
                         overlineContent = { Text("#${confession.number}") },
                         headlineContent = {
                             Text(
                                 text = confession.text,
-                                maxLines = 4,
+                                maxLines = if (expanded) Int.MAX_VALUE else 4,
                                 overflow = TextOverflow.Ellipsis,
                             )
                         },
@@ -173,15 +182,44 @@ fun ConfessionsScreen(
                             { Text(it.relativeToNow()) }
                         },
                         trailingContent = {
-                            IconButton(onClick = { pendingDelete = confession }) {
-                                Icon(
-                                    Icons.Default.Delete,
-                                    contentDescription = "Delete confession",
-                                    tint = MaterialTheme.colorScheme.error,
-                                )
+                            Row {
+                                IconButton(
+                                    onClick = {
+                                        expandedIds = if (expanded) {
+                                            expandedIds - confession.id
+                                        } else {
+                                            expandedIds + confession.id
+                                        }
+                                    },
+                                ) {
+                                    Icon(
+                                        if (expanded) Icons.Default.VisibilityOff else Icons.Default.Visibility,
+                                        contentDescription = if (expanded) {
+                                            "Collapse confession"
+                                        } else {
+                                            "Show full confession"
+                                        },
+                                    )
+                                }
+                                IconButton(onClick = { pendingDelete = confession }) {
+                                    Icon(
+                                        Icons.Default.Delete,
+                                        contentDescription = "Delete confession",
+                                        tint = MaterialTheme.colorScheme.error,
+                                    )
+                                }
                             }
                         },
                         colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickableRow {
+                                expandedIds = if (expanded) {
+                                    expandedIds - confession.id
+                                } else {
+                                    expandedIds + confession.id
+                                }
+                            },
                     )
                 }
             }

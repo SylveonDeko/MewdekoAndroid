@@ -108,7 +108,7 @@ class ApiClient @Inject constructor(
     }
 
     private suspend fun perform(endpoint: Endpoint, allowRetry: Boolean): String {
-        val base = currentBaseUrl() ?: throw ApiError.NotConfigured
+        val base = currentBaseUrl() ?: throw ApiError.NotConfigured()
         val url = "$base/${endpoint.path.trimStart('/')}"
 
         val response: HttpResponse = try {
@@ -134,7 +134,7 @@ class ApiClient @Inject constructor(
             runCatching { auth.refresh() }
             return perform(endpoint, allowRetry = false)
         }
-        if (status == 401) throw ApiError.Unauthorized
+        if (status == 401) throw ApiError.Unauthorized()
 
         val text = response.bodyAsText()
         if (!response.status.isSuccess()) {
@@ -162,4 +162,4 @@ suspend inline fun <reified T> ApiClient.call(
     path: String,
     method: HttpMethod,
     body: String? = null,
-): T = send(Endpoint(path, method, body), kotlinx.serialization.serializer())
+): T = send(Endpoint(path, method, body), serializer())

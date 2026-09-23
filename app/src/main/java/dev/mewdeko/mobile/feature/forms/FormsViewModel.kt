@@ -2,433 +2,40 @@ package dev.mewdeko.mobile.feature.forms
 
 import androidx.lifecycle.SavedStateHandle
 import dagger.hilt.android.lifecycle.HiltViewModel
+import dev.mewdeko.mobile.core.auth.AuthManager
 import dev.mewdeko.mobile.core.auth.SessionHolder
 import dev.mewdeko.mobile.core.model.GuildRole
-import dev.mewdeko.mobile.core.model.Snowflake
-import dev.mewdeko.mobile.core.model.SnowflakeSerializer
 import dev.mewdeko.mobile.core.model.TextChannelLite
 import dev.mewdeko.mobile.core.net.ApiClient
+import dev.mewdeko.mobile.core.net.ApiError
 import dev.mewdeko.mobile.core.net.Endpoint
 import dev.mewdeko.mobile.core.net.HttpMethod
+import dev.mewdeko.mobile.core.net.MewdekoJson
 import dev.mewdeko.mobile.core.net.jsonBody
-import dev.mewdeko.mobile.core.net.jsonBool
 import dev.mewdeko.mobile.core.net.jsonString
 import dev.mewdeko.mobile.core.ui.FeatureViewModel
+import io.ktor.client.HttpClient
+import io.ktor.client.request.get
+import io.ktor.client.request.header
+import io.ktor.client.statement.bodyAsText
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
-import kotlinx.serialization.Serializable
 import kotlinx.serialization.builtins.ListSerializer
+import kotlinx.serialization.decodeFromString
 import javax.inject.Inject
 
-/** The answer widget a question renders as. */
-enum class FormQuestionType(val raw: String, val label: String) {
-    SHORT_TEXT("short_text", "Short Text"),
-    LONG_TEXT("long_text", "Long Text"),
-    MULTIPLE_CHOICE("multiple_choice", "Multiple Choice"),
-    CHECKBOXES("checkboxes", "Checkboxes"),
-    DROPDOWN("dropdown", "Dropdown"),
-    NUMBER("number", "Number"),
-    EMAIL("email", "Email"),
-    URL("url", "URL");
-
-    /** Whether the question carries a fixed list of choices. */
-    val supportsOptions: Boolean
-        get() = this == MULTIPLE_CHOICE || this == CHECKBOXES || this == DROPDOWN
-
-    /** Whether the question accepts min/max bounds. */
-    val supportsValidation: Boolean
-        get() = this == SHORT_TEXT || this == LONG_TEXT || this == CHECKBOXES || this == NUMBER
-
-    companion object {
-        /** Maps a wire value onto a type, defaulting to [SHORT_TEXT]. */
-        fun from(raw: String?) = entries.firstOrNull { it.raw == raw } ?: SHORT_TEXT
-    }
-}
-
-/** What a form is used for, which decides whether it has a review workflow. */
-enum class FormType(val raw: Int, val label: String) {
-    REGULAR(0, "Regular"),
-    BAN_APPEAL(1, "Ban Appeal"),
-    JOIN_APPLICATION(2, "Join Application");
-
-    companion object {
-        /** Maps a wire value onto a type, defaulting to [REGULAR]. */
-        fun from(raw: Int) = entries.firstOrNull { it.raw == raw } ?: REGULAR
-    }
-}
-
-/** Where a submitted response sits in the review workflow. */
-enum class ResponseStatus(val raw: Int, val label: String) {
-    PENDING(0, "Pending"),
-    UNDER_REVIEW(1, "Under Review"),
-    APPROVED(2, "Approved"),
-    REJECTED(3, "Rejected");
-
-    companion object {
-        /** Maps a wire value onto a status, defaulting to [PENDING]. */
-        fun from(raw: Int) = entries.firstOrNull { it.raw == raw } ?: PENDING
-    }
-}
-
-/** How a question-based condition compares the parent answer. */
-enum class FormConditionalOperator(val raw: String, val label: String) {
-    EQUALS("equals", "Equals"),
-    NOT_EQUALS("not_equals", "Not equals"),
-    CONTAINS("contains", "Contains"),
-    GREATER_THAN("greater_than", "Greater than"),
-    LESS_THAN("less_than", "Less than");
-
-    companion object {
-        /** Maps a wire value onto an operator, defaulting to [EQUALS]. */
-        fun from(raw: String?) = entries.firstOrNull { it.raw == raw } ?: EQUALS
-    }
-}
-
-/** What a question's visibility is gated on. */
-enum class FormConditionType(val raw: Int, val label: String) {
-    QUESTION_BASED(0, "Based on question"),
-    DISCORD_ROLE(1, "Has Discord role"),
-    SERVER_TENURE(2, "Server tenure"),
-    BOOST_STATUS(3, "Boost / Nitro"),
-    PERMISSION(4, "Permission"),
-    MULTIPLE_CONDITIONS(5, "Multiple conditions");
-
-    companion object {
-        /** Maps a wire value onto a condition type, defaulting to [QUESTION_BASED]. */
-        fun from(raw: Int) = entries.firstOrNull { it.raw == raw } ?: QUESTION_BASED
-    }
-}
-
-/** How the conditions in a group combine. */
-enum class FormConditionLogicType(val raw: String) {
-    AND("AND"),
-    OR("OR");
-
-    companion object {
-        /** Maps a wire value onto a logic type, defaulting to [AND]. */
-        fun from(raw: String?) = entries.firstOrNull { it.raw == raw } ?: AND
-    }
-}
-
-/** The role change applied when a response is approved or rejected. */
-enum class FormApprovalActionType(val raw: Int, val label: String) {
-    NONE(0, "No role changes"),
-    ADD_ROLES(1, "Add roles"),
-    REMOVE_ROLES(2, "Remove roles");
-
-    companion object {
-        /** Maps a wire value onto an action, defaulting to [NONE]. */
-        fun from(raw: Int) = entries.firstOrNull { it.raw == raw } ?: NONE
-    }
-}
-
-/** One choice on a multiple-choice, checkbox, or dropdown question. */
-@Serializable
-data class FormQuestionOption(
-    val id: Int = 0,
-    val questionId: Int = 0,
-    val optionText: String = "",
-    val optionValue: String = "",
-    val displayOrder: Int = 0,
-)
-
-/** One clause of a question's multi-condition visibility rule. */
-@Serializable
-data class FormQuestionCondition(
-    val id: Int = 0,
-    val questionId: Int = 0,
-    val conditionGroup: Int = 0,
-    val conditionType: Int = 0,
-    val targetQuestionId: Int? = null,
-    val targetRoleIds: String? = null,
-    val operator: String? = null,
-    val expectedValue: String? = null,
-    val daysThreshold: Int? = null,
-    val requiresBoost: Boolean? = null,
-    val requiresNitro: Boolean? = null,
-    val permissionFlags: Int? = null,
-    val logicType: String = "AND",
-)
-
-/** One question on a form. */
-@Serializable
-data class FormQuestion(
-    val id: Int = 0,
-    val formId: Int = 0,
-    val questionText: String = "",
-    val questionType: String = "short_text",
-    val isRequired: Boolean = false,
-    val displayOrder: Int = 0,
-    val placeholder: String? = null,
-    val minValue: Int? = null,
-    val maxValue: Int? = null,
-    val minLength: Int? = null,
-    val maxLength: Int? = null,
-    val conditionalParentQuestionId: Int? = null,
-    val conditionalOperator: String? = null,
-    val conditionalExpectedValue: String? = null,
-    val conditionalType: Int = 0,
-    val conditionalRoleIds: String? = null,
-    val conditionalDaysInServer: Int? = null,
-    val conditionalAccountAgeDays: Int? = null,
-    val conditionalRequiresBoost: Boolean? = null,
-    val conditionalRequiresNitro: Boolean? = null,
-    val enableAnswerPiping: Boolean = false,
-    val options: List<FormQuestionOption>? = null,
-    val conditions: List<FormQuestionCondition>? = null,
-) {
-    /** The typed form of [questionType]. */
-    val type: FormQuestionType get() = FormQuestionType.from(questionType)
-
-    /** Whether this question is gated behind anything at all. */
-    val isConditional: Boolean get() = conditionalType != 0 || conditions?.isNotEmpty() == true
-
-    /**
-     * The wire body for create and update.
-     *
-     * Options round-trip through their own endpoint, so they are deliberately
-     * left out here.
-     */
-    fun payload(): String = jsonBody(
-        "id" to id,
-        "formId" to formId,
-        "questionText" to questionText,
-        "questionType" to questionType,
-        "isRequired" to isRequired,
-        "displayOrder" to displayOrder,
-        "placeholder" to placeholder,
-        "minValue" to minValue,
-        "maxValue" to maxValue,
-        "minLength" to minLength,
-        "maxLength" to maxLength,
-        "conditionalType" to conditionalType,
-        "conditionalParentQuestionId" to conditionalParentQuestionId,
-        "conditionalOperator" to conditionalOperator,
-        "conditionalExpectedValue" to conditionalExpectedValue,
-        "conditionalRoleIds" to conditionalRoleIds,
-        "conditionalDaysInServer" to conditionalDaysInServer,
-        "conditionalAccountAgeDays" to conditionalAccountAgeDays,
-        "conditionalRequiresBoost" to conditionalRequiresBoost,
-        "conditionalRequiresNitro" to conditionalRequiresNitro,
-        "enableAnswerPiping" to enableAnswerPiping,
-    )
-
-    companion object {
-        /** A fresh unsaved question belonging to [formId]. */
-        fun blank(formId: Int, displayOrder: Int = 0) =
-            FormQuestion(formId = formId, displayOrder = displayOrder)
-    }
-}
-
-/** A form definition with its settings and counters. */
-@Serializable
-data class FormDefinition(
-    val id: Int = 0,
-    @Serializable(with = SnowflakeSerializer::class) val guildId: Snowflake = "",
-    val name: String = "",
-    val description: String? = null,
-    @Serializable(with = SnowflakeSerializer::class) val submitChannelId: Snowflake? = null,
-    val allowMultipleSubmissions: Boolean = false,
-    val maxResponses: Int? = null,
-    val requireCaptcha: Boolean = false,
-    val isActive: Boolean = false,
-    val isDraft: Boolean = true,
-    val allowAnonymous: Boolean = false,
-    val expiresAt: String? = null,
-    @Serializable(with = SnowflakeSerializer::class) val requiredRoleId: Snowflake? = null,
-    val successMessage: String? = null,
-    val formType: Int = 0,
-    val allowExternalUsers: Boolean = false,
-    val inviteMaxUses: Int? = null,
-    val inviteMaxAge: Int? = null,
-    val requireApproval: Boolean = false,
-    val approvalActionType: Int = 0,
-    val approvalRoleIds: String? = null,
-    val rejectionActionType: Int = 0,
-    val rejectionRoleIds: String? = null,
-    @Serializable(with = SnowflakeSerializer::class) val createdBy: Snowflake = "",
-    val createdAt: String? = null,
-    val updatedAt: String? = null,
-    val responseCount: Int? = null,
-    val pendingCount: Int? = null,
-) {
-    /** The typed form of [formType]. */
-    val type: FormType get() = FormType.from(formType)
-
-    /** Whether this form runs submissions through the approval workflow. */
-    val hasWorkflow: Boolean get() = formType != FormType.REGULAR.raw
-
-    /** How many responses have come in. */
-    val responses: Int get() = responseCount ?: 0
-
-    /** How many responses are waiting on a reviewer. */
-    val pending: Int get() = pendingCount ?: 0
-
-    /**
-     * The expiry timestamp, with Postgres' unbounded sentinels treated as
-     * "no expiry" the way the dashboard does.
-     */
-    val expiry: String? get() = expiresAt?.takeIf { it != "infinity" && it != "-infinity" }
-
-    /** Roles applied on approval, parsed out of the packed id string. */
-    val approvalRoles: List<Snowflake> get() = approvalRoleIds.splitIds()
-
-    /** Roles applied on rejection, parsed out of the packed id string. */
-    val rejectionRoles: List<Snowflake> get() = rejectionRoleIds.splitIds()
-
-    /** The wire body for create and update, omitting server-owned counters. */
-    fun payload(): String = jsonBody(
-        "id" to id,
-        "guildId" to guildId,
-        "name" to name,
-        "description" to description,
-        "submitChannelId" to submitChannelId,
-        "allowMultipleSubmissions" to allowMultipleSubmissions,
-        "maxResponses" to maxResponses,
-        "requireCaptcha" to requireCaptcha,
-        "isActive" to isActive,
-        "isDraft" to isDraft,
-        "allowAnonymous" to allowAnonymous,
-        "expiresAt" to expiry,
-        "requiredRoleId" to requiredRoleId,
-        "successMessage" to successMessage,
-        "formType" to formType,
-        "allowExternalUsers" to allowExternalUsers,
-        "inviteMaxUses" to inviteMaxUses,
-        "inviteMaxAge" to inviteMaxAge,
-        "requireApproval" to requireApproval,
-        "approvalActionType" to approvalActionType,
-        "approvalRoleIds" to approvalRoleIds,
-        "rejectionActionType" to rejectionActionType,
-        "rejectionRoleIds" to rejectionRoleIds,
-        "createdBy" to createdBy,
-    )
-}
-
-/** Splits a packed role id string, which the bot writes space or comma separated. */
-private fun String?.splitIds(): List<Snowflake> =
-    this?.split(',', ' ')?.map { it.trim() }?.filter { it.isNotEmpty() }.orEmpty()
-
-/** Packs role ids back into the string shape the bot stores. */
-internal fun List<Snowflake>.packIds(): String? =
-    takeIf { it.isNotEmpty() }?.joinToString(",")
-
-/** A single submission's summary row. */
-@Serializable
-data class FormResponseRecord(
-    val id: Int = 0,
-    val formId: Int = 0,
-    @Serializable(with = SnowflakeSerializer::class) val userId: Snowflake = "",
-    val username: String? = null,
-    val submittedAt: String? = null,
-)
-
-/** One page of a form's responses. */
-@Serializable
-data class PaginatedFormResponses(
-    val responses: List<FormResponseRecord> = emptyList(),
-    val totalCount: Int = 0,
-    val page: Int = 1,
-    val pageSize: Int = 25,
-    val totalPages: Int = 1,
-)
-
-/** One answer within a submitted response. */
-@Serializable
-data class FormAnswerEntry(
-    val id: Int = 0,
-    val questionId: Int = 0,
-    val answerText: String? = null,
-    val answerValues: List<String>? = null,
-    val question: FormQuestion? = null,
-)
-
-/** A submitted response with every answer it carried. */
-@Serializable
-data class FormResponseDetail(
-    val response: FormResponseRecord = FormResponseRecord(),
-    val answers: List<FormAnswerEntry> = emptyList(),
-)
-
-/** The review record attached to a response on a workflow form. */
-@Serializable
-data class FormResponseWorkflow(
-    val id: Int = 0,
-    val responseId: Int = 0,
-    val status: Int = 0,
-    @Serializable(with = SnowflakeSerializer::class) val reviewedBy: Snowflake? = null,
-    val reviewNotes: String? = null,
-    val actionTaken: Int = 0,
-    val inviteCode: String? = null,
-) {
-    /** The typed form of [status]. */
-    val state: ResponseStatus get() = ResponseStatus.from(status)
-}
-
-/** A response paired with its review record. */
-@Serializable
-data class FormResponseWithWorkflow(
-    val response: FormResponseRecord = FormResponseRecord(),
-    val workflow: FormResponseWorkflow = FormResponseWorkflow(),
-) {
-    /** The response id, which identifies the pair. */
-    val id: Int get() = response.id
-}
-
-/** What the bot returns after approving a response. */
-@Serializable
-data class FormApprovalResult(
-    val message: String = "",
-    val inviteCode: String? = null,
-)
-
-/** Which part of a form's detail view is showing. */
-enum class FormSection(val id: String, val label: String) {
-    SETTINGS("settings", "Settings"),
-    QUESTIONS("questions", "Questions"),
-    RESPONSES("responses", "Responses"),
-    REVIEW("review", "Review"),
-}
-
-/** Forms screen state. */
-data class FormsState(
-    val forms: List<FormDefinition> = emptyList(),
-    val availableChannels: List<TextChannelLite> = emptyList(),
-    val availableRoles: List<GuildRole> = emptyList(),
-    val selected: FormDefinition? = null,
-    val loadedSelected: FormDefinition? = null,
-    val section: FormSection = FormSection.SETTINGS,
-    val questions: List<FormQuestion> = emptyList(),
-    val questionsLoading: Boolean = false,
-    val responses: PaginatedFormResponses? = null,
-    val responsePage: Int = 1,
-    val responseDetail: FormResponseDetail? = null,
-    val review: List<FormResponseWithWorkflow> = emptyList(),
-    val reviewFilter: ResponseStatus? = null,
-    val busy: Boolean = false,
-) {
-    /** Whether the open form has edits that have not been saved. */
-    val hasUnsavedForm: Boolean get() = selected != null && selected != loadedSelected
-
-    /** The sections available for the open form. */
-    val sections: List<FormSection>
-        get() = if (selected?.hasWorkflow == true) {
-            FormSection.entries
-        } else {
-            listOf(FormSection.SETTINGS, FormSection.QUESTIONS, FormSection.RESPONSES)
-        }
-}
-
-/** Member-facing forms: definitions, questions, responses, and review. */
+/** Member-facing forms: build them, collect answers, review submissions, and track history. */
 @HiltViewModel
 class FormsViewModel @Inject constructor(
     savedStateHandle: SavedStateHandle,
     api: ApiClient,
     session: SessionHolder,
+    private val http: HttpClient,
+    private val auth: AuthManager,
 ) : FeatureViewModel(savedStateHandle, api, session) {
 
     private val _state = MutableStateFlow(FormsState())
@@ -436,18 +43,32 @@ class FormsViewModel @Inject constructor(
     /** Observable screen state. */
     val state: StateFlow<FormsState> = _state.asStateFlow()
 
+    /**
+     * Counter for temporary ids given to questions and page breaks added this session. Negative
+     * numbers cannot collide with anything saved, and the save payload normalises them back to
+     * zero, which is what still lets an unsaved question be picked as another question's
+     * condition or "required when" parent before either has ever been saved.
+     */
+    private var nextTempId = -1
+
     init {
         load()
     }
 
-    /** Reloads the form list along with the channel and role pickers. */
+    private fun takeTempId(): Int {
+        val id = nextTempId
+        nextTempId -= 1
+        return id
+    }
+
+    /** Reloads the form list along with the channel, role, and guild default pickers. */
     fun load(refreshing: Boolean = false) = launchLoad(refreshing) {
         coroutineScope {
             val forms = async {
                 runCatching {
                     api.send(
                         Endpoint("api/forms/guild/$guildId?activeOnly=false"),
-                        ListSerializer(FormDefinition.serializer()),
+                        ListSerializer(Form.serializer()),
                     )
                 }.getOrDefault(emptyList())
             }
@@ -467,6 +88,22 @@ class FormsViewModel @Inject constructor(
                     )
                 }.getOrDefault(emptyList())
             }
+            val emotes = async {
+                runCatching {
+                    api.send(
+                        Endpoint("api/forms/guild/$guildId/review-emotes"),
+                        FormReviewEmotes.serializer(),
+                    )
+                }.getOrDefault(FormReviewEmotes())
+            }
+            val emojiGuilds = async {
+                runCatching {
+                    api.send(
+                        Endpoint("api/ClientOperations/emojis/$userId?adminOnly=false"),
+                        ListSerializer(FormEmojiGuildInfo.serializer()),
+                    )
+                }.getOrDefault(emptyList())
+            }
 
             _state.update {
                 it.copy(
@@ -474,26 +111,33 @@ class FormsViewModel @Inject constructor(
                     availableChannels = channels.await()
                         .sortedBy { channel -> channel.name.lowercase() },
                     availableRoles = roles.await().sortedBy { role -> role.name.lowercase() },
+                    guildReviewEmotes = emotes.await(),
+                    availableEmojiGuilds = emojiGuilds.await(),
                 )
             }
         }
     }
 
-    /** Opens a form's detail view and loads the section it lands on. */
-    fun open(form: FormDefinition) {
+    /** Opens a form's detail view and loads its questions. */
+    fun open(form: Form) {
         _state.update {
             it.copy(
                 selected = form,
                 loadedSelected = form,
                 section = FormSection.SETTINGS,
                 questions = emptyList(),
+                loadedQuestions = emptyList(),
+                activePage = 0,
                 responses = null,
                 responsePage = 1,
-                responseDetail = null,
-                review = emptyList(),
-                reviewFilter = null,
+                responseFilter = null,
+                expandedResponseId = null,
+                responseRevisions = emptyMap(),
+                versions = null,
+                versionDiff = null,
             )
         }
+        loadQuestions()
     }
 
     /** Returns to the form list, discarding any unsaved edits. */
@@ -503,79 +147,116 @@ class FormsViewModel @Inject constructor(
     fun setSection(section: FormSection) {
         _state.update { it.copy(section = section) }
         when (section) {
-            FormSection.QUESTIONS -> loadQuestions()
             FormSection.RESPONSES -> loadResponses()
-            FormSection.REVIEW -> loadReview()
-            FormSection.SETTINGS -> Unit
+            FormSection.VERSIONS -> loadVersions()
+            FormSection.SETTINGS, FormSection.QUESTIONS -> Unit
         }
     }
 
     /** Applies an edit to the open form without saving it. */
-    fun editForm(transform: (FormDefinition) -> FormDefinition) =
-        _state.update { it.copy(selected = it.selected?.let(transform)) }
+    fun editForm(transform: (Form) -> Form) = _state.update { it.copy(selected = it.selected?.let(transform)) }
 
-    /** Creates a new draft form and opens it. */
-    fun createForm(name: String) = launchAction("Failed to create form.") {
-        val blank = FormDefinition(
-            guildId = guildId,
-            name = name.trim().ifEmpty { "New form" },
-            createdBy = userId,
+    /** Applies an edit to the open form's local question list without saving it. */
+    fun editQuestions(transform: (List<FormQuestion>) -> List<FormQuestion>) =
+        _state.update { it.copy(questions = transform(it.questions)) }
+
+    /**
+     * Creates a new draft form with a name and a type and opens its builder.
+     *
+     * The type decides which extra settings apply and, like the dashboard, is fixed once the form
+     * is created: every later edit goes through [saveForm], which round-trips whatever type the
+     * form already has.
+     */
+    fun createForm(name: String, formType: Int = FormType.REGULAR.raw) = launchAction("Failed to create form.") {
+        val blank = Form.blank(guildId, userId, name).copy(formType = formType)
+        val saved = api.send(
+            Endpoint(
+                "api/forms/guild/$guildId/save",
+                HttpMethod.POST,
+                buildFormSavePayload(blank, emptyList(), userId),
+            ),
+            Form.serializer(),
         )
-        val created = api.send(
-            Endpoint("api/forms/guild/$guildId", HttpMethod.POST, blank.payload()),
-            FormDefinition.serializer(),
-        )
-        _state.update { it.copy(forms = listOf(created) + it.forms) }
-        open(created)
-        postSuccess("Form created.")
+        _state.update { it.copy(forms = listOf(saved) + it.forms) }
+        open(saved)
     }
 
-    /** Writes the open form's settings back to the bot. */
+    /**
+     * Writes the open form's settings and questions back to the bot in one call.
+     *
+     * The whole tree is round-tripped every time, which is what keeps a save from wiping any
+     * setting or question field the app itself does not render a control for.
+     */
     fun saveForm() {
         val form = _state.value.selected ?: return
+        val questions = _state.value.questions
         launchAction("Failed to save form.") {
-            api.sendIgnoringBody(
-                Endpoint("api/forms/${form.id}", HttpMethod.PUT, form.payload())
-            )
+            val saved = try {
+                api.send(
+                    Endpoint(
+                        "api/forms/guild/$guildId/save",
+                        HttpMethod.POST,
+                        buildFormSavePayload(form, questions, userId),
+                    ),
+                    Form.serializer(),
+                )
+            } catch (error: ApiError.Http) {
+                postError(saveErrorMessage(error))
+                return@launchAction
+            }
+            val savedQuestions = runCatching {
+                api.send(
+                    Endpoint("api/forms/${saved.id}/questions"),
+                    ListSerializer(FormQuestion.serializer()),
+                )
+            }.getOrDefault(questions).sortedBy { it.displayOrder }
             _state.update { current ->
                 current.copy(
-                    loadedSelected = form,
-                    forms = current.forms.map { if (it.id == form.id) form else it },
+                    selected = saved,
+                    loadedSelected = saved,
+                    questions = savedQuestions,
+                    loadedQuestions = savedQuestions,
+                    forms = current.forms.map { if (it.id == saved.id) saved else it }
+                        .let { list -> if (list.any { it.id == saved.id }) list else list + saved },
                 )
             }
-            postSuccess("Saved.")
+            postSuccess("Form saved.")
         }
     }
 
     /** Flips a form between visible and hidden to members. */
-    fun toggleActive(form: FormDefinition) = launchAction("Failed to update form.") {
+    fun toggleActive(form: Form) = launchAction("Failed to update form.") {
         val target = !form.isActive
         api.sendIgnoringBody(
-            Endpoint("api/forms/${form.id}/active", HttpMethod.PATCH, jsonBool(target))
+            Endpoint("api/forms/${form.id}/active", HttpMethod.PATCH, target.toString())
         )
         updateForm(form.id) { it.copy(isActive = target) }
-        postSuccess(if (target) "Form activated." else "Form deactivated.")
     }
 
-    /** Takes a draft form live. */
-    fun publish(form: FormDefinition) = launchAction("Publish failed.") {
-        api.sendIgnoringBody(Endpoint("api/forms/${form.id}/publish", HttpMethod.POST))
+    /** Takes a draft form live, or surfaces the reasons the server refused to. */
+    fun publish(form: Form) = launchAction("Publish failed.") {
+        try {
+            api.sendIgnoringBody(Endpoint("api/forms/${form.id}/publish", HttpMethod.POST))
+        } catch (error: ApiError.Http) {
+            postError(saveErrorMessage(error, fallback = "This form cannot be published yet."))
+            return@launchAction
+        }
         updateForm(form.id) { it.copy(isDraft = false) }
         postSuccess("Form published.")
     }
 
     /** Copies a form, questions included, as a new draft. */
-    fun duplicate(form: FormDefinition) = launchAction("Duplicate failed.") {
-        api.send(
+    fun duplicate(form: Form) = launchAction("Duplicate failed.") {
+        val duplicated = api.send(
             Endpoint("api/forms/${form.id}/duplicate", HttpMethod.POST, jsonString(userId)),
-            FormDefinition.serializer(),
+            Form.serializer(),
         )
-        load()
-        postSuccess("Form duplicated.")
+        _state.update { it.copy(forms = listOf(duplicated) + it.forms) }
+        postSuccess("Form duplicated as \"${duplicated.name}\".")
     }
 
     /** Deletes a form and everything submitted to it. */
-    fun deleteForm(form: FormDefinition) = launchAction("Delete failed.") {
+    fun deleteForm(form: Form) = launchAction("Delete failed.") {
         api.sendIgnoringBody(Endpoint("api/forms/${form.id}", HttpMethod.DELETE))
         _state.update { current ->
             current.copy(
@@ -584,7 +265,39 @@ class FormsViewModel @Inject constructor(
                 loadedSelected = current.loadedSelected?.takeIf { it.id != form.id },
             )
         }
-        postSuccess("Form deleted.")
+    }
+
+    /** Generates, or reuses, this form's permanent share link and stores it for display. */
+    fun requestShareLink(form: Form) = launchAction("Failed to generate a share link.") {
+        val base = auth.currentBaseUrl()?.trimEnd('/') ?: return@launchAction
+        val result = api.send(
+            Endpoint(
+                "api/forms/${form.id}/share-link",
+                HttpMethod.POST,
+                jsonBody("instanceIdentifier" to MobileInstanceIdentifier),
+            ),
+            FormShareLinkResult.serializer(),
+        )
+        _state.update { it.copy(shareLink = "$base/forms/${result.shareCode}") }
+    }
+
+    /** Clears the pending share link once its dialog has been shown. */
+    fun clearShareLink() = _state.update { it.copy(shareLink = null) }
+
+    /** Generates a preview link for this form and returns it for the caller to open. */
+    suspend fun previewUrl(form: Form): String? {
+        val base = auth.currentBaseUrl()?.trimEnd('/') ?: return null
+        return runCatching {
+            val result = api.send(
+                Endpoint(
+                    "api/forms/${form.id}/share-link",
+                    HttpMethod.POST,
+                    jsonBody("instanceIdentifier" to MobileInstanceIdentifier),
+                ),
+                FormShareLinkResult.serializer(),
+            )
+            "$base/forms/${result.shareCode}?preview=true"
+        }.getOrNull()
     }
 
     /** Reloads the open form's questions in display order. */
@@ -597,224 +310,263 @@ class FormsViewModel @Inject constructor(
                     Endpoint("api/forms/${form.id}/questions"),
                     ListSerializer(FormQuestion.serializer()),
                 )
-            }.getOrDefault(emptyList())
+            }.getOrDefault(emptyList()).sortedBy { it.displayOrder }
             _state.update {
-                it.copy(
-                    questions = questions.sortedBy { question -> question.displayOrder },
-                    questionsLoading = false,
-                )
+                it.copy(questions = questions, loadedQuestions = questions, questionsLoading = false)
             }
         }
     }
 
     /**
-     * Creates or updates a question.
-     *
-     * The bot's question endpoints ignore any nested options, so newly added
-     * options are posted individually once the question itself has an id.
+     * Adds a new question of [type] to the end of the page being edited, and returns where it
+     * landed so the caller can open it straight into the editor. Can be called any number of
+     * times before saving: each one gets its own negative temporary id, so several can be added,
+     * wired into each other's conditions, and saved together in one call.
      */
-    fun saveQuestion(question: FormQuestion, isNew: Boolean) {
+    fun addQuestion(type: FormQuestionType = FormQuestionType.SHORT_TEXT): Int {
+        val form = _state.value.selected ?: return -1
+        val fresh = FormQuestion(id = takeTempId(), formId = form.id, questionType = type.raw)
+        val (next, index) = formPageInsertQuestion(_state.value.questions, fresh, _state.value.activePage)
+        _state.update { it.copy(questions = next) }
+        return index
+    }
+
+    /** Replaces one question in the local working list, matched by its position. */
+    fun replaceQuestionAt(index: Int, question: FormQuestion) = editQuestions { current ->
+        current.toMutableList().also { if (index in it.indices) it[index] = question }
+    }
+
+    /** Duplicates a question in place, right after the original. */
+    fun duplicateQuestionAt(index: Int) {
+        val current = _state.value.questions
+        val source = current.getOrNull(index) ?: return
+        val copy = source.copy(id = takeTempId(), questionText = "${source.questionText} (copy)")
+        _state.update { it.copy(questions = formQuestionDuplicateInList(current, index, copy)) }
+    }
+
+    /** Removes a question, or a page break, from the local working list. */
+    fun removeQuestionAt(index: Int) = editQuestions { current ->
+        current.toMutableList().also { if (index in it.indices) it.removeAt(index) }
+    }
+
+    /** Moves a question one place earlier or later within its own page. */
+    fun moveQuestion(index: Int, forward: Boolean) {
+        val moved = formQuestionMoveInPage(_state.value.questions, index, forward) ?: return
+        _state.update { it.copy(questions = moved) }
+    }
+
+    /** Switches which page of the form the question builder is showing. */
+    fun setActivePage(page: Int) = _state.update { it.copy(activePage = page) }
+
+    /** Starts a new page right after the one being edited, and moves onto it. */
+    fun addPage() {
         val form = _state.value.selected ?: return
-        launchAction("Failed to save question.") {
-            val saved = if (isNew) {
-                api.send(
-                    Endpoint(
-                        "api/forms/${form.id}/questions",
-                        HttpMethod.POST,
-                        question.copy(formId = form.id).payload(),
-                    ),
-                    FormQuestion.serializer(),
-                )
-            } else {
-                api.sendIgnoringBody(
-                    Endpoint(
-                        "api/forms/questions/${question.id}",
-                        HttpMethod.PUT,
-                        question.payload(),
-                    )
-                )
-                question
-            }
+        val brk = FormQuestion.blankBreak(form.id).copy(id = takeTempId())
+        val (next, activePage) = formPageAdd(_state.value.questions, brk, _state.value.activePage)
+        _state.update { it.copy(questions = next, activePage = activePage) }
+    }
 
-            val existingOptions = if (isNew) {
-                emptyList()
-            } else {
-                _state.value.questions.firstOrNull { it.id == question.id }?.options.orEmpty()
-            }
-            val wanted = question.options.orEmpty().filter { it.optionText.isNotBlank() }
-
-            existingOptions.filter { existing -> wanted.none { it.id == existing.id } }
-                .forEach { removed ->
-                    runCatching {
-                        api.sendIgnoringBody(
-                            Endpoint("api/forms/questions/options/${removed.id}", HttpMethod.DELETE)
-                        )
-                    }
-                }
-
-            wanted.forEachIndexed { index, option ->
-                val existing = existingOptions.firstOrNull { it.id != 0 && it.id == option.id }
-                runCatching {
-                    when {
-                        existing == null -> api.sendIgnoringBody(
-                            Endpoint(
-                                "api/forms/questions/${saved.id}/options",
-                                HttpMethod.POST,
-                                jsonBody(
-                                    "id" to 0,
-                                    "questionId" to saved.id,
-                                    "optionText" to option.optionText,
-                                    "optionValue" to option.optionValue.ifEmpty { option.optionText },
-                                    "displayOrder" to index,
-                                ),
-                            )
-                        )
-
-                        existing.optionText != option.optionText ||
-                            existing.optionValue != option.optionValue ||
-                            existing.displayOrder != index -> api.sendIgnoringBody(
-                            Endpoint(
-                                "api/forms/questions/options/${option.id}",
-                                HttpMethod.PUT,
-                                jsonBody(
-                                    "id" to option.id,
-                                    "questionId" to saved.id,
-                                    "optionText" to option.optionText,
-                                    "optionValue" to option.optionValue.ifEmpty { option.optionText },
-                                    "displayOrder" to index,
-                                ),
-                            )
-                        )
-
-                        else -> Unit
-                    }
-                }
-            }
-
-            loadQuestions()
-            postSuccess(if (isNew) "Question added." else "Question saved.")
+    /** Gives the first page a heading, which it does not have until a break is put above it. */
+    fun addHeadingToFirstPage() {
+        val form = _state.value.selected ?: return
+        val brk = FormQuestion.blankBreak(form.id).copy(id = takeTempId())
+        _state.update {
+            it.copy(questions = formPageAddHeading(it.questions, brk), activePage = 0)
         }
     }
 
-    /** Removes a question and every answer given to it. */
-    fun deleteQuestion(question: FormQuestion) = launchAction("Failed to delete question.") {
-        api.sendIgnoringBody(
-            Endpoint("api/forms/questions/${question.id}", HttpMethod.DELETE)
-        )
-        _state.update { it.copy(questions = it.questions.filterNot { q -> q.id == question.id }) }
-        postSuccess("Question deleted.")
+    /**
+     * Swaps the page being edited with its neighbour, heading and every question on it moving
+     * together. Refuses, with an error, when the first page has no heading of its own to move.
+     */
+    fun movePage(forward: Boolean) {
+        val result = formPageMove(_state.value.questions, _state.value.activePage, forward)
+        if (result == null) {
+            postError("Give the first page a heading before moving pages around.")
+            return
+        }
+        _state.update { it.copy(questions = result.first, activePage = result.second) }
     }
 
-    /** Loads one page of the open form's responses. */
-    fun loadResponses(page: Int = _state.value.responsePage) {
+    /** Removes the page being edited; its questions join the page before it. */
+    fun removePage() {
+        val result = formPageRemove(_state.value.questions, _state.value.activePage) ?: return
+        _state.update { it.copy(questions = result.first, activePage = result.second) }
+    }
+
+    /** Writes a field of the section break heading the given page. */
+    fun updatePageHeading(headingIndex: Int, transform: (FormQuestion) -> FormQuestion) = editQuestions { current ->
+        current.toMutableList().also { list ->
+            if (headingIndex in list.indices) list[headingIndex] = transform(list[headingIndex])
+        }
+    }
+
+    /** Loads one page of the open form's unified response queue. */
+    fun loadResponses(page: Int = _state.value.responsePage, status: ResponseStatus? = _state.value.responseFilter) {
         val form = _state.value.selected ?: return
         launchAction("Failed to load responses.") {
-            val data = api.send(
-                Endpoint("api/forms/${form.id}/responses?page=$page&pageSize=25"),
-                PaginatedFormResponses.serializer(),
-            )
-            _state.update { it.copy(responses = data, responsePage = page) }
-        }
-    }
-
-    /** Opens one response's full answer list. */
-    fun openResponse(response: FormResponseRecord) = launchAction("Failed to load response.") {
-        val detail = api.send(
-            Endpoint("api/forms/responses/${response.id}"),
-            FormResponseDetail.serializer(),
-        )
-        _state.update { it.copy(responseDetail = detail) }
-    }
-
-    /** Closes the open response detail. */
-    fun closeResponse() = _state.update { it.copy(responseDetail = null) }
-
-    /** Deletes one submitted response. */
-    fun deleteResponse(response: FormResponseRecord) =
-        launchAction("Failed to delete response.") {
-            api.sendIgnoringBody(
-                Endpoint("api/forms/responses/${response.id}", HttpMethod.DELETE)
-            )
-            _state.update { current ->
-                current.copy(
-                    responseDetail = current.responseDetail?.takeIf {
-                        it.response.id != response.id
-                    },
-                    responses = current.responses?.let { page ->
-                        page.copy(
-                            responses = page.responses.filterNot { it.id == response.id },
-                            totalCount = (page.totalCount - 1).coerceAtLeast(0),
-                        )
-                    },
-                )
-            }
-            postSuccess("Response deleted.")
-        }
-
-    /** Narrows the review queue to one status, or clears the filter with null. */
-    fun setReviewFilter(status: ResponseStatus?) {
-        _state.update { it.copy(reviewFilter = status) }
-        loadReview()
-    }
-
-    /** Reloads the review queue for the current filter. */
-    fun loadReview() {
-        val form = _state.value.selected ?: return
-        val filter = _state.value.reviewFilter
-        launchAction("Failed to load review queue.") {
             val path = buildString {
-                append("api/forms/${form.id}/responses/pending")
-                filter?.let { append("?status=${it.raw}") }
+                append("api/forms/${form.id}/responses?page=$page&pageSize=25")
+                status?.let { append("&status=${it.queryName}") }
             }
-            val queue = runCatching {
-                api.send(Endpoint(path), ListSerializer(FormResponseWithWorkflow.serializer()))
-            }.getOrDefault(emptyList())
-            _state.update { it.copy(review = queue) }
+            val data = api.send(Endpoint(path), ResponseQueuePage.serializer())
+            _state.update { it.copy(responses = data, responsePage = page, responseFilter = status) }
         }
+    }
+
+    /** Narrows the response queue to one status, or clears the filter with null. */
+    fun setResponseFilter(status: ResponseStatus?) = loadResponses(page = 1, status = status)
+
+    /** Expands, or collapses, one response's inline answers. */
+    fun toggleResponseExpanded(response: QueuedResponse) = _state.update {
+        val id = response.response.id
+        it.copy(expandedResponseId = if (it.expandedResponseId == id) null else id)
+    }
+
+    /** Loads the edit history of one response's answers. */
+    fun loadResponseRevisions(response: QueuedResponse) = launchAction("Failed to load revision history.") {
+        val revisions = api.send(
+            Endpoint("api/forms/responses/${response.response.id}/revisions"),
+            ListSerializer(FormResponseRevision.serializer()),
+        )
+        _state.update { it.copy(responseRevisions = it.responseRevisions + (response.response.id to revisions)) }
     }
 
     /** Approves a response, optionally recording reviewer notes. */
-    fun approve(entry: FormResponseWithWorkflow, notes: String) =
-        launchAction("Approve failed.") {
-            val result = api.send(
-                Endpoint(
-                    "api/forms/responses/${entry.id}/approve",
-                    HttpMethod.POST,
-                    jsonBody(
-                        "reviewerId" to userId,
-                        "notes" to notes.trim().takeIf { it.isNotEmpty() },
-                    ),
-                ),
-                FormApprovalResult.serializer(),
-            )
-            loadReview()
-            postSuccess(
-                result.inviteCode?.let { "Approved. Invite: $it" }
-                    ?: result.message.ifEmpty { "Response approved." }
-            )
-        }
+    fun approve(response: QueuedResponse, notes: String) = launchAction("Approve failed.") {
+        val result = api.send(
+            Endpoint(
+                "api/forms/responses/${response.response.id}/approve",
+                HttpMethod.POST,
+                jsonBody("reviewerId" to userId, "notes" to notes.trim().takeIf { it.isNotEmpty() }),
+            ),
+            FormApprovalResult.serializer(),
+        )
+        loadResponses()
+        postSuccess(result.inviteCode?.let { "Approved. Invite: $it" } ?: "Response approved.")
+    }
 
     /** Rejects a response. The bot requires a reason here. */
-    fun reject(entry: FormResponseWithWorkflow, notes: String) = launchAction("Reject failed.") {
+    fun reject(response: QueuedResponse, notes: String) = launchAction("Reject failed.") {
         api.sendIgnoringBody(
             Endpoint(
-                "api/forms/responses/${entry.id}/reject",
+                "api/forms/responses/${response.response.id}/reject",
                 HttpMethod.POST,
                 jsonBody("reviewerId" to userId, "notes" to notes.trim()),
             )
         )
-        loadReview()
+        loadResponses()
         postSuccess("Response rejected.")
     }
 
-    private fun updateForm(id: Int, transform: (FormDefinition) -> FormDefinition) =
-        _state.update { current ->
-            current.copy(
-                forms = current.forms.map { if (it.id == id) transform(it) else it },
-                selected = current.selected?.let { if (it.id == id) transform(it) else it },
-                loadedSelected = current.loadedSelected?.let {
-                    if (it.id == id) transform(it) else it
-                },
+    /** Deletes one submitted response. */
+    fun deleteResponse(response: QueuedResponse) = launchAction("Failed to delete response.") {
+        api.sendIgnoringBody(Endpoint("api/forms/responses/${response.response.id}", HttpMethod.DELETE))
+        loadResponses()
+        postSuccess("Response deleted.")
+    }
+
+    /**
+     * Fetches the form's responses as CSV text.
+     *
+     * [ApiClient] only decodes JSON, so this issues the request directly with the same
+     * credentials, matching the bot instance header the rest of the screen uses.
+     */
+    suspend fun exportResponsesCsv(form: Form): String? {
+        val base = auth.currentBaseUrl() ?: return null
+        return runCatching {
+            val response = http.get("${base.trimEnd('/')}/api/forms/${form.id}/responses/export") {
+                header("Authorization", "Bearer ${auth.currentAccessToken()}")
+                api.currentInstance()?.let { header("X-Mobile-Instance", it) }
+            }
+            response.bodyAsText()
+        }.getOrNull()
+    }
+
+    /** Reloads the open form's saved version history. */
+    fun loadVersions() {
+        val form = _state.value.selected ?: return
+        launchAction("Failed to load version history.") {
+            val versions = api.send(Endpoint("api/forms/${form.id}/versions"), FormVersionList.serializer())
+            _state.update { it.copy(versions = versions) }
+        }
+    }
+
+    /** Loads what one saved version changed compared to the version before it. */
+    fun loadVersionDiff(version: FormVersion) = launchAction("Failed to compare versions.") {
+        val form = _state.value.selected ?: return@launchAction
+        val changes = api.send(
+            Endpoint("api/forms/${form.id}/versions/${version.versionNumber}/diff"),
+            ListSerializer(FormVersionChange.serializer()),
+        )
+        _state.update { it.copy(versionDiff = version.versionNumber to changes) }
+    }
+
+    /** Clears the open version diff. */
+    fun clearVersionDiff() = _state.update { it.copy(versionDiff = null) }
+
+    /** Restores the form to a saved version. */
+    fun restoreVersion(version: FormVersion) = launchAction("Failed to restore that version.") {
+        val form = _state.value.selected ?: return@launchAction
+        api.sendIgnoringBody(
+            Endpoint(
+                "api/forms/${form.id}/versions/${version.versionNumber}/restore",
+                HttpMethod.POST,
+                jsonString(userId),
+            )
+        )
+        val restored = api.send(Endpoint("api/forms/${form.id}"), Form.serializer())
+        val questions = runCatching {
+            api.send(Endpoint("api/forms/${form.id}/questions"), ListSerializer(FormQuestion.serializer()))
+        }.getOrDefault(emptyList()).sortedBy { it.displayOrder }
+        _state.update {
+            it.copy(
+                selected = restored,
+                loadedSelected = restored,
+                questions = questions,
+                loadedQuestions = questions,
+                versionDiff = null,
             )
         }
+        loadVersions()
+        postSuccess("Form restored to version ${version.versionNumber}.")
+    }
+
+    /** Saves the guild's default review button emotes. */
+    fun saveGuildReviewEmotes(approve: String?, reject: String?) = launchAction("Failed to save defaults.") {
+        api.sendIgnoringBody(
+            Endpoint(
+                "api/forms/guild/$guildId/review-emotes",
+                HttpMethod.POST,
+                jsonBody("approveEmote" to approve, "rejectEmote" to reject),
+            )
+        )
+        _state.update { it.copy(guildReviewEmotes = FormReviewEmotes(approve, reject)) }
+        postSuccess("Review emotes saved.")
+    }
+
+    private fun saveErrorMessage(error: ApiError.Http, fallback: String = "This form could not be saved."): String {
+        val parsed = runCatching {
+            MewdekoJson.decodeFromString(FormErrorResponse.serializer(), error.body)
+        }.getOrNull()
+        val reasons = parsed?.errors?.filter { it.isNotBlank() }
+        return when {
+            !reasons.isNullOrEmpty() -> reasons.joinToString(". ")
+            !parsed?.message.isNullOrBlank() -> parsed?.message!!
+            else -> fallback
+        }
+    }
+
+    private fun updateForm(id: Int, transform: (Form) -> Form) = _state.update { current ->
+        current.copy(
+            forms = current.forms.map { if (it.id == id) transform(it) else it },
+            selected = current.selected?.let { if (it.id == id) transform(it) else it },
+            loadedSelected = current.loadedSelected?.let { if (it.id == id) transform(it) else it },
+        )
+    }
+
+    companion object {
+        /** Stands in for the dashboard's per-instance port, which mobile has no equivalent of. */
+        private const val MobileInstanceIdentifier = "mobile"
+    }
 }

@@ -47,14 +47,12 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import dev.mewdeko.mobile.core.model.EmbedMessage
 import dev.mewdeko.mobile.core.model.Snowflake
 import dev.mewdeko.mobile.core.ui.ConfirmDialog
 import dev.mewdeko.mobile.core.ui.DiscordSelectorSingle
 import dev.mewdeko.mobile.core.ui.EmptyState
 import dev.mewdeko.mobile.core.ui.FeatureScaffold
 import dev.mewdeko.mobile.core.ui.InfoRow
-import dev.mewdeko.mobile.core.ui.MewdekoTextField
 import dev.mewdeko.mobile.core.ui.SectionCard
 import dev.mewdeko.mobile.core.ui.SectionCardHeader
 import dev.mewdeko.mobile.core.ui.SectionTab
@@ -65,7 +63,6 @@ import dev.mewdeko.mobile.core.ui.SliderRow
 import dev.mewdeko.mobile.core.ui.StatTile
 import dev.mewdeko.mobile.core.ui.SwitchRow
 import dev.mewdeko.mobile.core.ui.clickableRow
-import dev.mewdeko.mobile.feature.embed.EmbedMessageEditor
 import dev.mewdeko.mobile.navigation.GuildRouteArgs
 
 /** The Material icon standing in for each section. */
@@ -111,29 +108,17 @@ fun AdministrationScreen(
 
         when (state.section) {
             AdminSection.OVERVIEW -> OverviewSection(state)
-            AdminSection.PROTECTION -> ProtectionSection(state, onEdit = { editor = it })
-            AdminSection.ROLES -> RolesSection(
+            AdminSection.PROTECTION -> ProtectionSection(
                 state = state,
-                onStaffRole = viewModel::setStaffRole,
-                onMemberRole = viewModel::setMemberRole,
-                onToggleAutoAssignNormal = viewModel::toggleAutoAssignNormal,
-                onToggleAutoAssignBot = viewModel::toggleAutoAssignBot,
-                onToggleSelfAssignable = viewModel::toggleSelfAssignable,
-                onToggleAutoBan = viewModel::toggleAutoBanRole,
+                viewModel = viewModel,
+                onEdit = { editor = it },
             )
 
-            AdminSection.AUTOMATION -> AutomationSection(
-                state = state,
-                onTimezone = viewModel::setTimezone,
-                onToggleGameVoice = viewModel::toggleGameVoiceChannel,
-            )
+            AdminSection.ROLES -> RolesSection(state = state, viewModel = viewModel)
 
-            AdminSection.ADVANCED -> AdvancedSection(
-                state = state,
-                onSaveBanMessage = viewModel::saveBanMessage,
-                onMassBan = viewModel::massBan,
-                onPrune = viewModel::prune,
-            )
+            AdminSection.AUTOMATION -> AutomationSection(state = state, viewModel = viewModel)
+
+            AdminSection.ADVANCED -> AdvancedSection(state = state, viewModel = viewModel)
         }
     }
 
@@ -191,7 +176,7 @@ private fun OverviewSection(state: AdministrationState) {
     SectionCard {
         SectionCardHeader("Protection", Icons.Default.Shield)
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            StatTile("Active", "${state.activeProtections}/5", Modifier.weight(1f))
+            StatTile("Active", "${state.activeProtections}/8", Modifier.weight(1f))
             StatTile("Auto-ban roles", "${state.autoBanRoles.size}", Modifier.weight(1f))
         }
     }
@@ -199,7 +184,7 @@ private fun OverviewSection(state: AdministrationState) {
     SectionCard {
         SectionCardHeader("Role automation", Icons.Default.Groups)
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            StatTile("Self-assignable", "${state.selfAssignable.size}", Modifier.weight(1f))
+            StatTile("Self-assignable", "${state.selfAssignable.roles.size}", Modifier.weight(1f))
             StatTile("Voice roles", "${state.voiceChannelRoles.size}", Modifier.weight(1f))
         }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -221,7 +206,9 @@ private fun OverviewSection(state: AdministrationState) {
         InfoRow("Timezone", state.timezoneId)
         InfoRow(
             "Game voice channel",
-            if (state.gameVoiceChannelEnabled) "Enabled" else "Disabled",
+            state.gameVoiceChannelId?.let { id ->
+                state.availableVoiceChannels.firstOrNull { it.id == id }?.name ?: id
+            } ?: "Disabled",
         )
         InfoRow("Staff role", state.staffRoleId?.let { id ->
             state.availableRoles.firstOrNull { it.id == id }?.name?.let { "@$it" } ?: id
@@ -235,6 +222,7 @@ private fun OverviewSection(state: AdministrationState) {
 @Composable
 private fun ProtectionSection(
     state: AdministrationState,
+    viewModel: AdministrationViewModel,
     onEdit: (ProtectionEditor) -> Unit,
 ) {
     val protection = state.protection
@@ -249,6 +237,7 @@ private fun ProtectionSection(
         title = "Anti-raid",
         enabled = protection.antiRaid.enabled,
         onEdit = { onEdit(ProtectionEditor.RAID) },
+        onQuickToggle = { viewModel.quickToggleProtection(QuickProtectionModule.RAID) },
     ) {
         InfoRow(
             "Trigger",
@@ -262,17 +251,20 @@ private fun ProtectionSection(
         title = "Anti-spam",
         enabled = protection.antiSpam.enabled,
         onEdit = { onEdit(ProtectionEditor.SPAM) },
+        onQuickToggle = { viewModel.quickToggleProtection(QuickProtectionModule.SPAM) },
     ) {
         InfoRow("Threshold", "${protection.antiSpam.messageThreshold} messages")
         InfoRow("Action", AntiPunishmentAction.from(protection.antiSpam.action).label)
         InfoRow("Mute time", "${protection.antiSpam.muteTime}m")
         InfoRow("Tracked users", "${protection.antiSpam.userCount}")
     }
+    AntiSpamIgnoredChannelsCard(state = state, viewModel = viewModel)
 
     ProtectionCard(
         title = "Anti-alt",
         enabled = protection.antiAlt.enabled,
         onEdit = { onEdit(ProtectionEditor.ALT) },
+        onQuickToggle = { viewModel.quickToggleProtection(QuickProtectionModule.ALT) },
     ) {
         InfoRow("Min account age", protection.antiAlt.minAge.ifEmpty { "Not set" })
         InfoRow("Action", AntiPunishmentAction.from(protection.antiAlt.action).label)
@@ -283,6 +275,7 @@ private fun ProtectionSection(
         title = "Anti-mass-mention",
         enabled = protection.antiMassMention.enabled,
         onEdit = { onEdit(ProtectionEditor.MASS_MENTION) },
+        onQuickToggle = { viewModel.quickToggleProtection(QuickProtectionModule.MASS_MENTION) },
     ) {
         InfoRow("Per message", "${protection.antiMassMention.mentionThreshold} mentions")
         InfoRow(
@@ -294,32 +287,30 @@ private fun ProtectionSection(
         InfoRow("Action", AntiPunishmentAction.from(protection.antiMassMention.action).label)
     }
 
-    ProtectionCard(
-        title = "Anti-mass-post",
-        enabled = protection.antiMassPost.enabled,
-        onEdit = null,
-    ) {
-        InfoRow(
-            "Trigger",
-            "${protection.antiMassPost.channelThreshold} channels in " +
-                "${protection.antiMassPost.timeWindowSeconds}s",
-        )
-        InfoRow("Action", AntiPunishmentAction.from(protection.antiMassPost.action).label)
-        InfoRow("Caught", "${protection.antiMassPost.counter}")
-    }
+    AntiMassPostCard(state = state, viewModel = viewModel, onQuickToggle = {
+        viewModel.quickToggleProtection(QuickProtectionModule.MASS_POST)
+    })
 
-    Text(
-        "Anti-mass-post and anti-pattern are configured from the web dashboard.",
-        style = MaterialTheme.typography.bodySmall,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
-    )
+    AntiPatternCard(state = state, viewModel = viewModel, onQuickToggle = {
+        viewModel.quickToggleProtection(QuickProtectionModule.PATTERN)
+    })
+
+    AntiPostChannelCard(state = state, viewModel = viewModel, onQuickToggle = {
+        viewModel.quickToggleProtection(QuickProtectionModule.POST_CHANNEL)
+    })
+
+    AntiImageHashCard(state = state, viewModel = viewModel, onQuickToggle = {
+        viewModel.quickToggleProtection(QuickProtectionModule.IMAGE_HASH)
+    })
 }
 
+/** Shared card shell for every protection module: header, enabled badge, and content or hint. */
 @Composable
-private fun ProtectionCard(
+fun ProtectionCard(
     title: String,
     enabled: Boolean,
     onEdit: (() -> Unit)?,
+    onQuickToggle: (() -> Unit)?,
     content: @Composable () -> Unit,
 ) {
     SectionCard(
@@ -350,7 +341,12 @@ private fun ProtectionCard(
             } else {
                 MaterialTheme.colorScheme.onSurfaceVariant
             }
-            Surface(shape = CircleShape, color = color.copy(alpha = 0.16f)) {
+            Surface(
+                shape = CircleShape,
+                color = color.copy(alpha = 0.16f),
+                onClick = { onQuickToggle?.invoke() },
+                enabled = onQuickToggle != null,
+            ) {
                 Text(
                     if (enabled) "Enabled" else "Disabled",
                     style = MaterialTheme.typography.labelSmall,
@@ -364,9 +360,9 @@ private fun ProtectionCard(
         } else {
             Text(
                 if (onEdit != null) {
-                    "Tap to configure and switch on."
+                    "Tap to configure, or tap the badge to switch on with sensible defaults."
                 } else {
-                    "Disabled."
+                    "Tap the badge to switch on with sensible defaults."
                 },
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -376,15 +372,7 @@ private fun ProtectionCard(
 }
 
 @Composable
-private fun RolesSection(
-    state: AdministrationState,
-    onStaffRole: (Snowflake?) -> Unit,
-    onMemberRole: (Snowflake?) -> Unit,
-    onToggleAutoAssignNormal: (Snowflake) -> Unit,
-    onToggleAutoAssignBot: (Snowflake) -> Unit,
-    onToggleSelfAssignable: (Snowflake) -> Unit,
-    onToggleAutoBan: (Snowflake) -> Unit,
-) {
+private fun RolesSection(state: AdministrationState, viewModel: AdministrationViewModel) {
     val roleOptions = state.availableRoles.map { SelectorOption(it.id, it.name) }
 
     SectionCard {
@@ -394,7 +382,7 @@ private fun RolesSection(
             options = roleOptions,
             placeholder = "No staff role",
             selectedId = state.staffRoleId,
-            onSelect = onStaffRole,
+            onSelect = viewModel::setStaffRole,
             label = "Staff role",
         )
         DiscordSelectorSingle(
@@ -402,7 +390,7 @@ private fun RolesSection(
             options = roleOptions,
             placeholder = "No member role",
             selectedId = state.memberRoleId,
-            onSelect = onMemberRole,
+            onSelect = viewModel::setMemberRole,
             label = "Member role",
         )
     }
@@ -413,7 +401,7 @@ private fun RolesSection(
         blurb = "Applied automatically to non-bot members on join.",
         roles = state.availableRoles.map { it.id to it.name },
         selected = state.autoAssign.normalRoles,
-        onToggle = onToggleAutoAssignNormal,
+        onToggle = viewModel::toggleAutoAssignNormal,
     )
 
     RoleCheckList(
@@ -422,16 +410,7 @@ private fun RolesSection(
         blurb = "Applied automatically to bot accounts on join.",
         roles = state.availableRoles.map { it.id to it.name },
         selected = state.autoAssign.botRoles,
-        onToggle = onToggleAutoAssignBot,
-    )
-
-    RoleCheckList(
-        title = "Self-assignable roles",
-        icon = Icons.Default.PanTool,
-        blurb = "Members can grant themselves these with /iam.",
-        roles = state.availableRoles.map { it.id to it.name },
-        selected = state.selfAssignable,
-        onToggle = onToggleSelfAssignable,
+        onToggle = viewModel::toggleAutoAssignBot,
     )
 
     RoleCheckList(
@@ -440,13 +419,18 @@ private fun RolesSection(
         blurb = "Members who receive any of these roles are banned automatically.",
         roles = state.availableRoles.map { it.id to it.name },
         selected = state.autoBanRoles,
-        onToggle = onToggleAutoBan,
+        onToggle = viewModel::toggleAutoBanRole,
         destructive = true,
     )
+
+    SelfAssignableRolesSection(state = state, viewModel = viewModel)
+    VoiceChannelRolesSection(state = state, viewModel = viewModel)
+    ReactionRolesSection(state = state, viewModel = viewModel)
 }
 
+/** A checklist card used for the simple role toggles (auto-assign, auto-ban). */
 @Composable
-private fun RoleCheckList(
+fun RoleCheckList(
     title: String,
     icon: ImageVector,
     blurb: String,
@@ -497,11 +481,7 @@ private fun RoleCheckList(
 }
 
 @Composable
-private fun AutomationSection(
-    state: AdministrationState,
-    onTimezone: (String) -> Unit,
-    onToggleGameVoice: () -> Unit,
-) {
+private fun AutomationSection(state: AdministrationState, viewModel: AdministrationViewModel) {
     SectionCard {
         SectionCardHeader("Server timezone", Icons.Default.Public)
         if (state.availableTimezones.isEmpty()) {
@@ -514,158 +494,25 @@ private fun AutomationSection(
                 },
                 placeholder = "UTC",
                 selectedId = state.timezoneId,
-                onSelect = { it?.let(onTimezone) },
+                onSelect = { it?.let(viewModel::setTimezone) },
                 label = "Timezone",
             )
         }
     }
 
-    SectionCard {
-        SectionCardHeader("Game voice channel", Icons.Default.SportsEsports)
-        SwitchRow(
-            title = "Assign roles by game played",
-            subtitle = "Members joining a voice channel get the matching game role.",
-            checked = state.gameVoiceChannelEnabled,
-            onCheckedChange = { onToggleGameVoice() },
-        )
-    }
-
-    if (state.voiceChannelRoles.isNotEmpty()) {
-        SectionCard {
-            SectionCardHeader("Voice channel roles", Icons.Default.Groups)
-            state.voiceChannelRoles.forEach { entry ->
-                InfoRow(
-                    label = "Channel ${entry.voiceChannelId ?: "?"}",
-                    value = entry.roleId?.let { id ->
-                        state.availableRoles.firstOrNull { it.id == id }?.name?.let { "@$it" } ?: id
-                    } ?: "None",
-                )
-            }
-            Text(
-                "Voice channel roles are added and removed with /voicerole.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
-    }
+    GameVoiceChannelSection(state = state, viewModel = viewModel)
+    DeleteMessageOnCommandSection(state = state, viewModel = viewModel)
+    CommandCooldownsSection(state = state, viewModel = viewModel)
+    PermissionOverridesSection(state = state, viewModel = viewModel)
+    PermissionsManagerSection(state = state, viewModel = viewModel)
+    StatsPrivacySection(state = state, viewModel = viewModel)
 }
 
 @Composable
-private fun AdvancedSection(
-    state: AdministrationState,
-    onSaveBanMessage: (String) -> Unit,
-    onMassBan: (List<Snowflake>, String?) -> Unit,
-    onPrune: (Snowflake, Int) -> Unit,
-) {
-    var banMessage by remember(state.banMessage) {
-        mutableStateOf(EmbedMessage.parse(state.banMessage))
-    }
-    var massBanIds by remember { mutableStateOf("") }
-    var massBanReason by remember { mutableStateOf("") }
-    var pruneChannelId by remember { mutableStateOf<String?>(null) }
-    var pruneCount by remember { mutableStateOf(100f) }
-    var confirmMassBan by remember { mutableStateOf(false) }
-    var confirmPrune by remember { mutableStateOf(false) }
-
-    val parsedIds = remember(massBanIds) {
-        massBanIds.split(',', ' ', '\n', '\t')
-            .map { it.trim() }
-            .filter { it.isNotEmpty() && it.toLongOrNull() != null }
-    }
-
-    SectionCard {
-        SectionCardHeader("Ban DM message", Icons.Default.Mail)
-        Text(
-            "Sent to a member when they are banned. Supports the standard placeholders.",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        EmbedMessageEditor(message = banMessage, onMessageChange = { banMessage = it })
-        Button(
-            onClick = { onSaveBanMessage(banMessage.serialize()) },
-            modifier = Modifier.fillMaxWidth(),
-        ) { Text("Save ban message") }
-    }
-
-    SectionCard {
-        SectionCardHeader("Mass ban", Icons.Default.Gavel)
-        MewdekoTextField(
-            value = massBanIds,
-            onValueChange = { massBanIds = it },
-            label = "User IDs",
-            placeholder = "Comma or space separated",
-            singleLine = false,
-            minLines = 3,
-            supportingText = "${parsedIds.size} valid IDs",
-        )
-        MewdekoTextField(
-            value = massBanReason,
-            onValueChange = { massBanReason = it },
-            label = "Reason",
-            placeholder = "Optional",
-        )
-        Button(
-            onClick = { confirmMassBan = true },
-            enabled = parsedIds.isNotEmpty(),
-            modifier = Modifier.fillMaxWidth(),
-        ) { Text("Mass ban ${parsedIds.size} users") }
-    }
-
-    SectionCard {
-        SectionCardHeader("Prune channel", Icons.Default.ContentCut)
-        Text(
-            "Bulk deletes the most recent messages in a channel.",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        DiscordSelectorSingle(
-            kind = SelectorKind.Channel,
-            options = state.availableChannels.map { SelectorOption(it.id, it.name) },
-            placeholder = "Pick a channel",
-            selectedId = pruneChannelId,
-            onSelect = { pruneChannelId = it },
-            label = "Channel",
-        )
-        SliderRow(
-            label = "Messages",
-            value = pruneCount,
-            onValueChange = { pruneCount = it },
-            valueRange = 1f..1000f,
-        )
-        Button(
-            onClick = { confirmPrune = true },
-            enabled = pruneChannelId != null,
-            modifier = Modifier.fillMaxWidth(),
-        ) { Text("Prune ${pruneCount.toInt()} messages") }
-    }
-
-    if (confirmMassBan) {
-        ConfirmDialog(
-            title = "Ban ${parsedIds.size} users?",
-            message = "This bans every listed ID immediately and cannot be undone in bulk.",
-            confirmLabel = "Mass ban",
-            onConfirm = {
-                confirmMassBan = false
-                onMassBan(parsedIds, massBanReason.trim().takeIf { it.isNotEmpty() })
-                massBanIds = ""
-                massBanReason = ""
-            },
-            onDismiss = { confirmMassBan = false },
-        )
-    }
-
-    if (confirmPrune) {
-        ConfirmDialog(
-            title = "Prune ${pruneCount.toInt()} messages?",
-            message = "The most recent messages in the selected channel will be deleted.",
-            confirmLabel = "Prune",
-            onConfirm = {
-                confirmPrune = false
-                pruneChannelId?.let { onPrune(it, pruneCount.toInt()) }
-            },
-            onDismiss = { confirmPrune = false },
-        )
-    }
+private fun AdvancedSection(state: AdministrationState, viewModel: AdministrationViewModel) {
+    BanMessageSection(state = state, viewModel = viewModel)
+    ServerRecoverySection(state = state, viewModel = viewModel)
+    MassOperationsSection(state = state, viewModel = viewModel)
 }
 
 /** The editable fields shared by every protection module. */
@@ -884,6 +731,7 @@ private fun hydrate(
             userThreshold = protection.antiRaid.userThreshold.coerceAtLeast(2),
             seconds = protection.antiRaid.seconds.coerceAtLeast(2),
             action = AntiPunishmentAction.from(protection.antiRaid.action),
+            actionDuration = protection.antiRaid.punishDuration,
         )
 
         ProtectionEditor.SPAM -> base.copy(
@@ -891,12 +739,15 @@ private fun hydrate(
             messageThreshold = protection.antiSpam.messageThreshold.coerceAtLeast(2),
             muteTime = protection.antiSpam.muteTime.coerceAtLeast(0),
             action = AntiPunishmentAction.from(protection.antiSpam.action),
+            roleId = protection.antiSpam.roleId,
         )
 
         ProtectionEditor.ALT -> base.copy(
             enabled = protection.antiAlt.enabled,
             minAgeMinutes = parseMinutes(protection.antiAlt.minAge)?.coerceAtLeast(1) ?: 60,
             action = AntiPunishmentAction.from(protection.antiAlt.action),
+            actionDuration = protection.antiAlt.actionDuration,
+            roleId = protection.antiAlt.roleId,
         )
 
         ProtectionEditor.MASS_MENTION -> base.copy(
@@ -907,6 +758,8 @@ private fun hydrate(
                 .coerceAtLeast(1),
             ignoreBots = protection.antiMassMention.ignoreBots,
             action = AntiPunishmentAction.from(protection.antiMassMention.action),
+            muteTime = protection.antiMassMention.muteTime,
+            roleId = protection.antiMassMention.roleId,
         )
     }
 }

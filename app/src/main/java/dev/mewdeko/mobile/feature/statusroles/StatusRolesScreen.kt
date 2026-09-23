@@ -2,7 +2,6 @@ package dev.mewdeko.mobile.feature.statusroles
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
@@ -90,6 +89,18 @@ fun StatusRolesScreen(
                     modifier = Modifier.weight(1f),
                 )
             }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                StatTile(
+                    label = "Active configs",
+                    value = "${state.configs.count { it.addRoleIds.isNotEmpty() || it.removeRoleIds.isNotEmpty() }}",
+                    modifier = Modifier.weight(1f),
+                )
+                StatTile(
+                    label = "With notifications",
+                    value = "${state.configs.count { it.statusChannelId != null && it.statusChannelId != "0" }}",
+                    modifier = Modifier.weight(1f),
+                )
+            }
             Text(
                 text = "When a member's custom status contains the trigger text, the bot applies " +
                     "the configured role changes.",
@@ -163,6 +174,11 @@ fun StatusRolesScreen(
                         EmbedMessageEditor(
                             message = EmbedMessage.parse(config.statusEmbed),
                             onMessageChange = { viewModel.setEmbed(config.id, it) },
+                        )
+                        Text(
+                            text = "Placeholders: %user%, %user.mention%, %status%, %server%.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
                 }

@@ -7,13 +7,14 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.DeleteSweep
-import androidx.compose.material.icons.filled.Done
-import androidx.compose.material.icons.filled.HelpOutline
+import androidx.compose.material.icons.filled.Forum
+import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.Save
+import androidx.compose.material.icons.filled.SmartButton
+import androidx.compose.material.icons.filled.Sort
+import androidx.compose.material.icons.filled.SwapVert
 import androidx.compose.material.icons.filled.TipsAndUpdates
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.AlertDialog
@@ -60,6 +61,68 @@ private val Tabs = listOf(
     SectionTab("list", "Suggestions", Icons.Default.TipsAndUpdates),
     SectionTab("settings", "Settings", Icons.Default.Tune),
 )
+
+private val ThreadTypeOptions = listOf(
+    SelectorOption("0", "No threads"),
+    SelectorOption("1", "Regular threads"),
+    SelectorOption("2", "Private threads"),
+)
+
+private val EmoteModeOptions = listOf(
+    SelectorOption("0", "Reactions"),
+    SelectorOption("1", "Buttons"),
+)
+
+private val ButtonColorOptions = listOf(
+    SelectorOption("1", "Blue"),
+    SelectorOption("2", "Grey"),
+    SelectorOption("3", "Green"),
+    SelectorOption("4", "Red"),
+)
+
+private val SortOptions = listOf(
+    SelectorOption(SuggestionSortBy.DATE.raw, SuggestionSortBy.DATE.label),
+    SelectorOption(SuggestionSortBy.STATUS.raw, SuggestionSortBy.STATUS.label),
+)
+
+/** Placeholders the bot substitutes into every suggestion message template. */
+private val SuggestionPlaceholders = listOf(
+    "%suggest.user%" to "Full username of the suggester",
+    "%suggest.user.id%" to "Id of the suggester",
+    "%suggest.user.name%" to "Name of the suggester",
+    "%suggest.user.avatar%" to "Avatar of the suggester",
+    "%suggest.message%" to "The original suggestion text",
+    "%suggest.number%" to "The suggestion's number",
+    "%suggest.mod.user%" to "Full username of whoever updated it",
+    "%suggest.mod.name%" to "Name of whoever updated it",
+    "%suggest.mod.avatar%" to "Avatar of whoever updated it",
+    "%suggest.mod.message%" to "The reason it was updated",
+)
+
+/** Expandable list of the placeholders available in suggestion templates. */
+@Composable
+private fun PlaceholderHint(modifier: Modifier = Modifier) {
+    var expanded by remember { mutableStateOf(false) }
+    Column(modifier = modifier) {
+        TextButton(onClick = { expanded = !expanded }) {
+            Text(
+                if (expanded) "Hide placeholders" else "Show placeholders",
+                style = MaterialTheme.typography.labelSmall,
+            )
+        }
+        if (expanded) {
+            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                SuggestionPlaceholders.forEach { (name, description) ->
+                    Text(
+                        text = "$name: $description",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+        }
+    }
+}
 
 /** The member suggestion box. */
 @Composable
@@ -179,6 +242,26 @@ fun SuggestionsScreen(
                     selectedId = state.settings.implementChannel,
                     onSelect = { id -> viewModel.edit { it.copy(implementChannel = id) } },
                 )
+                DiscordSelectorSingle(
+                    kind = SelectorKind.Channel,
+                    options = channelOptions,
+                    placeholder = "Same as submissions",
+                    label = "Suggestion button posts to",
+                    selectedId = state.settings.suggestButtonChannel,
+                    onSelect = { id -> viewModel.edit { it.copy(suggestButtonChannel = id) } },
+                )
+            }
+
+            SectionCard {
+                SectionCardHeader("Behavior", Icons.Default.Forum)
+                DiscordSelectorSingle(
+                    kind = SelectorKind.Custom(Icons.Default.Forum),
+                    options = ThreadTypeOptions,
+                    placeholder = "No threads",
+                    label = "Thread type",
+                    selectedId = state.settings.threadsType.toString(),
+                    onSelect = { id -> viewModel.edit { it.copy(threadsType = id?.toIntOrNull() ?: 0) } },
+                )
             }
 
             SectionCard {
@@ -189,7 +272,7 @@ fun SuggestionsScreen(
                     onValueChange = { value ->
                         viewModel.edit { it.copy(minLength = value.toInt()) }
                     },
-                    valueRange = 0f..500f,
+                    valueRange = 0f..2000f,
                     valueLabel = "${state.settings.minLength}",
                 )
                 SliderRow(
@@ -204,14 +287,89 @@ fun SuggestionsScreen(
             }
 
             SectionCard {
-                SectionCardHeader("Reactions", Icons.Default.Tune)
-                MewdekoTextField(
-                    value = state.settings.emotes,
-                    onValueChange = { value -> viewModel.edit { it.copy(emotes = value) } },
-                    label = "Vote emotes",
-                    placeholder = "👍 👎",
-                    supportingText = "Up to five space-separated emoji added to each suggestion.",
+                SectionCardHeader("Emotes", Icons.Default.SmartButton)
+                DiscordSelectorSingle(
+                    kind = SelectorKind.Custom(Icons.Default.SmartButton),
+                    options = EmoteModeOptions,
+                    placeholder = "Reactions",
+                    label = "Display mode",
+                    selectedId = state.settings.emoteMode.toString(),
+                    onSelect = { id -> viewModel.edit { it.copy(emoteMode = id?.toIntOrNull() ?: 0) } },
                 )
+                SuggestionEmotePicker(
+                    label = "Vote emotes",
+                    selected = state.settings.emoteList,
+                    guildEmotes = state.guildEmotes,
+                    onSelectedChange = { values ->
+                        viewModel.edit { it.copy(emotes = values.joinToString(",")) }
+                    },
+                    max = 5,
+                    supportingText = "Up to five emotes added to each suggestion. Leave empty for the default " +
+                        "👍/👎.",
+                )
+            }
+
+            SectionCard {
+                SectionCardHeader("Suggestion button", Icons.Default.SmartButton)
+                MewdekoTextField(
+                    value = state.settings.suggestButtonLabel,
+                    onValueChange = { value -> viewModel.edit { it.copy(suggestButtonLabel = value) } },
+                    label = "Button label",
+                    placeholder = "Suggest",
+                )
+                SuggestionEmotePicker(
+                    label = "Button emote",
+                    selected = state.settings.suggestButtonEmote
+                        .takeIf { it.isNotBlank() }
+                        ?.let { listOf(it) }
+                        ?: emptyList(),
+                    guildEmotes = state.guildEmotes,
+                    onSelectedChange = { values ->
+                        viewModel.edit { it.copy(suggestButtonEmote = values.firstOrNull().orEmpty()) }
+                    },
+                    max = 1,
+                    supportingText = "Shown on the suggest button. Leave empty for none.",
+                )
+                DiscordSelectorSingle(
+                    kind = SelectorKind.Custom(Icons.Default.Palette),
+                    options = ButtonColorOptions,
+                    placeholder = "Blue",
+                    label = "Button color",
+                    selectedId = state.settings.suggestButtonColor.toString(),
+                    onSelect = { id ->
+                        viewModel.edit { it.copy(suggestButtonColor = id?.toIntOrNull() ?: 1) }
+                    },
+                )
+                LabelledEmbedField(
+                    label = "Button message",
+                    raw = state.settings.suggestButtonMessage,
+                    onRawChange = { value ->
+                        viewModel.edit { it.copy(suggestButtonMessage = value) }
+                    },
+                )
+                PlaceholderHint()
+            }
+
+            SectionCard {
+                SectionCardHeader("Emote button colors", Icons.Default.Palette)
+                state.settings.emoteButtonStyles.forEachIndexed { index, style ->
+                    DiscordSelectorSingle(
+                        kind = SelectorKind.Custom(Icons.Default.Palette),
+                        options = ButtonColorOptions,
+                        placeholder = "Blue",
+                        label = "Emote ${index + 1} button",
+                        selectedId = style.toString(),
+                        onSelect = { id ->
+                            viewModel.edit {
+                                it.copy(
+                                    emoteButtonStyles = it.emoteButtonStyles.toMutableList().apply {
+                                        this[index] = id?.toIntOrNull() ?: 1
+                                    },
+                                )
+                            }
+                        },
+                    )
+                }
             }
 
             SectionCard {
@@ -253,6 +411,7 @@ fun SuggestionsScreen(
                         viewModel.edit { it.copy(suggestionMessage = value) }
                     },
                 )
+                PlaceholderHint()
                 LabelledEmbedField(
                     label = "Accepted template",
                     raw = state.settings.acceptMessage,
@@ -260,6 +419,7 @@ fun SuggestionsScreen(
                         viewModel.edit { it.copy(acceptMessage = value) }
                     },
                 )
+                PlaceholderHint()
                 LabelledEmbedField(
                     label = "Denied template",
                     raw = state.settings.denyMessage,
@@ -267,6 +427,7 @@ fun SuggestionsScreen(
                         viewModel.edit { it.copy(denyMessage = value) }
                     },
                 )
+                PlaceholderHint()
                 LabelledEmbedField(
                     label = "Considered template",
                     raw = state.settings.considerMessage,
@@ -274,6 +435,7 @@ fun SuggestionsScreen(
                         viewModel.edit { it.copy(considerMessage = value) }
                     },
                 )
+                PlaceholderHint()
                 LabelledEmbedField(
                     label = "Implemented template",
                     raw = state.settings.implementMessage,
@@ -281,8 +443,36 @@ fun SuggestionsScreen(
                         viewModel.edit { it.copy(implementMessage = value) }
                     },
                 )
+                PlaceholderHint()
             }
             return@FeatureScaffold
+        }
+
+        SectionCard(contentPadding = 12) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                DiscordSelectorSingle(
+                    kind = SelectorKind.Custom(Icons.Default.Sort),
+                    options = SortOptions,
+                    placeholder = "Date",
+                    selectedId = state.sortBy.raw,
+                    onSelect = { id ->
+                        viewModel.setSortBy(
+                            SuggestionSortBy.entries.firstOrNull { it.raw == id } ?: SuggestionSortBy.DATE,
+                        )
+                    },
+                    modifier = Modifier.weight(1f),
+                )
+                IconButton(onClick = viewModel::toggleSortDirection) {
+                    Icon(
+                        Icons.Default.SwapVert,
+                        contentDescription = if (state.sortDescending) "Descending" else "Ascending",
+                    )
+                }
+            }
         }
 
         SectionCard(contentPadding = 12) {
@@ -360,6 +550,18 @@ fun SuggestionsScreen(
                         maxLines = 6,
                         overflow = TextOverflow.Ellipsis,
                     )
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        TagChip("ID: ${suggestion.suggestionId}")
+                        suggestion.stateChangeUser?.let { TagChip("Modified by: $it") }
+                        if (suggestion.stateChangeCount > 0) {
+                            TagChip("Changes: ${suggestion.stateChangeCount}")
+                        }
+                    }
                     suggestion.emoteCounts?.let { counts ->
                         Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                             counts.values.forEachIndexed { index, value ->

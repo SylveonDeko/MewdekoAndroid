@@ -3,6 +3,7 @@ package dev.mewdeko.mobile.feature.embed
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -29,12 +30,17 @@ import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.OpenInNew
 import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.RestartAlt
 import androidx.compose.material.icons.filled.Rule
 import androidx.compose.material.icons.filled.Send
 import androidx.compose.material.icons.filled.SmartButton
 import androidx.compose.material.icons.filled.Upload
 import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.automirrored.filled.Redo
+import androidx.compose.material.icons.automirrored.filled.Undo
+import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -44,13 +50,12 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.PrimaryTabRow
 import androidx.compose.material3.Surface
-import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -61,6 +66,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -69,11 +75,13 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.mewdeko.mobile.core.model.EmbedField
 import dev.mewdeko.mobile.core.model.EmbedMessage
 import dev.mewdeko.mobile.core.model.EmbedSpec
+import dev.mewdeko.mobile.core.net.MewdekoJson
 import dev.mewdeko.mobile.core.theme.LocalGuildPalette
 import dev.mewdeko.mobile.core.theme.MonospaceStyle
 import dev.mewdeko.mobile.core.ui.ConfirmDialog
 import dev.mewdeko.mobile.core.ui.DiscordSelectorSingle
 import dev.mewdeko.mobile.core.ui.EmptyState
+import dev.mewdeko.mobile.core.ui.InfoRow
 import dev.mewdeko.mobile.core.ui.MewdekoTextField
 import dev.mewdeko.mobile.core.ui.SectionCard
 import dev.mewdeko.mobile.core.ui.SectionCardHeader
@@ -82,9 +90,17 @@ import dev.mewdeko.mobile.core.ui.SectionTabs
 import dev.mewdeko.mobile.core.ui.SelectorKind
 import dev.mewdeko.mobile.core.ui.SelectorOption
 import dev.mewdeko.mobile.core.ui.SwitchRow
+import kotlinx.coroutines.delay
+import kotlinx.serialization.json.JsonObject
 
 private const val MAX_EMBEDS = 10
 private const val MAX_FIELDS = 25
+
+/** How many edits the undo/redo history keeps, matching the dashboard's cap. */
+private const val MAX_HISTORY = 50
+
+/** How long editing pauses before a snapshot is pushed onto the history. */
+private const val HISTORY_DEBOUNCE_MS = 350L
 
 /**
  * Compact trigger that summarises an [EmbedMessage] and opens the full editor.
@@ -97,6 +113,7 @@ fun EmbedMessageEditor(
     message: EmbedMessage,
     onMessageChange: (EmbedMessage) -> Unit,
     modifier: Modifier = Modifier,
+    additionalPlaceholders: List<Placeholder> = emptyList(),
 ) {
     var editing by remember { mutableStateOf(false) }
     val primary = MaterialTheme.colorScheme.primary
@@ -180,6 +197,7 @@ fun EmbedMessageEditor(
                 onMessageChange(it)
                 editing = false
             },
+            additionalPlaceholders = additionalPlaceholders,
         )
     }
 }
@@ -190,13 +208,39 @@ private fun EmbedEditorSheet(
     initial: EmbedMessage,
     onDismiss: () -> Unit,
     onSave: (EmbedMessage) -> Unit,
+    additionalPlaceholders: List<Placeholder> = emptyList(),
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-    var draft by remember { mutableStateOf(initial) }
     var tab by remember { mutableIntStateOf(0) }
     var selectedEmbed by remember { mutableIntStateOf(0) }
     var confirmingClear by remember { mutableStateOf(false) }
     val gradient = LocalGuildPalette.current.gradient
+
+    var history by remember { mutableStateOf(listOf(initial)) }
+    var historyIndex by remember { mutableIntStateOf(0) }
+    var pendingDraft by remember { mutableStateOf(initial) }
+    var restoringHistory by remember { mutableStateOf(false) }
+    val draft = pendingDraft
+
+    fun setDraft(new: EmbedMessage) {
+        restoringHistory = false
+        pendingDraft = new
+    }
+
+    fun jumpTo(index: Int) {
+        restoringHistory = true
+        historyIndex = index
+        pendingDraft = history[index]
+    }
+
+    LaunchedEffect(pendingDraft) {
+        if (restoringHistory) return@LaunchedEffect
+        delay(HISTORY_DEBOUNCE_MS)
+        if (pendingDraft.serialize() == history[historyIndex].serialize()) return@LaunchedEffect
+        val next = (history.take(historyIndex + 1) + pendingDraft).takeLast(MAX_HISTORY)
+        history = next
+        historyIndex = next.lastIndex
+    }
 
     ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheetState) {
         Column(modifier = Modifier.fillMaxSize().imePadding()) {
@@ -214,6 +258,18 @@ private fun EmbedEditorSheet(
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
+                    }
+                    IconButton(onClick = { jumpTo(historyIndex - 1) }, enabled = historyIndex > 0) {
+                        Icon(Icons.AutoMirrored.Filled.Undo, contentDescription = "Undo")
+                    }
+                    IconButton(
+                        onClick = { jumpTo(historyIndex + 1) },
+                        enabled = historyIndex < history.lastIndex,
+                    ) {
+                        Icon(Icons.AutoMirrored.Filled.Redo, contentDescription = "Redo")
+                    }
+                    IconButton(onClick = { jumpTo(0) }, enabled = historyIndex > 0) {
+                        Icon(Icons.Default.RestartAlt, contentDescription = "Cancel edits")
                     }
                     IconButton(onClick = { confirmingClear = true }) {
                         Icon(
@@ -240,7 +296,7 @@ private fun EmbedEditorSheet(
                     message = "This removes the content, every embed, and every component.",
                     confirmLabel = "Clear all",
                     onConfirm = {
-                        draft = EmbedMessage()
+                        setDraft(EmbedMessage())
                         selectedEmbed = 0
                         confirmingClear = false
                     },
@@ -263,8 +319,29 @@ private fun EmbedEditorSheet(
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
                 when (ComposerTabs[tab].id) {
+                    "templates" -> {
+                        TemplatesPanel(
+                            onApply = { spec ->
+                                val embeds = if (draft.embeds.isEmpty()) {
+                                    listOf(spec)
+                                } else {
+                                    draft.embeds.toMutableList().apply { set(0, spec) }
+                                }
+                                setDraft(draft.copy(embeds = embeds))
+                                selectedEmbed = 0
+                                tab = ComposerTabs.indexOfFirst { it.id == "editor" }
+                            },
+                            onStartFromScratch = {
+                                setDraft(EmbedMessage())
+                                selectedEmbed = 0
+                                tab = ComposerTabs.indexOfFirst { it.id == "editor" }
+                            },
+                        )
+                        return@Column
+                    }
+
                     "components" -> {
-                        ComponentEditor(message = draft, onMessageChange = { draft = it })
+                        ComponentEditor(message = draft, onMessageChange = { setDraft(it) })
                         return@Column
                     }
 
@@ -278,12 +355,12 @@ private fun EmbedEditorSheet(
                     }
 
                     "json" -> {
-                        JsonPanel(draft = draft, onDraftChange = { draft = it })
+                        JsonPanel(draft = draft, onDraftChange = { setDraft(it) })
                         return@Column
                     }
 
                     "saved" -> {
-                        SavedPanel(draft = draft, onLoad = { draft = it })
+                        SavedPanel(draft = draft, onLoad = { setDraft(it) })
                         return@Column
                     }
 
@@ -295,12 +372,14 @@ private fun EmbedEditorSheet(
 
                 SectionCard {
                     SectionCardHeader("Message content", Icons.Default.Edit)
-                    MewdekoTextField(
+                    PlaceholderField(
                         value = draft.content,
-                        onValueChange = { draft = draft.copy(content = it) },
+                        onValueChange = { setDraft(draft.copy(content = it)) },
                         label = "Content",
                         singleLine = false,
                         minLines = 3,
+                        maxLength = Limits.CONTENT,
+                        additionalPlaceholders = additionalPlaceholders,
                     )
                     Text(
                         text = "Plain text shown above the embed. Discord renders Markdown and " +
@@ -332,8 +411,9 @@ private fun EmbedEditorSheet(
                         if (draft.embeds.size < MAX_EMBEDS) {
                             AssistChip(
                                 onClick = {
-                                    draft = draft.copy(embeds = draft.embeds + EmbedSpec.Blank)
-                                    selectedEmbed = draft.embeds.lastIndex
+                                    val updated = draft.embeds + EmbedSpec.Blank
+                                    setDraft(draft.copy(embeds = updated))
+                                    selectedEmbed = updated.lastIndex
                                 },
                                 label = { Text("Add") },
                                 leadingIcon = { Icon(Icons.Default.Add, contentDescription = null) },
@@ -349,10 +429,9 @@ private fun EmbedEditorSheet(
                                 onClick = {
                                     if (draft.embeds.size >= MAX_EMBEDS) return@OutlinedButton
                                     val copy = embed.copy()
-                                    draft = draft.copy(
-                                        embeds = draft.embeds.toMutableList()
-                                            .apply { add(index + 1, copy) },
-                                    )
+                                    val updated = draft.embeds.toMutableList()
+                                        .apply { add(index + 1, copy) }
+                                    setDraft(draft.copy(embeds = updated))
                                     selectedEmbed = index + 1
                                 },
                             ) {
@@ -365,9 +444,8 @@ private fun EmbedEditorSheet(
                             }
                             OutlinedButton(
                                 onClick = {
-                                    draft = draft.copy(
-                                        embeds = draft.embeds.filterIndexed { i, _ -> i != index },
-                                    )
+                                    val updated = draft.embeds.filterIndexed { i, _ -> i != index }
+                                    setDraft(draft.copy(embeds = updated))
                                     selectedEmbed = (index - 1).coerceAtLeast(0)
                                 },
                             ) {
@@ -387,10 +465,13 @@ private fun EmbedEditorSheet(
                     EmbedSpecEditor(
                         embed = embed,
                         onChange = { updated ->
-                            draft = draft.copy(
-                                embeds = draft.embeds.toMutableList().apply { set(index, updated) },
+                            setDraft(
+                                draft.copy(
+                                    embeds = draft.embeds.toMutableList().apply { set(index, updated) },
+                                )
                             )
                         },
+                        additionalPlaceholders = additionalPlaceholders,
                     )
                 }
             }
@@ -399,20 +480,28 @@ private fun EmbedEditorSheet(
 }
 
 @Composable
-private fun EmbedSpecEditor(embed: EmbedSpec, onChange: (EmbedSpec) -> Unit) {
+private fun EmbedSpecEditor(
+    embed: EmbedSpec,
+    onChange: (EmbedSpec) -> Unit,
+    additionalPlaceholders: List<Placeholder> = emptyList(),
+) {
     SectionCard {
         SectionCardHeader("Body", Icons.Default.Edit)
-        MewdekoTextField(
+        PlaceholderField(
             value = embed.title,
             onValueChange = { onChange(embed.copy(title = it)) },
             label = "Title",
+            maxLength = Limits.TITLE,
+            additionalPlaceholders = additionalPlaceholders,
         )
-        MewdekoTextField(
+        PlaceholderField(
             value = embed.description,
             onValueChange = { onChange(embed.copy(description = it)) },
             label = "Description",
             singleLine = false,
             minLines = 3,
+            maxLength = Limits.DESCRIPTION,
+            additionalPlaceholders = additionalPlaceholders,
         )
         MewdekoTextField(
             value = embed.url,
@@ -424,10 +513,12 @@ private fun EmbedSpecEditor(embed: EmbedSpec, onChange: (EmbedSpec) -> Unit) {
 
     SectionCard {
         SectionCardHeader("Author", Icons.Default.Person)
-        MewdekoTextField(
+        PlaceholderField(
             value = embed.author.name,
             onValueChange = { onChange(embed.copy(author = embed.author.copy(name = it))) },
             label = "Name",
+            maxLength = Limits.AUTHOR,
+            additionalPlaceholders = additionalPlaceholders,
         )
         MewdekoTextField(
             value = embed.author.url,
@@ -457,10 +548,12 @@ private fun EmbedSpecEditor(embed: EmbedSpec, onChange: (EmbedSpec) -> Unit) {
 
     SectionCard {
         SectionCardHeader("Footer", Icons.Default.Edit)
-        MewdekoTextField(
+        PlaceholderField(
             value = embed.footer.text,
             onValueChange = { onChange(embed.copy(footer = embed.footer.copy(text = it))) },
             label = "Text",
+            maxLength = Limits.FOOTER,
+            additionalPlaceholders = additionalPlaceholders,
         )
         MewdekoTextField(
             value = embed.footer.iconUrl,
@@ -507,14 +600,16 @@ private fun EmbedSpecEditor(embed: EmbedSpec, onChange: (EmbedSpec) -> Unit) {
                             )
                         }
                     }
-                    MewdekoTextField(
+                    PlaceholderField(
                         value = field.name,
                         onValueChange = { value ->
                             onChange(embed.replaceField(index, field.copy(name = value)))
                         },
                         label = "Name",
+                        maxLength = Limits.FIELD_NAME,
+                        additionalPlaceholders = additionalPlaceholders,
                     )
-                    MewdekoTextField(
+                    PlaceholderField(
                         value = field.value,
                         onValueChange = { value ->
                             onChange(embed.replaceField(index, field.copy(value = value)))
@@ -522,6 +617,8 @@ private fun EmbedSpecEditor(embed: EmbedSpec, onChange: (EmbedSpec) -> Unit) {
                         label = "Value",
                         singleLine = false,
                         minLines = 2,
+                        maxLength = Limits.FIELD_VALUE,
+                        additionalPlaceholders = additionalPlaceholders,
                     )
                     SwitchRow(
                         title = "Inline",
@@ -588,6 +685,7 @@ private fun EmbedSpec.replaceField(index: Int, field: EmbedField): EmbedSpec =
 
 /** The composer's tabs. */
 private val ComposerTabs = listOf(
+    SectionTab("templates", "Templates", Icons.Default.AutoAwesome),
     SectionTab("editor", "Editor", Icons.Default.Edit),
     SectionTab("components", "Components", Icons.Default.SmartButton),
     SectionTab("preview", "Preview", Icons.Default.Visibility),
@@ -639,6 +737,7 @@ private fun JsonPanel(draft: EmbedMessage, onDraftChange: (EmbedMessage) -> Unit
     val clipboard = LocalClipboardManager.current
     val serialized = remember(draft) { draft.serialize() }
     var pasted by remember { mutableStateOf("") }
+    var parseError by remember { mutableStateOf<String?>(null) }
 
     SectionCard {
         SectionCardHeader("Payload", Icons.Default.DataObject)
@@ -668,15 +767,26 @@ private fun JsonPanel(draft: EmbedMessage, onDraftChange: (EmbedMessage) -> Unit
         SectionCardHeader("Import", Icons.Default.Upload)
         MewdekoTextField(
             value = pasted,
-            onValueChange = { pasted = it },
+            onValueChange = { pasted = it; parseError = null },
             label = "Paste JSON",
             singleLine = false,
             minLines = 4,
+            isError = parseError != null,
+            supportingText = parseError,
         )
         Button(
             onClick = {
-                onDraftChange(EmbedMessage.parse(pasted))
-                pasted = ""
+                val trimmed = pasted.trim()
+                val isValidObject = trimmed.startsWith("{") &&
+                    runCatching { MewdekoJson.parseToJsonElement(trimmed) }
+                        .getOrNull() is JsonObject
+                if (isValidObject) {
+                    onDraftChange(EmbedMessage.parse(pasted))
+                    pasted = ""
+                    parseError = null
+                } else {
+                    parseError = "That isn't valid JSON."
+                }
             },
             enabled = pasted.isNotBlank(),
             modifier = Modifier.fillMaxWidth(),
@@ -770,13 +880,35 @@ private fun SendPanel(
     viewModel: EmbedLibraryViewModel = hiltViewModel(),
 ) {
     val library by viewModel.library.collectAsStateWithLifecycle()
+    val uriHandler = LocalUriHandler.current
     var channelId by remember { mutableStateOf<String?>(null) }
     var useWebhook by remember { mutableStateOf(false) }
     var personaId by remember { mutableStateOf<String?>(null) }
     var webhookName by remember { mutableStateOf("") }
     var webhookAvatar by remember { mutableStateOf("") }
+    var showPersonaManager by remember { mutableStateOf(false) }
+    var confirmingSend by remember { mutableStateOf(false) }
 
     val blocking = remember(draft) { draft.validate().count { it.level == IssueLevel.ERROR } }
+    val selectedChannel = remember(channelId, library.channels) {
+        library.channels.firstOrNull { it.id == channelId }
+    }
+    val hasEmbedContent = remember(draft) {
+        draft.embeds.any { it.title.isNotEmpty() || it.description.isNotEmpty() || it.fields.isNotEmpty() }
+    }
+    val embedPermissionBlock = remember(selectedChannel, hasEmbedContent) {
+        when {
+            !hasEmbedContent || selectedChannel == null -> null
+            !selectedChannel.canEmbed -> "You do not have the Embed Links permission in this channel."
+            !selectedChannel.botCanEmbed -> "The bot does not have the Embed Links permission in this channel."
+            else -> null
+        }
+    }
+    val webhookAvailable = selectedChannel?.webhookUsable == true
+
+    LaunchedEffect(webhookAvailable) {
+        if (!webhookAvailable) useWebhook = false
+    }
 
     SectionCard {
         SectionCardHeader("Destination", Icons.Default.Send)
@@ -790,49 +922,84 @@ private fun SendPanel(
             onSelect = { channelId = it },
             label = "Channel",
         )
-        val blocked = library.channels.filterNot { it.isUsable }
-        if (blocked.isNotEmpty()) {
-            Text(
-                "${blocked.size} channels are hidden because they cannot receive this message.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
+        selectedChannel?.let { channel ->
+            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text(
+                    "Your permissions in #${channel.name}",
+                    style = MaterialTheme.typography.labelLarge,
+                )
+                InfoRow("Send messages", if (channel.canSend) "Yes" else "No")
+                InfoRow("Send embeds", if (channel.canEmbed) "Yes" else "No")
+                InfoRow("Mention everyone and roles", if (channel.canMentionEveryone) "Yes" else "No")
+                InfoRow("Manage webhooks", if (channel.canUseWebhooks) "Yes" else "No")
+            }
+            if (!channel.canMentionEveryone) {
+                Text(
+                    "Everyone, here, and role mentions will be stripped from this message.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            embedPermissionBlock?.let {
+                Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+            }
         }
     }
 
-    SectionCard {
-        SectionCardHeader("Send as", Icons.Default.Person)
-        SwitchRow(
-            title = "Send through a webhook",
-            subtitle = "Posts under a custom name and avatar instead of the bot",
-            checked = useWebhook,
-            onCheckedChange = { useWebhook = it },
-        )
-        if (useWebhook) {
-            if (library.personas.isNotEmpty()) {
+    if (selectedChannel != null) {
+        SectionCard {
+            SectionCardHeader("Send as", Icons.Default.Person)
+            SwitchRow(
+                title = "Send through a webhook",
+                subtitle = "Posts under a custom name and avatar instead of the bot",
+                checked = useWebhook,
+                onCheckedChange = { useWebhook = it },
+                enabled = webhookAvailable,
+            )
+            if (!webhookAvailable) {
+                Text(
+                    if (selectedChannel.canUseWebhooks) {
+                        "The bot needs the Manage Webhooks permission in this channel."
+                    } else {
+                        "You need the Manage Webhooks permission in this channel."
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error,
+                )
+            }
+            if (useWebhook) {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        "Send as",
+                        style = MaterialTheme.typography.labelLarge,
+                        modifier = Modifier.weight(1f),
+                    )
+                    TextButton(onClick = { showPersonaManager = true }) { Text("Manage personas") }
+                }
                 DiscordSelectorSingle(
                     kind = SelectorKind.Custom(Icons.Default.Person),
                     options = library.personas.map {
                         SelectorOption(it.id.toString(), it.name)
                     },
-                    placeholder = "No persona",
+                    placeholder = "Custom name and avatar",
                     selectedId = personaId,
                     onSelect = { personaId = it },
                     label = "Persona",
                 )
-            }
-            if (personaId == null) {
-                MewdekoTextField(
-                    value = webhookName,
-                    onValueChange = { webhookName = it },
-                    label = "Username",
-                )
-                MewdekoTextField(
-                    value = webhookAvatar,
-                    onValueChange = { webhookAvatar = it },
-                    label = "Avatar URL",
-                    placeholder = "Optional",
-                )
+                if (personaId == null) {
+                    MewdekoTextField(
+                        value = webhookName,
+                        onValueChange = { webhookName = it },
+                        label = "Username",
+                        placeholder = "Optional",
+                    )
+                    MewdekoTextField(
+                        value = webhookAvatar,
+                        onValueChange = { webhookAvatar = it },
+                        label = "Avatar URL",
+                        placeholder = "Optional, links only. Save a persona to upload an image.",
+                    )
+                }
             }
         }
     }
@@ -847,7 +1014,90 @@ private fun SendPanel(
             )
         }
         Button(
-            onClick = {
+            onClick = { confirmingSend = true },
+            enabled = channelId != null && blocking == 0 && embedPermissionBlock == null && !library.isSending,
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Icon(Icons.Default.Send, contentDescription = null, modifier = Modifier.size(18.dp))
+            Text(
+                if (library.isSending) "Sending…" else "Send message",
+                modifier = Modifier.padding(start = 8.dp),
+            )
+        }
+        library.lastSend?.let { result ->
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(
+                    "Sent to #${result.channelName}" +
+                        (result.identityLabel?.let { " as \"$it\"" }
+                            ?: if (result.sentViaWebhook) " via webhook" else " as the bot"),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.tertiary,
+                )
+                if (result.mentionsSuppressed) {
+                    Text(
+                        "Mentions were stripped because you lack Mention Everyone in this channel.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                if (result.messageLink.isNotBlank()) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                        modifier = Modifier.clickable { uriHandler.openUri(result.messageLink) },
+                    ) {
+                        Text(
+                            "Jump to message",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.primary,
+                        )
+                        Icon(
+                            Icons.Default.OpenInNew,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(14.dp),
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    val unavailable = library.channels.filterNot { it.isUsable }
+    if (unavailable.isNotEmpty()) {
+        SectionCard {
+            SectionCardHeader("Unavailable channels (${unavailable.size})", Icons.Default.Info)
+            unavailable.forEach { channel ->
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                ) {
+                    Text(
+                        "#${channel.name}",
+                        style = MaterialTheme.typography.bodySmall,
+                        modifier = Modifier.weight(1f),
+                    )
+                    Text(
+                        channel.blockedReason.orEmpty(),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+        }
+    }
+
+    if (showPersonaManager) {
+        PersonaManagerSheet(onDismiss = { showPersonaManager = false }, viewModel = viewModel)
+    }
+
+    if (confirmingSend) {
+        ConfirmDialog(
+            title = "Send this message?",
+            message = "It will be posted to #${selectedChannel?.name.orEmpty()} right away.",
+            confirmLabel = "Send",
+            destructive = false,
+            onConfirm = {
                 channelId?.let {
                     viewModel.send(
                         channelId = it,
@@ -859,23 +1109,8 @@ private fun SendPanel(
                     )
                 }
             },
-            enabled = channelId != null && blocking == 0 && !library.isSending,
-            modifier = Modifier.fillMaxWidth(),
-        ) {
-            Icon(Icons.Default.Send, contentDescription = null, modifier = Modifier.size(18.dp))
-            Text(
-                if (library.isSending) "Sending…" else "Send message",
-                modifier = Modifier.padding(start = 8.dp),
-            )
-        }
-        library.lastSend?.let { result ->
-            Text(
-                "Sent to #${result.channelName}" +
-                    (result.personaName?.let { " as $it" } ?: ""),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.tertiary,
-            )
-        }
+            onDismiss = { confirmingSend = false },
+        )
     }
 }
 

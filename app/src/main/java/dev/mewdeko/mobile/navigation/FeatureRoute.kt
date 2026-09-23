@@ -13,13 +13,21 @@ import dev.mewdeko.mobile.core.ui.EmptyState
 import dev.mewdeko.mobile.core.ui.LoadState
 import dev.mewdeko.mobile.feature.administration.AdministrationScreen
 import dev.mewdeko.mobile.feature.afk.AfkScreen
+import dev.mewdeko.mobile.feature.auditlog.AuditlogScreen
 import dev.mewdeko.mobile.feature.birthday.BirthdayScreen
+import dev.mewdeko.mobile.feature.channelaccess.ChannelaccessScreen
+import dev.mewdeko.mobile.feature.wordoftheday.WordOfTheDayScreen
+import dev.mewdeko.mobile.feature.liveboards.LiveboardsScreen
 import dev.mewdeko.mobile.feature.chatsaver.ChatSaverScreen
 import dev.mewdeko.mobile.feature.chattriggers.ChatTriggersScreen
 import dev.mewdeko.mobile.feature.confessions.ConfessionsScreen
 import dev.mewdeko.mobile.feature.counting.CountingScreen
+import dev.mewdeko.mobile.feature.currency.CurrencyScreen
 import dev.mewdeko.mobile.feature.customvoice.CustomVoiceScreen
+import dev.mewdeko.mobile.feature.dashboardaccess.DashboardaccessScreen
 import dev.mewdeko.mobile.feature.embed.EmbedBuilderScreen
+import dev.mewdeko.mobile.feature.featurerequests.FeaturerequestsScreen
+import dev.mewdeko.mobile.feature.filter.FilterScreen
 import dev.mewdeko.mobile.feature.forms.FormsScreen
 import dev.mewdeko.mobile.feature.feeds.FeedsScreen
 import dev.mewdeko.mobile.feature.giveaways.GiveawaysScreen
@@ -28,6 +36,7 @@ import dev.mewdeko.mobile.feature.invites.InvitesScreen
 import dev.mewdeko.mobile.feature.multigreets.MultiGreetsScreen
 import dev.mewdeko.mobile.feature.logging.LoggingScreen
 import dev.mewdeko.mobile.feature.messagestats.MessageStatsScreen
+import dev.mewdeko.mobile.feature.serverstats.ServerstatsScreen
 import dev.mewdeko.mobile.feature.repeaters.RepeatersScreen
 import dev.mewdeko.mobile.feature.reputation.ReputationScreen
 import dev.mewdeko.mobile.feature.rolegreets.RoleGreetsScreen
@@ -40,12 +49,16 @@ import dev.mewdeko.mobile.feature.rolestates.RoleStatesScreen
 import dev.mewdeko.mobile.feature.settings.SettingsScreen
 import dev.mewdeko.mobile.feature.starboard.StarboardScreen
 import dev.mewdeko.mobile.feature.statchannels.StatChannelsScreen
+import dev.mewdeko.mobile.feature.statroles.StatrolesScreen
 import dev.mewdeko.mobile.feature.statusroles.StatusRolesScreen
 import dev.mewdeko.mobile.feature.suggestions.SuggestionsScreen
 import dev.mewdeko.mobile.feature.streams.StreamsScreen
+import dev.mewdeko.mobile.feature.twitch.TwitchScreen
 import dev.mewdeko.mobile.feature.tickets.TicketsScreen
 import dev.mewdeko.mobile.feature.todo.TodoScreen
+import dev.mewdeko.mobile.feature.utility.UtilityScreen
 import dev.mewdeko.mobile.feature.votes.VotesScreen
+import dev.mewdeko.mobile.feature.polls.PollsScreen
 import dev.mewdeko.mobile.feature.xp.XpScreen
 import dev.mewdeko.mobile.feature.palette.GuildPaletteViewModel
 
@@ -68,30 +81,40 @@ fun FeatureRoute(
         when (featureId) {
             "afk" -> AfkScreen(guild = guild, onBack = onBack)
             "birthday" -> BirthdayScreen(guild = guild, onBack = onBack)
+            "currency" -> CurrencyScreen(guild = guild, onBack = onBack)
+            "wordoftheday" -> WordOfTheDayScreen(guild = guild, onBack = onBack)
+            "liveboards" -> LiveboardsScreen(guild = guild, onBack = onBack)
             "moderation" -> ModerationScreen(guild = guild, onBack = onBack)
+            "filter" -> FilterScreen(guild = guild, onBack = onBack)
             "logging" -> LoggingScreen(guild = guild, onBack = onBack)
+            "auditlog" -> AuditlogScreen(guild = guild, onBack = onBack)
             "settings" -> SettingsScreen(guild = guild, onBack = onBack)
             "performance" -> PerformanceScreen(guild = guild, onBack = onBack)
             "feeds" -> FeedsScreen(guild = guild, onBack = onBack)
             "chatsaver" -> ChatSaverScreen(guild = guild, onBack = onBack)
             "rolegreets" -> RoleGreetsScreen(guild = guild, onBack = onBack)
             "messagestats" -> MessageStatsScreen(guild = guild, onBack = onBack)
+            "serverstats" -> ServerstatsScreen(guild = guild, onBack = onBack)
             "invites" -> InvitesScreen(guild = guild, onBack = onBack)
             "giveaways" -> GiveawaysScreen(guild = guild, onBack = onBack)
             "multigreets" -> MultiGreetsScreen(guild = guild, onBack = onBack)
             "highlights" -> HighlightsScreen(guild = guild, onBack = onBack)
             "statusroles" -> StatusRolesScreen(guild = guild, onBack = onBack)
             "votes" -> VotesScreen(guild = guild, onBack = onBack)
+            "polls" -> PollsScreen(guild = guild, onBack = onBack)
             "statchannels" -> StatChannelsScreen(guild = guild, onBack = onBack)
+            "statroles" -> StatrolesScreen(guild = guild, onBack = onBack)
             "rolestates" -> RoleStatesScreen(guild = guild, onBack = onBack)
             "confessions" -> ConfessionsScreen(guild = guild, onBack = onBack)
             "chat-triggers" -> ChatTriggersScreen(guild = guild, onBack = onBack)
             "repeaters" -> RepeatersScreen(guild = guild, onBack = onBack)
             "streams" -> StreamsScreen(guild = guild, onBack = onBack)
+            "twitch" -> TwitchScreen(guild = guild, onBack = onBack)
             "reputation" -> ReputationScreen(guild = guild, onBack = onBack)
             "customvoice" -> CustomVoiceScreen(guild = guild, onBack = onBack)
             "patreon" -> PatreonScreen(guild = guild, onBack = onBack)
             "suggestions" -> SuggestionsScreen(guild = guild, onBack = onBack)
+            "feature-requests" -> FeaturerequestsScreen(guild = guild, onBack = onBack)
             "starboard" -> StarboardScreen(guild = guild, onBack = onBack)
             "counting" -> CountingScreen(guild = guild, onBack = onBack)
             "todo" -> TodoScreen(guild = guild, onBack = onBack)
@@ -102,6 +125,9 @@ fun FeatureRoute(
             "forms" -> FormsScreen(guild = guild, onBack = onBack)
             "tickets" -> TicketsScreen(guild = guild, onBack = onBack)
             "administration" -> AdministrationScreen(guild = guild, onBack = onBack)
+            "utility" -> UtilityScreen(guild = guild, onBack = onBack)
+            "access" -> DashboardaccessScreen(guild = guild, onBack = onBack)
+            "channel-access" -> ChannelaccessScreen(guild = guild, onBack = onBack)
 
             /**
              * Every catalog feature above has a real screen. This only fires

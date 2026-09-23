@@ -4,6 +4,7 @@ import androidx.lifecycle.SavedStateHandle
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dev.mewdeko.mobile.core.auth.SessionHolder
 import dev.mewdeko.mobile.core.model.EmbedMessage
+import dev.mewdeko.mobile.core.model.GuildRole
 import dev.mewdeko.mobile.core.model.Snowflake
 import dev.mewdeko.mobile.core.model.SnowflakeSerializer
 import dev.mewdeko.mobile.core.model.TextChannelLite
@@ -19,6 +20,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
+import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.builtins.ListSerializer
 import java.time.Instant
@@ -65,42 +67,39 @@ data class PatreonAnalytics(
 data class PatreonSupporter(
     val id: Int = 0,
     val fullName: String = "Unknown",
+    val email: String? = null,
     val amountCents: Int = 0,
     val patronStatus: String = "unknown",
     val tierId: String? = null,
     val lifetimeAmountCents: Int = 0,
+    @Serializable(with = InstantSerializer::class) val pledgeRelationshipStart: Instant? = null,
     @Serializable(with = InstantSerializer::class) val lastChargeDate: Instant? = null,
 ) {
     /** Whether this supporter's pledge is currently active. */
     val isActive: Boolean get() = patronStatus.equals("active_patron", ignoreCase = true)
 }
 
-/** The attribute block Patreon nests tier fields inside. */
-@Serializable
-data class PatreonTierAttributes(
-    val title: String? = null,
-    val amountCents: Int? = null,
-    val patronCount: Int? = null,
-    val description: String? = null,
-)
-
-/** One Patreon tier, flattened from its nested wire shape. */
+/**
+ * One Patreon tier cached for this guild.
+ *
+ * Mirrors `DataModel.PatreonTier`, the flat row type `PatreonService.GetTiersAsync`
+ * actually returns: there is no nested `attributes` object on the wire and a
+ * tier carries a single Discord role, not a list.
+ */
 @Serializable
 data class PatreonTier(
-    val id: String = "",
-    val attributes: PatreonTierAttributes = PatreonTierAttributes(),
+    val tierId: String = "",
+    val tierTitle: String = "Tier",
+    val amountCents: Int = 0,
+    @Serializable(with = SnowflakeSerializer::class) val discordRoleId: Snowflake = "0",
+    val description: String? = null,
+    val isActive: Boolean = true,
 ) {
     /** The tier's display name. */
-    val title: String get() = attributes.title ?: "Tier"
+    val title: String get() = tierTitle
 
-    /** The tier's monthly price in cents. */
-    val amountCents: Int get() = attributes.amountCents ?: 0
-
-    /** How many supporters are on this tier. */
-    val patronCount: Int get() = attributes.patronCount ?: 0
-
-    /** The tier's blurb, if the campaign set one. */
-    val description: String? get() = attributes.description
+    /** Whether this tier already grants a Discord role. */
+    val isMapped: Boolean get() = discordRoleId.isNotBlank() && discordRoleId != "0"
 }
 
 /** The campaign creator's public profile. */
@@ -110,6 +109,24 @@ data class PatreonCreator(
     val url: String = "",
     val imageUrl: String = "",
     val patronCount: Int = 0,
+)
+
+/**
+ * The raw shape of `GET api/patreon/creator`: a Patreon `User` JSON:API
+ * resource with the display fields nested one level down, under `attributes`,
+ * and keyed with the Patreon API's snake_case names rather than camelCase.
+ */
+@Serializable
+private data class PatreonCreatorWire(
+    val attributes: PatreonCreatorAttributesWire? = null,
+)
+
+/** The `attributes` object of a Patreon `User` resource. */
+@Serializable
+private data class PatreonCreatorAttributesWire(
+    @SerialName("full_name") val fullName: String? = null,
+    @SerialName("image_url") val imageUrl: String? = null,
+    val url: String? = null,
 )
 
 /** Per-guild Patreon announcement configuration. */
@@ -133,6 +150,7 @@ data class PatreonState(
     val tiers: List<PatreonTier> = emptyList(),
     val config: PatreonConfig = PatreonConfig(),
     val availableChannels: List<TextChannelLite> = emptyList(),
+    val availableRoles: List<GuildRole> = emptyList(),
     val oauthUrl: String? = null,
     val section: String = "overview",
 ) {
@@ -183,6 +201,14 @@ class PatreonViewModel @Inject constructor(
                     )
                 }.getOrDefault(emptyList())
             }
+            val roles = async {
+                runCatching {
+                    api.send(
+                        Endpoint("api/ClientOperations/roles/$guildId"),
+                        ListSerializer(GuildRole.serializer()),
+                    )
+                }.getOrDefault(emptyList())
+            }
             val analytics = async {
                 if (status?.isConfigured != true) null else runCatching {
                     api.send(
@@ -211,10 +237,13 @@ class PatreonViewModel @Inject constructor(
                 if (status?.isConfigured != true) null else runCatching {
                     api.send(
                         Endpoint("api/patreon/creator?guildId=$guildId"),
-                        PatreonCreator.serializer(),
+                        PatreonCreatorWire.serializer(),
                     )
                 }.getOrNull()
             }
+
+            val analyticsResult = analytics.await()
+            val creatorAttributes = creator.await()?.attributes
 
             _state.update {
                 it.copy(
@@ -222,11 +251,19 @@ class PatreonViewModel @Inject constructor(
                     config = config.await(),
                     availableChannels = channels.await()
                         .sortedBy { channel -> channel.name.lowercase() },
-                    analytics = analytics.await(),
+                    availableRoles = roles.await().sortedBy { role -> role.name.lowercase() },
+                    analytics = analyticsResult,
                     supporters = supporters.await()
                         .sortedByDescending { supporter -> supporter.amountCents },
                     tiers = tiers.await().sortedBy { tier -> tier.amountCents },
-                    creator = creator.await(),
+                    creator = creatorAttributes?.let { attrs ->
+                        PatreonCreator(
+                            fullName = attrs.fullName?.takeIf { it.isNotBlank() } ?: "Creator",
+                            url = attrs.url ?: "",
+                            imageUrl = attrs.imageUrl ?: "",
+                            patronCount = analyticsResult?.totalSupporters ?: 0,
+                        )
+                    },
                 )
             }
         }
@@ -256,7 +293,12 @@ class PatreonViewModel @Inject constructor(
         load(refreshing = true)
     }
 
-    /** Runs a named maintenance operation, such as a manual sync. */
+    /**
+     * Runs a named maintenance operation, such as a manual sync.
+     *
+     * The bot only recognises `sync_all`, `sync`, `refresh_token`,
+     * `manual_announcement`, and `sync_roles`; anything else returns a 400.
+     */
     fun runOperation(operation: String) = launchAction("Failed to run $operation.") {
         api.sendIgnoringBody(
             Endpoint(
@@ -266,6 +308,18 @@ class PatreonViewModel @Inject constructor(
             )
         )
         postSuccess("Operation queued.")
+        load(refreshing = true)
+    }
+
+    /** Maps a Patreon tier to a Discord role, granted when a supporter is synced. */
+    fun mapTierToRole(tierId: String, roleId: Snowflake) = launchAction("Failed to map tier to role.") {
+        api.sendIgnoringBody(
+            Endpoint(
+                "api/patreon/tiers/map?guildId=$guildId",
+                HttpMethod.POST,
+                jsonBody("tierId" to tierId, "roleId" to roleId.toLongOrNull()),
+            )
+        )
         load(refreshing = true)
     }
 

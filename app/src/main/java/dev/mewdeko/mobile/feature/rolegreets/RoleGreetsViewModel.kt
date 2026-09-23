@@ -11,6 +11,7 @@ import dev.mewdeko.mobile.core.model.TextChannelLite
 import dev.mewdeko.mobile.core.net.ApiClient
 import dev.mewdeko.mobile.core.net.Endpoint
 import dev.mewdeko.mobile.core.net.HttpMethod
+import dev.mewdeko.mobile.core.net.jsonBody
 import dev.mewdeko.mobile.core.net.jsonBool
 import dev.mewdeko.mobile.core.net.jsonInt
 import dev.mewdeko.mobile.core.net.jsonString
@@ -124,7 +125,6 @@ class RoleGreetsViewModel @Inject constructor(
                 (channelId.toLongOrNull() ?: 0L).toString(),
             )
         )
-        postSuccess("Greet added.")
         load(refreshing = true)
     }
 
@@ -138,7 +138,6 @@ class RoleGreetsViewModel @Inject constructor(
                 },
             )
         }
-        postSuccess("Saved.")
     }
 
     /** Sets how long the greet stays before being deleted, in seconds. */
@@ -174,6 +173,26 @@ class RoleGreetsViewModel @Inject constructor(
                     if (it.id == greetId) it.copy(disabled = value) else it
                 },
             )
+        }
+    }
+
+    /** Sets or clears the webhook this greet posts through. */
+    fun updateWebhook(greetId: Int, webhookUrl: String?) = launchAction("Failed to update webhook.") {
+        put(greetId, "webhook", jsonBody("webhookUrl" to webhookUrl))
+        _state.update { current ->
+            current.copy(
+                greets = current.greets.map {
+                    if (it.id == greetId) it.copy(webhookUrl = webhookUrl) else it
+                },
+            )
+        }
+    }
+
+    /** Deletes a role greet. */
+    fun delete(greetId: Int) = launchAction("Failed to delete greet.") {
+        api.sendIgnoringBody(Endpoint("api/RoleGreet/$guildId/$greetId", HttpMethod.DELETE))
+        _state.update { current ->
+            current.copy(greets = current.greets.filterNot { it.id == greetId })
         }
     }
 

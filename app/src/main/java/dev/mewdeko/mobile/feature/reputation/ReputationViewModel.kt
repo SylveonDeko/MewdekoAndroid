@@ -1,6 +1,7 @@
 package dev.mewdeko.mobile.feature.reputation
 
 import androidx.lifecycle.SavedStateHandle
+import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dev.mewdeko.mobile.core.auth.SessionHolder
 import dev.mewdeko.mobile.core.model.GuildRole
@@ -10,6 +11,7 @@ import dev.mewdeko.mobile.core.model.TextChannelLite
 import dev.mewdeko.mobile.core.net.ApiClient
 import dev.mewdeko.mobile.core.net.Endpoint
 import dev.mewdeko.mobile.core.net.HttpMethod
+import dev.mewdeko.mobile.core.net.InstantSerializer
 import dev.mewdeko.mobile.core.net.jsonBody
 import dev.mewdeko.mobile.core.net.jsonBool
 import dev.mewdeko.mobile.core.net.jsonInt
@@ -21,9 +23,14 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.launch
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.builtins.ListSerializer
+import java.time.Instant
 import javax.inject.Inject
+
+/** Number of history rows requested per page, matching the dashboard. */
+private const val HistoryPageSize = 20
 
 /** Reputation configuration for a guild. */
 @Serializable
@@ -68,6 +75,19 @@ data class RepStats(
     val averageRepPerUser: Int = 0,
 )
 
+/** One reputation gift or removal recorded against a member. */
+@Serializable
+data class RepHistoryEntry(
+    val id: Int = 0,
+    @Serializable(with = SnowflakeSerializer::class) val giverId: Snowflake = "",
+    @Serializable(with = SnowflakeSerializer::class) val receiverId: Snowflake = "",
+    val amount: Int = 0,
+    val repType: String = "",
+    val reason: String? = null,
+    val isAnonymous: Boolean = false,
+    @Serializable(with = InstantSerializer::class) val timestamp: Instant = Instant.EPOCH,
+)
+
 /** Reputation screen state. */
 data class ReputationState(
     val config: RepConfig = RepConfig(),
@@ -77,6 +97,11 @@ data class ReputationState(
     val availableChannels: List<TextChannelLite> = emptyList(),
     val availableRoles: List<GuildRole> = emptyList(),
     val section: String = "settings",
+    val historyTarget: RepLeaderboardEntry? = null,
+    val historyEntries: List<RepHistoryEntry> = emptyList(),
+    val historyPage: Int = 1,
+    val historyLoading: Boolean = false,
+    val historyFailed: Boolean = false,
 )
 
 /** Member-to-member reputation. */
@@ -236,6 +261,45 @@ class ReputationViewModel @Inject constructor(
         )
         _state.update { it.copy(rewards = it.rewards.filterNot { reward -> reward.roleId == roleId }) }
         postSuccess("Role reward removed.")
+    }
+
+    /** Opens the reputation history modal for a leaderboard entry and loads its first page. */
+    fun openHistory(entry: RepLeaderboardEntry) {
+        _state.update {
+            it.copy(historyTarget = entry, historyEntries = emptyList(), historyPage = 1, historyFailed = false)
+        }
+        loadHistory(1)
+    }
+
+    /** Dismisses the reputation history modal. */
+    fun closeHistory() = _state.update {
+        it.copy(historyTarget = null, historyEntries = emptyList(), historyPage = 1, historyFailed = false)
+    }
+
+    /** Loads one page of history for the member currently open in the modal. */
+    fun loadHistory(page: Int) {
+        val target = _state.value.historyTarget ?: return
+        if (page < 1) return
+        viewModelScope.launch {
+            _state.update { it.copy(historyLoading = true) }
+            val result = runCatching {
+                api.send(
+                    Endpoint(
+                        "api/Reputation/$guildId/history/${target.userId}?page=$page&pageSize=$HistoryPageSize"
+                    ),
+                    ListSerializer(RepHistoryEntry.serializer()),
+                )
+            }
+            _state.update {
+                it.copy(
+                    historyLoading = false,
+                    historyPage = if (result.isSuccess) page else it.historyPage,
+                    historyEntries = result.getOrDefault(it.historyEntries),
+                    historyFailed = result.isFailure,
+                )
+            }
+            if (result.isFailure) postError("Failed to load reputation history.")
+        }
     }
 
     private fun setting(

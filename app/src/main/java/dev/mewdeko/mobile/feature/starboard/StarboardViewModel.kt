@@ -48,8 +48,9 @@ data class StarboardConfig(
             .map { it.trim() }
             .filter { it.isNotEmpty() }
 
-    /** The reaction emoji that count toward this starboard. */
-    val emotes: List<String> get() = emote.split(' ').filter { it.isNotBlank() }
+    /** The reaction emoji that count toward this starboard. The bot joins these with `|`. */
+    val emotes: List<String>
+        get() = emote.split('|').map { it.trim() }.filter { it.isNotEmpty() }
 }
 
 /** The most-starred member. */

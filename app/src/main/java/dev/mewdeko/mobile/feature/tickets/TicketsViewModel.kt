@@ -48,6 +48,7 @@ data class TicketSummary(
     val buttonLabel: String? = null,
     val optionLabel: String? = null,
     val caseId: Int? = null,
+    val transcriptUrl: String? = null,
 ) {
     /** Whether the ticket is still live: not closed, archived, or deleted. */
     val isOpen: Boolean get() = closedAt == null && !isArchived && !isDeleted
@@ -101,7 +102,12 @@ data class TicketSettingsResponse(
     @Serializable(with = SnowflakeSerializer::class) val logChannelId: Snowflake? = null,
 )
 
-/** One button on a panel. */
+/**
+ * The full set of ticket-opening settings a panel button or select menu
+ * option carries. The list endpoints dump the raw entity, and the single-item
+ * GET endpoints add a couple of resolved display names, so one shape covers
+ * both: unused fields simply keep their default.
+ */
 @Serializable
 data class PanelButton(
     val id: Int = 0,
@@ -109,6 +115,30 @@ data class PanelButton(
     val style: Int = 1,
     val emoji: String? = null,
     val customId: String? = null,
+    val channelNameFormat: String? = null,
+    @Serializable(with = SnowflakeSerializer::class) val categoryId: Snowflake? = null,
+    val categoryName: String? = null,
+    @Serializable(with = SnowflakeSerializer::class) val archiveCategoryId: Snowflake? = null,
+    val archiveCategoryName: String? = null,
+    val supportRoles: List<@Serializable(with = SnowflakeSerializer::class) Snowflake> = emptyList(),
+    val viewerRoles: List<@Serializable(with = SnowflakeSerializer::class) Snowflake> = emptyList(),
+    val autoCloseTime: String? = null,
+    val requiredResponseTime: String? = null,
+    val maxActiveTickets: Int = 1,
+    val allowedPriorities: List<String> = emptyList(),
+    val defaultPriority: String? = null,
+    val saveTranscript: Boolean = true,
+    val deleteOnClose: Boolean = false,
+    val lockOnClose: Boolean = true,
+    val renameOnClose: Boolean = true,
+    val removeCreatorOnClose: Boolean = false,
+    val deleteDelay: String? = null,
+    val lockOnArchive: Boolean = true,
+    val renameOnArchive: Boolean = true,
+    val removeCreatorOnArchive: Boolean = false,
+    val autoArchiveOnClose: Boolean = false,
+    val openMessageJson: String? = null,
+    val modalJson: String? = null,
 ) {
     /** The Discord button style's display name. */
     val styleLabel: String
@@ -122,16 +152,50 @@ data class PanelButton(
         }
 }
 
-/** One select menu on a panel, shown read-only on mobile. */
+/** One choice on a select menu, carrying the same ticket-opening settings as [PanelButton]. */
+@Serializable
+data class SelectMenuOption(
+    val id: Int = 0,
+    val label: String = "",
+    val description: String? = null,
+    val emoji: String? = null,
+    val value: String? = null,
+    val channelNameFormat: String? = null,
+    @Serializable(with = SnowflakeSerializer::class) val categoryId: Snowflake? = null,
+    val categoryName: String? = null,
+    @Serializable(with = SnowflakeSerializer::class) val archiveCategoryId: Snowflake? = null,
+    val archiveCategoryName: String? = null,
+    val supportRoles: List<@Serializable(with = SnowflakeSerializer::class) Snowflake> = emptyList(),
+    val viewerRoles: List<@Serializable(with = SnowflakeSerializer::class) Snowflake> = emptyList(),
+    val autoCloseTime: String? = null,
+    val requiredResponseTime: String? = null,
+    val maxActiveTickets: Int = 1,
+    val allowedPriorities: List<String> = emptyList(),
+    val defaultPriority: String? = null,
+    val saveTranscript: Boolean = true,
+    val deleteOnClose: Boolean = false,
+    val lockOnClose: Boolean = true,
+    val renameOnClose: Boolean = true,
+    val removeCreatorOnClose: Boolean = false,
+    val deleteDelay: String? = null,
+    val lockOnArchive: Boolean = true,
+    val renameOnArchive: Boolean = true,
+    val removeCreatorOnArchive: Boolean = false,
+    val autoArchiveOnClose: Boolean = false,
+    val openMessageJson: String? = null,
+    val modalJson: String? = null,
+)
+
+/** One select menu on a panel. */
 @Serializable
 data class PanelSelectMenu(
     val id: Int = 0,
     val placeholder: String? = null,
     val optionCount: Int = 0,
-    val options: List<kotlinx.serialization.json.JsonElement>? = null,
+    val options: List<SelectMenuOption> = emptyList(),
 ) {
     /** How many options the menu offers, however the bot reported it. */
-    val optionTotal: Int get() = if (optionCount > 0) optionCount else options?.size ?: 0
+    val optionTotal: Int get() = if (optionCount > 0) optionCount else options.size
 }
 
 /** A case grouping several related tickets. */
@@ -141,14 +205,79 @@ data class TicketCase(
     val title: String = "",
     val description: String? = null,
     @Serializable(with = SnowflakeSerializer::class) val createdBy: Snowflake? = null,
+    val createdByName: String? = null,
     @Serializable(with = InstantSerializer::class) val createdAt: Instant? = null,
-    val isClosed: Boolean = false,
-    val linkedTicketIds: List<Int> = emptyList(),
-    val linkedTickets: List<Int> = emptyList(),
+    @Serializable(with = InstantSerializer::class) val closedAt: Instant? = null,
+    val linkedTickets: Int = 0,
 ) {
-    /** The tickets attached to this case, however the bot named the field. */
-    val linked: List<Int> get() = linkedTicketIds.ifEmpty { linkedTickets }
+    /** A case with a close timestamp is closed; the bot sends no separate flag. */
+    val isClosed: Boolean get() = closedAt != null
 }
+
+/** One ticket linked to a case, as the case detail endpoint renders it. */
+@Serializable
+data class CaseLinkedTicket(
+    val id: Int = 0,
+    @Serializable(with = SnowflakeSerializer::class) val channelId: Snowflake = "0",
+    val channelName: String = "",
+    @Serializable(with = SnowflakeSerializer::class) val creatorId: Snowflake? = null,
+    val creatorName: String? = null,
+    @Serializable(with = InstantSerializer::class) val createdAt: Instant? = null,
+    @Serializable(with = InstantSerializer::class) val closedAt: Instant? = null,
+    val isArchived: Boolean = false,
+)
+
+/** A staff-only note left on a case. */
+@Serializable
+data class CaseNote(
+    val id: Int = 0,
+    val content: String = "",
+    @Serializable(with = SnowflakeSerializer::class) val authorId: Snowflake? = null,
+    @Serializable(with = InstantSerializer::class) val createdAt: Instant? = null,
+)
+
+/** The full detail view of one case. */
+@Serializable
+data class CaseDetailResponse(
+    val id: Int = 0,
+    val title: String = "",
+    val description: String? = null,
+    @Serializable(with = SnowflakeSerializer::class) val createdBy: Snowflake? = null,
+    val createdByName: String? = null,
+    @Serializable(with = InstantSerializer::class) val createdAt: Instant? = null,
+    @Serializable(with = InstantSerializer::class) val closedAt: Instant? = null,
+    val linkedTickets: List<CaseLinkedTicket> = emptyList(),
+    val notes: List<CaseNote> = emptyList(),
+) {
+    /** A case with a close timestamp is closed; the bot sends no separate flag. */
+    val isClosed: Boolean get() = closedAt != null
+}
+
+/** Guild-wide ticket counters and timing averages, from the overview endpoint. */
+@Serializable
+data class OverviewStatistics(
+    val totalTickets: Int = 0,
+    val openTickets: Int = 0,
+    val closedTickets: Int = 0,
+    val averageResponseTime: Double = 0.0,
+    val averageResolutionTime: Double = 0.0,
+    val ticketsByPriority: Map<String, Int> = emptyMap(),
+)
+
+/** One staff member's average first-response time. */
+@Serializable
+data class StaffResponseStat(
+    @Serializable(with = SnowflakeSerializer::class) val staffId: Snowflake? = null,
+    val staffName: String = "Unknown User",
+    val averageResponseTimeMinutes: Double = 0.0,
+)
+
+/** The dashboard-optimised overview payload. */
+@Serializable
+data class TicketOverview(
+    val statistics: OverviewStatistics? = null,
+    val staffResponseStats: List<StaffResponseStat> = emptyList(),
+)
 
 /** Which slice of the ticket list is showing. */
 enum class TicketFilter(val label: String) {
@@ -156,6 +285,7 @@ enum class TicketFilter(val label: String) {
     CLAIMED("Claimed"),
     CLOSED("Closed"),
     ARCHIVED("Archived"),
+    ALL("All"),
 }
 
 /** Which part of the tickets screen is showing. */
@@ -176,6 +306,18 @@ data class PanelDetail(
     val loading: Boolean = true,
 )
 
+/** One select menu, opened to manage its options. */
+data class MenuDetail(
+    val panel: TicketPanel,
+    val menu: PanelSelectMenu,
+)
+
+/** One case, opened to its full detail view. */
+data class CaseDetailState(
+    val detail: CaseDetailResponse,
+    val loading: Boolean = true,
+)
+
 /** Tickets screen state. */
 data class TicketsState(
     val tickets: List<TicketSummary> = emptyList(),
@@ -189,26 +331,50 @@ data class TicketsState(
     val availableRoles: List<GuildRole> = emptyList(),
     val transcriptChannelId: Snowflake? = null,
     val logChannelId: Snowflake? = null,
+    val overview: TicketOverview? = null,
     val section: TicketSection = TicketSection.OVERVIEW,
     val filter: TicketFilter = TicketFilter.OPEN,
+    val searchQuery: String = "",
     val openPanel: PanelDetail? = null,
+    val openMenu: MenuDetail? = null,
+    val editingButton: PanelButton? = null,
+    val editingButtonLoading: Boolean = false,
+    val editingOption: SelectMenuOption? = null,
+    val editingOptionLoading: Boolean = false,
+    val openCase: CaseDetailState? = null,
 ) {
-    /** The tickets matching the active filter. */
+    /** The tickets matching the active filter and search query. */
     val visible: List<TicketSummary>
-        get() = when (filter) {
-            TicketFilter.OPEN -> tickets.filter { it.isOpen }
-            TicketFilter.CLAIMED -> tickets.filter { it.claimedBy != null && it.isOpen }
-            TicketFilter.CLOSED -> tickets.filter { it.closedAt != null && !it.isArchived }
-            TicketFilter.ARCHIVED -> tickets.filter { it.isArchived }
+        get() {
+            val base = when (filter) {
+                TicketFilter.OPEN -> tickets.filter { it.isOpen }
+                TicketFilter.CLAIMED -> tickets.filter { it.claimedBy != null && it.isOpen }
+                TicketFilter.CLOSED -> tickets.filter { it.closedAt != null && !it.isArchived }
+                TicketFilter.ARCHIVED -> tickets.filter { it.isArchived }
+                TicketFilter.ALL -> tickets
+            }
+            val query = searchQuery.trim()
+            if (query.isEmpty()) return base
+            return base.filter { ticket ->
+                ticket.id.toString().contains(query, ignoreCase = true) ||
+                    ticket.channelName.contains(query, ignoreCase = true) ||
+                    ticket.creatorName?.contains(query, ignoreCase = true) == true ||
+                    ticket.claimedByName?.contains(query, ignoreCase = true) == true ||
+                    ticket.tags.any { it.contains(query, ignoreCase = true) }
+            }
         }
 
-    /** How many tickets fall into each filter, for the overview tiles. */
+    /** How many tickets fall into each filter, for the filter chips. */
     fun countFor(filter: TicketFilter): Int = when (filter) {
         TicketFilter.OPEN -> tickets.count { it.isOpen }
         TicketFilter.CLAIMED -> tickets.count { it.claimedBy != null && it.isOpen }
         TicketFilter.CLOSED -> tickets.count { it.closedAt != null && !it.isArchived }
         TicketFilter.ARCHIVED -> tickets.count { it.isArchived }
+        TicketFilter.ALL -> tickets.size
     }
+
+    /** Tickets not yet attached to any case, for the case-linking pickers. */
+    val unlinkedTickets: List<TicketSummary> get() = tickets.filter { it.caseId == null }
 }
 
 /** The support ticket system: tickets, panels, priorities, tags, and cases. */
@@ -266,6 +432,14 @@ class TicketsViewModel @Inject constructor(
                     )
                 }.getOrNull()
             }
+            val overview = async {
+                runCatching {
+                    api.send(
+                        Endpoint("api/Ticket/$guildId/overview?activityDays=30"),
+                        TicketOverview.serializer(),
+                    )
+                }.getOrNull()
+            }
 
             val loaded = settings.await()
             _state.update {
@@ -287,6 +461,7 @@ class TicketsViewModel @Inject constructor(
                         .sortedBy { role -> role.name.lowercase() },
                     transcriptChannelId = loaded?.transcriptChannelId,
                     logChannelId = loaded?.logChannelId,
+                    overview = overview.await(),
                 )
             }
         }
@@ -298,6 +473,9 @@ class TicketsViewModel @Inject constructor(
     /** Narrows the ticket list. */
     fun setFilter(filter: TicketFilter) = _state.update { it.copy(filter = filter) }
 
+    /** Filters the ticket list by id, creator, channel, claimer, or tag. */
+    fun setSearch(query: String) = _state.update { it.copy(searchQuery = query) }
+
     /** Assigns a ticket to the signed-in staff member. */
     fun claim(ticket: TicketSummary) = ticketAction(ticket, "claim", "Claimed.", "Failed to claim.")
 
@@ -305,8 +483,21 @@ class TicketsViewModel @Inject constructor(
     fun unclaim(ticket: TicketSummary) =
         ticketAction(ticket, "unclaim", "Unclaimed.", "Failed to unclaim.")
 
-    /** Closes a ticket. */
-    fun close(ticket: TicketSummary) = ticketAction(ticket, "close", "Closed.", "Failed to close.")
+    /** Closes a ticket, optionally recording why. */
+    fun close(ticket: TicketSummary, reason: String?) = launchAction("Failed to close.") {
+        api.sendIgnoringBody(
+            Endpoint(
+                "api/Ticket/$guildId/tickets/by-channel/${ticket.channelId}/close",
+                HttpMethod.POST,
+                jsonBody(
+                    "reason" to reason?.takeIf { it.isNotBlank() },
+                    "staffId" to userId.asSnowflakeNumber(),
+                ),
+            )
+        )
+        load()
+        postSuccess("Closed.")
+    }
 
     /** Moves a closed ticket into the archive category. */
     fun archive(ticket: TicketSummary) = launchAction("Failed to archive.") {
@@ -338,19 +529,38 @@ class TicketsViewModel @Inject constructor(
             postSuccess("Priority set.")
         }
 
-    /** Attaches tags to a ticket. */
-    fun addTags(ticket: TicketSummary, tagIds: List<String>) =
+    /**
+     * Reconciles a ticket's tags against a new selection: tags dropped from
+     * the selection are removed, tags newly picked are added.
+     */
+    fun updateTags(ticket: TicketSummary, originalIds: List<String>, newIds: List<String>) =
         launchAction("Failed to update tags.") {
-            api.sendIgnoringBody(
-                Endpoint(
-                    "api/Ticket/$guildId/tickets/by-channel/${ticket.channelId}/tags",
-                    HttpMethod.POST,
-                    jsonBody(
-                        "tagIds" to JsonArray(tagIds.map { JsonPrimitive(it) }),
-                        "staffId" to userId.asSnowflakeNumber(),
-                    ),
+            val added = newIds - originalIds.toSet()
+            val removed = originalIds - newIds.toSet()
+            if (added.isNotEmpty()) {
+                api.sendIgnoringBody(
+                    Endpoint(
+                        "api/Ticket/$guildId/tickets/by-channel/${ticket.channelId}/tags",
+                        HttpMethod.POST,
+                        jsonBody(
+                            "tagIds" to JsonArray(added.map { JsonPrimitive(it) }),
+                            "staffId" to userId.asSnowflakeNumber(),
+                        ),
+                    )
                 )
-            )
+            }
+            if (removed.isNotEmpty()) {
+                api.sendIgnoringBody(
+                    Endpoint(
+                        "api/Ticket/$guildId/tickets/by-channel/${ticket.channelId}/tags",
+                        HttpMethod.DELETE,
+                        jsonBody(
+                            "tagIds" to JsonArray(removed.map { JsonPrimitive(it) }),
+                            "staffId" to userId.asSnowflakeNumber(),
+                        ),
+                    )
+                )
+            }
             load()
             postSuccess("Tags updated.")
         }
@@ -370,8 +580,8 @@ class TicketsViewModel @Inject constructor(
         postSuccess("Note added.")
     }
 
-    /** Posts a new ticket panel into a channel. */
-    fun createPanel(channelId: Snowflake, title: String, description: String) =
+    /** Posts a new ticket panel into a channel from a ready-made embed payload. */
+    fun createPanel(channelId: Snowflake, embedJson: String) =
         launchAction("Failed to create panel.") {
             api.sendIgnoringBody(
                 Endpoint(
@@ -379,8 +589,7 @@ class TicketsViewModel @Inject constructor(
                     HttpMethod.POST,
                     jsonBody(
                         "channelId" to channelId.asSnowflakeNumber(),
-                        "title" to title,
-                        "description" to description,
+                        "embedJson" to embedJson,
                     ),
                 )
             )
@@ -400,6 +609,34 @@ class TicketsViewModel @Inject constructor(
             )
         }
         postSuccess("Panel deleted.")
+    }
+
+    /** Replaces a panel's embed. */
+    fun updatePanelEmbed(panel: TicketPanel, embedJson: String) =
+        launchAction("Failed to update embed.") {
+            api.sendIgnoringBody(
+                Endpoint(
+                    "api/Ticket/$guildId/panels/${panel.id}/embed",
+                    HttpMethod.PUT,
+                    jsonBody("embedJson" to embedJson),
+                )
+            )
+            load()
+            postSuccess("Embed updated.")
+        }
+
+    /** Checks whether a panel's message and channel still exist. */
+    fun checkPanelStatus(panel: TicketPanel) = launchAction("Failed to check panel status.") {
+        val result = api.send(
+            Endpoint("api/Ticket/$guildId/panels/${panel.id}/status"),
+            PanelStatusResponse.serializer(),
+        )
+        when (result.status) {
+            0 -> postSuccess("Panel #${panel.id} is healthy.")
+            1 -> postError("Panel #${panel.id}'s message was deleted. Use Repost to recreate it.")
+            2 -> postError("Panel #${panel.id}'s channel was deleted.")
+            else -> postError("Panel #${panel.id} status is unknown.")
+        }
     }
 
     /** Reposts one panel's message. */
@@ -426,7 +663,7 @@ class TicketsViewModel @Inject constructor(
     }
 
     /** Returns from a panel's detail view. */
-    fun closePanel() = _state.update { it.copy(openPanel = null) }
+    fun closePanel() = _state.update { it.copy(openPanel = null, openMenu = null) }
 
     /** Reloads the open panel's buttons and menus. */
     fun loadPanelDetail(panel: TicketPanel) = launchAction("Failed to load panel.") {
@@ -440,44 +677,63 @@ class TicketsViewModel @Inject constructor(
                     PanelSelectMenu.serializer(),
                 )
             }
-            val loaded = PanelDetail(panel, buttons.await(), menus.await(), loading = false)
+            val loadedMenus = menus.await()
+            val loaded = PanelDetail(panel, buttons.await(), loadedMenus, loading = false)
             _state.update {
-                if (it.openPanel?.panel?.id == panel.id) it.copy(openPanel = loaded) else it
+                val refreshedMenu = it.openMenu
+                    ?.takeIf { open -> open.panel.id == panel.id }
+                    ?.let { open -> loadedMenus.firstOrNull { m -> m.id == open.menu.id } }
+                    ?.let { menu -> it.openMenu?.copy(menu = menu) }
+                if (it.openPanel?.panel?.id == panel.id) {
+                    it.copy(openPanel = loaded, openMenu = refreshedMenu ?: it.openMenu)
+                } else {
+                    it
+                }
             }
         }
     }
 
     /** Adds a ticket-opening button to a panel. */
-    fun addPanelButton(
-        panel: TicketPanel,
-        label: String,
-        emoji: String?,
-        style: Int,
-        categoryId: Snowflake?,
-        archiveCategoryId: Snowflake?,
-        supportRoles: List<Snowflake>,
-        viewerRoles: List<Snowflake>,
-        maxActiveTickets: Int,
-    ) = launchAction("Failed to add button.") {
-        api.sendIgnoringBody(
-            Endpoint(
-                "api/Ticket/$guildId/panels/${panel.id}/buttons",
-                HttpMethod.POST,
-                jsonBody(
-                    "label" to label,
-                    "style" to style,
-                    "maxActiveTickets" to maxActiveTickets,
-                    "emoji" to emoji?.takeIf { it.isNotEmpty() },
-                    "categoryId" to categoryId?.toLongOrNull(),
-                    "archiveCategoryId" to archiveCategoryId?.toLongOrNull(),
-                    "supportRoles" to supportRoles.asIdArray(),
-                    "viewerRoles" to viewerRoles.asIdArray(),
-                ),
+    fun addPanelButton(panel: TicketPanel, form: ComponentSubmission) =
+        launchAction("Failed to add button.") {
+            api.sendIgnoringBody(
+                Endpoint(
+                    "api/Ticket/$guildId/panels/${panel.id}/buttons",
+                    HttpMethod.POST,
+                    jsonBody(*form.toButtonFields()),
+                )
             )
+            loadPanelDetail(panel)
+            postSuccess("Button added.")
+        }
+
+    /** Loads one button's full configuration for editing. */
+    fun openButtonEditor(button: PanelButton) = launchAction("Failed to load button.") {
+        _state.update { it.copy(editingButton = button, editingButtonLoading = true) }
+        val detail = api.send(
+            Endpoint("api/Ticket/$guildId/buttons/${button.id}"),
+            PanelButton.serializer(),
         )
-        loadPanelDetail(panel)
-        postSuccess("Button added.")
+        _state.update { it.copy(editingButton = detail, editingButtonLoading = false) }
     }
+
+    /** Closes the button editor without saving. */
+    fun closeButtonEditor() = _state.update { it.copy(editingButton = null) }
+
+    /** Saves changes to an existing button. */
+    fun updateButton(button: PanelButton, form: ComponentSubmission) =
+        launchAction("Failed to update button.") {
+            api.sendIgnoringBody(
+                Endpoint(
+                    "api/Ticket/$guildId/buttons/${button.id}",
+                    HttpMethod.PUT,
+                    jsonBody(*form.toUpdateFields()),
+                )
+            )
+            closeButtonEditor()
+            _state.value.openPanel?.let { loadPanelDetail(it.panel) }
+            postSuccess("Button updated.")
+        }
 
     /** Removes a button from a panel. */
     fun deletePanelButton(button: PanelButton) = launchAction("Failed to delete button.") {
@@ -486,6 +742,112 @@ class TicketsViewModel @Inject constructor(
         )
         _state.value.openPanel?.let { loadPanelDetail(it.panel) }
         postSuccess("Button deleted.")
+    }
+
+    /** Adds a select menu to a panel with its first option. */
+    fun createSelectMenu(
+        panel: TicketPanel,
+        placeholder: String,
+        firstOptionLabel: String,
+        firstOptionDescription: String?,
+        firstOptionEmoji: String?,
+    ) = launchAction("Failed to add select menu.") {
+        api.sendIgnoringBody(
+            Endpoint(
+                "api/Ticket/$guildId/panels/${panel.id}/selectmenus",
+                HttpMethod.POST,
+                jsonBody(
+                    "placeholder" to placeholder,
+                    "firstOptionLabel" to firstOptionLabel,
+                    "firstOptionDescription" to firstOptionDescription?.takeIf { it.isNotBlank() },
+                    "firstOptionEmoji" to firstOptionEmoji?.takeIf { it.isNotBlank() },
+                ),
+            )
+        )
+        loadPanelDetail(panel)
+        postSuccess("Select menu added.")
+    }
+
+    /** Updates a select menu's placeholder text. */
+    fun updateMenuPlaceholder(panel: TicketPanel, menu: PanelSelectMenu, placeholder: String) =
+        launchAction("Failed to update menu.") {
+            api.sendIgnoringBody(
+                Endpoint(
+                    "api/Ticket/$guildId/selectmenus/${menu.id}/placeholder",
+                    HttpMethod.PUT,
+                    jsonBody("placeholder" to placeholder),
+                )
+            )
+            loadPanelDetail(panel)
+            postSuccess("Placeholder updated.")
+        }
+
+    /** Deletes a select menu from a panel. */
+    fun deleteMenu(panel: TicketPanel, menu: PanelSelectMenu) = launchAction("Failed to delete menu.") {
+        api.sendIgnoringBody(
+            Endpoint("api/Ticket/$guildId/selectmenus/${menu.id}", HttpMethod.DELETE)
+        )
+        _state.update { it.copy(openMenu = it.openMenu?.takeIf { open -> open.menu.id != menu.id }) }
+        loadPanelDetail(panel)
+        postSuccess("Menu deleted.")
+    }
+
+    /** Opens a select menu's option list. */
+    fun openMenu(panel: TicketPanel, menu: PanelSelectMenu) =
+        _state.update { it.copy(openMenu = MenuDetail(panel, menu)) }
+
+    /** Returns from a select menu's option list. */
+    fun closeMenu() = _state.update { it.copy(openMenu = null) }
+
+    /** Adds an option to a select menu. */
+    fun addMenuOption(menu: PanelSelectMenu, form: ComponentSubmission) =
+        launchAction("Failed to add option.") {
+            api.sendIgnoringBody(
+                Endpoint(
+                    "api/Ticket/$guildId/selectmenus/${menu.id}/options",
+                    HttpMethod.POST,
+                    jsonBody(*form.toButtonFields()),
+                )
+            )
+            _state.value.openPanel?.let { loadPanelDetail(it.panel) }
+            postSuccess("Option added.")
+        }
+
+    /** Loads one select option's full configuration for editing. */
+    fun openOptionEditor(option: SelectMenuOption) = launchAction("Failed to load option.") {
+        _state.update { it.copy(editingOption = option, editingOptionLoading = true) }
+        val detail = api.send(
+            Endpoint("api/Ticket/$guildId/selectmenus/options/${option.id}"),
+            SelectMenuOption.serializer(),
+        )
+        _state.update { it.copy(editingOption = detail, editingOptionLoading = false) }
+    }
+
+    /** Closes the select option editor without saving. */
+    fun closeOptionEditor() = _state.update { it.copy(editingOption = null) }
+
+    /** Saves changes to an existing select option. */
+    fun updateMenuOption(option: SelectMenuOption, form: ComponentSubmission) =
+        launchAction("Failed to update option.") {
+            api.sendIgnoringBody(
+                Endpoint(
+                    "api/Ticket/$guildId/selectmenus/options/${option.id}",
+                    HttpMethod.PUT,
+                    jsonBody(*form.toUpdateFields()),
+                )
+            )
+            closeOptionEditor()
+            _state.value.openPanel?.let { loadPanelDetail(it.panel) }
+            postSuccess("Option updated.")
+        }
+
+    /** Removes an option from a select menu. */
+    fun deleteMenuOption(optionId: Int) = launchAction("Failed to delete option.") {
+        api.sendIgnoringBody(
+            Endpoint("api/Ticket/$guildId/selectmenus/options/$optionId", HttpMethod.DELETE)
+        )
+        _state.value.openPanel?.let { loadPanelDetail(it.panel) }
+        postSuccess("Option deleted.")
     }
 
     /** Defines a new urgency level. */
@@ -606,21 +968,125 @@ class TicketsViewModel @Inject constructor(
         postSuccess("Removed from blacklist.")
     }
 
-    /** Opens a new case that tickets can be linked to. */
-    fun createCase(title: String, description: String) = launchAction("Failed to create case.") {
-        api.sendIgnoringBody(
-            Endpoint(
-                "api/Ticket/$guildId/cases",
-                HttpMethod.POST,
-                jsonBody(
-                    "title" to title.trim(),
-                    "description" to description.trim(),
-                    "creatorId" to userId.asSnowflakeNumber(),
-                ),
-            )
+    /** Closes every ticket that has been inactive for at least the given hours. */
+    fun batchCloseInactive(hours: Int) = launchAction("Failed to close inactive tickets.") {
+        val result = api.send(
+            Endpoint("api/Ticket/$guildId/batch/close-inactive?hours=$hours", HttpMethod.POST),
+            BatchCloseResult.serializer(),
         )
         load()
-        postSuccess("Case created.")
+        postSuccess("Closed ${result.closed} inactive ticket(s).")
+    }
+
+    /** Opens a new case that tickets can be linked to. */
+    fun createCase(title: String, description: String, linkTicketIds: List<Int>) =
+        launchAction("Failed to create case.") {
+            val result = api.send(
+                Endpoint(
+                    "api/Ticket/$guildId/cases",
+                    HttpMethod.POST,
+                    jsonBody(
+                        "title" to title.trim(),
+                        "description" to description.trim(),
+                        "creatorId" to userId.asSnowflakeNumber(),
+                    ),
+                ),
+                CreateCaseResult.serializer(),
+            )
+            if (linkTicketIds.isNotEmpty() && result.id != 0) {
+                api.sendIgnoringBody(
+                    Endpoint(
+                        "api/Ticket/$guildId/cases/${result.id}/link-tickets",
+                        HttpMethod.POST,
+                        jsonBody("ticketIds" to JsonArray(linkTicketIds.map { JsonPrimitive(it) })),
+                    )
+                )
+            }
+            load()
+            postSuccess("Case created.")
+        }
+
+    /** Opens a case's full detail view. */
+    fun openCase(case: TicketCase) {
+        _state.update {
+            it.copy(
+                openCase = CaseDetailState(
+                    CaseDetailResponse(
+                        id = case.id,
+                        title = case.title,
+                        description = case.description,
+                        createdBy = case.createdBy,
+                        createdByName = case.createdByName,
+                        createdAt = case.createdAt,
+                        closedAt = case.closedAt,
+                    ),
+                    loading = true,
+                )
+            )
+        }
+        loadCaseDetail(case.id)
+    }
+
+    /** Returns from a case's detail view. */
+    fun closeCaseDetail() = _state.update { it.copy(openCase = null) }
+
+    /** Reloads the open case's linked tickets and notes. */
+    fun loadCaseDetail(caseId: Int) = launchAction("Failed to load case.") {
+        val detail = api.send(
+            Endpoint("api/Ticket/$guildId/cases/$caseId"),
+            CaseDetailResponse.serializer(),
+        )
+        _state.update {
+            if (it.openCase?.detail?.id == caseId) it.copy(openCase = CaseDetailState(detail, false)) else it
+        }
+    }
+
+    /** Marks a case closed. */
+    fun closeTicketCase(caseId: Int) = launchAction("Failed to close case.") {
+        api.sendIgnoringBody(
+            Endpoint("api/Ticket/$guildId/cases/$caseId/close", HttpMethod.POST)
+        )
+        loadCaseDetail(caseId)
+        load()
+        postSuccess("Case closed.")
+    }
+
+    /** Reopens a closed case. */
+    fun reopenTicketCase(caseId: Int) = launchAction("Failed to reopen case.") {
+        api.sendIgnoringBody(
+            Endpoint("api/Ticket/$guildId/cases/$caseId/reopen", HttpMethod.POST)
+        )
+        loadCaseDetail(caseId)
+        load()
+        postSuccess("Case reopened.")
+    }
+
+    /** Links more tickets into an existing case. */
+    fun linkTickets(caseId: Int, ticketIds: List<Int>) = launchAction("Failed to link tickets.") {
+        if (ticketIds.isEmpty()) return@launchAction
+        api.sendIgnoringBody(
+            Endpoint(
+                "api/Ticket/$guildId/cases/$caseId/link-tickets",
+                HttpMethod.POST,
+                jsonBody("ticketIds" to JsonArray(ticketIds.map { JsonPrimitive(it) })),
+            )
+        )
+        loadCaseDetail(caseId)
+        load()
+        postSuccess("Tickets linked.")
+    }
+
+    /** Detaches one ticket from its case. */
+    fun unlinkTicket(caseId: Int, ticketId: Int) = launchAction("Failed to unlink ticket.") {
+        api.sendIgnoringBody(
+            Endpoint(
+                "api/Ticket/$guildId/unlink-tickets",
+                HttpMethod.POST,
+                jsonBody("ticketIds" to JsonArray(listOf(JsonPrimitive(ticketId)))),
+            )
+        )
+        loadCaseDetail(caseId)
+        load()
     }
 
     private fun ticketAction(
@@ -648,6 +1114,119 @@ class TicketsViewModel @Inject constructor(
     }.getOrDefault(emptyList())
 }
 
+/** `{ panelId, status }`; status 0 is healthy, 1 is a deleted message, 2 a deleted channel. */
+@Serializable
+private data class PanelStatusResponse(val status: Int = 0)
+
+/** `{ closed, failed, inactiveHours }` from the batch-close endpoint. */
+@Serializable
+private data class BatchCloseResult(val closed: Int = 0, val failed: Int = 0)
+
+/** `{ id, title, description, createdBy, createdAt }` from case creation. */
+@Serializable
+private data class CreateCaseResult(val id: Int = 0)
+
+/**
+ * Everything a panel button or select menu option's create/update form can
+ * carry, shared because both use the same request shape on the bot.
+ */
+data class ComponentSubmission(
+    val label: String,
+    val description: String? = null,
+    val emoji: String?,
+    val style: Int? = null,
+    val channelFormat: String?,
+    val categoryId: Snowflake?,
+    val archiveCategoryId: Snowflake?,
+    val supportRoles: List<Snowflake>?,
+    val viewerRoles: List<Snowflake>?,
+    val maxActiveTickets: Int?,
+    val autoCloseHours: Int?,
+    val requiredResponseMinutes: Int?,
+    val allowedPriorities: List<String>?,
+    val defaultPriority: String?,
+    val openMessageJson: String?,
+    val modalJson: String?,
+    val saveTranscript: Boolean? = null,
+    val deleteOnClose: Boolean? = null,
+    val lockOnClose: Boolean? = null,
+    val renameOnClose: Boolean? = null,
+    val removeCreatorOnClose: Boolean? = null,
+    val deleteDelaySeconds: Int? = null,
+    val lockOnArchive: Boolean? = null,
+    val renameOnArchive: Boolean? = null,
+    val removeCreatorOnArchive: Boolean? = null,
+    val autoArchiveOnClose: Boolean? = null,
+) {
+    /** The fields the create endpoints (`AddTicketComponentRequestBase`) accept. */
+    fun toButtonFields(): Array<Pair<String, Any?>> = arrayOf(
+        "label" to label,
+        "description" to description?.takeIf { it.isNotBlank() },
+        "style" to style,
+        "maxActiveTickets" to maxActiveTickets,
+        "emoji" to emoji?.takeIf { it.isNotEmpty() },
+        "channelFormat" to channelFormat?.takeIf { it.isNotBlank() },
+        "categoryId" to categoryId?.toLongOrNull(),
+        "archiveCategoryId" to archiveCategoryId?.toLongOrNull(),
+        "supportRoles" to supportRoles?.asIdArray(),
+        "viewerRoles" to viewerRoles?.asIdArray(),
+        "autoCloseTime" to autoCloseHours?.takeIf { it > 0 }?.let(::hoursToTimeSpan),
+        "requiredResponseTime" to requiredResponseMinutes?.takeIf { it > 0 }?.let(::minutesToTimeSpan),
+        "allowedPriorities" to allowedPriorities?.takeIf { it.isNotEmpty() }
+            ?.let { ids -> JsonArray(ids.map { JsonPrimitive(it) }) },
+        "defaultPriority" to defaultPriority?.takeIf { it.isNotBlank() },
+        "openMessageJson" to openMessageJson?.takeIf { it.isNotBlank() },
+        "modalJson" to modalJson?.takeIf { it.isNotBlank() },
+    )
+
+    /** The fields the update endpoints (`UpdateTicketComponentRequestBase`) accept. */
+    fun toUpdateFields(): Array<Pair<String, Any?>> = arrayOf(
+        *toButtonFields(),
+        "saveTranscript" to saveTranscript,
+        "deleteOnClose" to deleteOnClose,
+        "lockOnClose" to lockOnClose,
+        "renameOnClose" to renameOnClose,
+        "removeCreatorOnClose" to removeCreatorOnClose,
+        "deleteDelay" to deleteDelaySeconds?.let(::secondsToTimeSpan),
+        "lockOnArchive" to lockOnArchive,
+        "renameOnArchive" to renameOnArchive,
+        "removeCreatorOnArchive" to removeCreatorOnArchive,
+        "autoArchiveOnClose" to autoArchiveOnClose,
+    )
+}
+
 /** Packs snowflakes into the numeric array the ticket endpoints expect. */
-private fun List<Snowflake>.asIdArray(): JsonArray? = takeIf { it.isNotEmpty() }
+fun List<Snowflake>.asIdArray(): JsonArray? = takeIf { it.isNotEmpty() }
     ?.let { ids -> JsonArray(ids.mapNotNull { it.toLongOrNull() }.map { JsonPrimitive(it) }) }
+
+/** Encodes whole hours as the `hh:mm:ss` string .NET's `TimeSpan` expects. */
+fun hoursToTimeSpan(hours: Int): String = "%02d:00:00".format(hours)
+
+/** Encodes whole minutes as the `hh:mm:ss` string .NET's `TimeSpan` expects. */
+fun minutesToTimeSpan(minutes: Int): String = "%02d:%02d:00".format(minutes / 60, minutes % 60)
+
+/** Encodes whole seconds as the `hh:mm:ss` string .NET's `TimeSpan` expects. */
+fun secondsToTimeSpan(seconds: Int): String =
+    "%02d:%02d:%02d".format(seconds / 3600, (seconds % 3600) / 60, seconds % 60)
+
+/** Reads the whole-minutes value out of a `hh:mm:ss` `TimeSpan` string. */
+fun timeSpanToMinutes(value: String?): Int {
+    if (value.isNullOrBlank()) return 0
+    val parts = value.split(":")
+    val hours = parts.getOrNull(0)?.toIntOrNull() ?: 0
+    val minutes = parts.getOrNull(1)?.toIntOrNull() ?: 0
+    return hours * 60 + minutes
+}
+
+/** Reads the whole-hours value out of a `hh:mm:ss` `TimeSpan` string. */
+fun timeSpanToHours(value: String?): Int = timeSpanToMinutes(value) / 60
+
+/** Reads the whole-seconds value out of a `hh:mm:ss` `TimeSpan` string. */
+fun timeSpanToSeconds(value: String?): Int {
+    if (value.isNullOrBlank()) return 0
+    val parts = value.split(":")
+    val hours = parts.getOrNull(0)?.toIntOrNull() ?: 0
+    val minutes = parts.getOrNull(1)?.toIntOrNull() ?: 0
+    val seconds = parts.getOrNull(2)?.toIntOrNull() ?: 0
+    return hours * 3600 + minutes * 60 + seconds
+}

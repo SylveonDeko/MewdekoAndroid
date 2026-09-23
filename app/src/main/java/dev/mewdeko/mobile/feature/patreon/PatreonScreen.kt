@@ -38,6 +38,7 @@ import dev.mewdeko.mobile.core.ui.ConfirmDialog
 import dev.mewdeko.mobile.core.ui.DiscordSelectorSingle
 import dev.mewdeko.mobile.core.ui.EmptyState
 import dev.mewdeko.mobile.core.ui.FeatureScaffold
+import dev.mewdeko.mobile.core.ui.InfoRow
 import dev.mewdeko.mobile.core.ui.SectionCard
 import dev.mewdeko.mobile.core.ui.SectionCardHeader
 import dev.mewdeko.mobile.core.ui.SectionTab
@@ -55,7 +56,8 @@ import dev.mewdeko.mobile.util.relativeToNow
 private val Tabs = listOf(
     SectionTab("overview", "Overview", Icons.Default.Favorite),
     SectionTab("supporters", "Supporters", Icons.Default.Groups),
-    SectionTab("settings", "Settings", Icons.Default.Tune),
+    SectionTab("tiers", "Tiers", Icons.Default.WorkspacePremium),
+    SectionTab("settings", "Configuration", Icons.Default.Tune),
 )
 
 /** Patreon supporter integration. */
@@ -71,6 +73,8 @@ fun PatreonScreen(
     val uriHandler = LocalUriHandler.current
 
     var pendingDisconnect by remember { mutableStateOf(false) }
+    var pendingTierId by remember { mutableStateOf<String?>(null) }
+    var pendingTierRoleId by remember { mutableStateOf<String?>(null) }
 
     LaunchedEffect(state.oauthUrl) {
         val url = state.oauthUrl ?: return@LaunchedEffect
@@ -127,16 +131,9 @@ fun PatreonScreen(
                     }
                     if (creator.url.isNotBlank()) {
                         OutlinedButton(onClick = { uriHandler.openUri(creator.url) }) {
-                            Text("Open")
+                            Text("View Patreon Profile")
                         }
                     }
-                }
-                state.status?.lastSync?.let {
-                    Text(
-                        text = "Last synced ${it.relativeToNow()}",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
                 }
             }
         }
@@ -146,7 +143,18 @@ fun PatreonScreen(
         when (state.section) {
             "supporters" -> {
                 SectionCard {
-                    SectionCardHeader("Supporters", Icons.Default.Groups)
+                    SectionCardHeader(
+                        title = "Supporters",
+                        icon = Icons.Default.Groups,
+                        trailing = { Text("${state.supporters.size}") },
+                    )
+                    OutlinedButton(
+                        onClick = { viewModel.runOperation("sync") },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Icon(Icons.Default.Sync, contentDescription = null)
+                        Text("Sync now", modifier = Modifier.padding(start = 6.dp))
+                    }
                     if (state.supporters.isEmpty()) {
                         EmptyState("No supporters synced yet.", icon = Icons.Default.Favorite)
                     } else {
@@ -160,18 +168,25 @@ fun PatreonScreen(
                                     )
                                 },
                                 supportingContent = {
-                                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                        TagChip(
-                                            if (supporter.isActive) "Active" else supporter.patronStatus
-                                        )
-                                        if (supporter.lifetimeAmountCents > 0) {
-                                            TagChip(
-                                                "Lifetime " +
-                                                    "$${supporter.lifetimeAmountCents / 100}"
-                                            )
+                                    androidx.compose.foundation.layout.Column(
+                                        verticalArrangement = Arrangement.spacedBy(4.dp),
+                                    ) {
+                                        supporter.email?.let {
+                                            Text(it, maxLines = 1, overflow = TextOverflow.Ellipsis)
                                         }
-                                        supporter.lastChargeDate?.let {
-                                            TagChip(it.relativeToNow())
+                                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                            TagChip(
+                                                if (supporter.isActive) "Active" else supporter.patronStatus
+                                            )
+                                            supporter.pledgeRelationshipStart?.let {
+                                                TagChip("Since ${it.relativeToNow()}")
+                                            }
+                                            if (supporter.lifetimeAmountCents > 0) {
+                                                TagChip(
+                                                    "Lifetime " +
+                                                        "$${supporter.lifetimeAmountCents / 100}"
+                                                )
+                                            }
                                         }
                                     }
                                 },
@@ -187,31 +202,69 @@ fun PatreonScreen(
                         }
                     }
                 }
+            }
 
-                if (state.tiers.isNotEmpty()) {
-                    SectionCard {
-                        SectionCardHeader("Tiers", Icons.Default.WorkspacePremium)
+            "tiers" -> {
+                SectionCard {
+                    SectionCardHeader("Map tier to role", Icons.Default.WorkspacePremium)
+                    Text(
+                        text = "Supporters on a mapped tier are granted the matching role " +
+                            "the next time roles are synced.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    DiscordSelectorSingle(
+                        kind = SelectorKind.Custom(Icons.Default.WorkspacePremium),
+                        options = state.tiers.map {
+                            SelectorOption(it.tierId, "${it.title} ($${it.amountCents / 100})")
+                        },
+                        placeholder = "Select a tier",
+                        label = "Tier",
+                        selectedId = pendingTierId,
+                        onSelect = { pendingTierId = it },
+                    )
+                    DiscordSelectorSingle(
+                        kind = SelectorKind.Role,
+                        options = state.availableRoles.map { SelectorOption(it.id, it.name) },
+                        placeholder = "Select a role",
+                        label = "Role",
+                        selectedId = pendingTierRoleId,
+                        onSelect = { pendingTierRoleId = it },
+                    )
+                    Button(
+                        onClick = {
+                            val tierId = pendingTierId ?: return@Button
+                            val roleId = pendingTierRoleId ?: return@Button
+                            viewModel.mapTierToRole(tierId, roleId)
+                        },
+                        enabled = pendingTierId != null && pendingTierRoleId != null,
+                        modifier = Modifier.fillMaxWidth(),
+                    ) { Text("Map Tier") }
+                }
+
+                SectionCard {
+                    SectionCardHeader("Tiers", Icons.Default.WorkspacePremium)
+                    if (state.tiers.isEmpty()) {
+                        EmptyState("No tiers synced yet.", icon = Icons.Default.WorkspacePremium)
+                    } else {
                         state.tiers.forEach { tier ->
                             ListItem(
                                 headlineContent = { Text(tier.title) },
-                                supportingContent = tier.description?.let {
-                                    { Text(it, maxLines = 2, overflow = TextOverflow.Ellipsis) }
+                                supportingContent = {
+                                    androidx.compose.foundation.layout.Column(
+                                        verticalArrangement = Arrangement.spacedBy(4.dp),
+                                    ) {
+                                        TagChip(if (tier.isMapped) "Mapped" else "Unmapped")
+                                        tier.description?.let {
+                                            Text(it, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                                        }
+                                    }
                                 },
                                 trailingContent = {
-                                    androidx.compose.foundation.layout.Column(
-                                        horizontalAlignment =
-                                            androidx.compose.ui.Alignment.End,
-                                    ) {
-                                        Text(
-                                            text = "$${tier.amountCents / 100}",
-                                            style = MaterialTheme.typography.titleSmall,
-                                        )
-                                        Text(
-                                            text = "${tier.patronCount} patrons",
-                                            style = MaterialTheme.typography.labelSmall,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        )
-                                    }
+                                    Text(
+                                        text = "$${tier.amountCents / 100}",
+                                        style = MaterialTheme.typography.titleSmall,
+                                    )
                                 },
                                 colors = ListItemDefaults.colors(containerColor = Color.Transparent),
                             )
@@ -261,6 +314,8 @@ fun PatreonScreen(
                     ) { Text("Save configuration") }
                 }
 
+                PatreonPlaceholderCard()
+
                 SectionCard {
                     SectionCardHeader("Maintenance", Icons.Default.Sync)
                     OutlinedButton(
@@ -289,6 +344,19 @@ fun PatreonScreen(
             }
 
             else -> {
+                SectionCard {
+                    SectionCardHeader("Connection", Icons.Default.Favorite)
+                    InfoRow("Campaign ID", state.status?.campaignId ?: "Unknown")
+                    InfoRow(
+                        "Last sync",
+                        state.status?.lastSync?.relativeToNow() ?: "Never",
+                    )
+                    InfoRow(
+                        "Token expires",
+                        state.status?.tokenExpiry?.relativeToNow() ?: "Unknown",
+                    )
+                }
+
                 SectionCard {
                     SectionCardHeader("Revenue", Icons.Default.Payments)
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -345,6 +413,46 @@ fun PatreonScreen(
                                 colors = ListItemDefaults.colors(containerColor = Color.Transparent),
                             )
                         }
+                    }
+                }
+
+                SectionCard {
+                    SectionCardHeader("Quick actions", Icons.Default.Sync)
+                    OutlinedButton(
+                        onClick = { viewModel.runOperation("sync_all") },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Icon(Icons.Default.Sync, contentDescription = null)
+                        Text("Sync all data", modifier = Modifier.padding(start = 6.dp))
+                    }
+                    OutlinedButton(
+                        onClick = { viewModel.runOperation("sync_roles") },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Icon(Icons.Default.Groups, contentDescription = null)
+                        Text("Sync roles", modifier = Modifier.padding(start = 6.dp))
+                    }
+                    OutlinedButton(
+                        onClick = { viewModel.runOperation("manual_announcement") },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Icon(Icons.Default.Payments, contentDescription = null)
+                        Text("Send announcement", modifier = Modifier.padding(start = 6.dp))
+                    }
+                    OutlinedButton(
+                        onClick = { pendingDisconnect = true },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Icon(
+                            Icons.Default.LinkOff,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.error,
+                        )
+                        Text(
+                            text = "Re-login",
+                            color = MaterialTheme.colorScheme.error,
+                            modifier = Modifier.padding(start = 6.dp),
+                        )
                     }
                 }
             }

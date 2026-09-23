@@ -1,5 +1,6 @@
 package dev.mewdeko.mobile.feature.afk
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -7,6 +8,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AccessTime
+import androidx.compose.material.icons.filled.AllInclusive
 import androidx.compose.material.icons.filled.ChatBubble
 import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.Delete
@@ -17,6 +19,7 @@ import androidx.compose.material.icons.filled.Tag
 import androidx.compose.material.icons.filled.Timer
 import androidx.compose.material.icons.filled.ToggleOn
 import androidx.compose.material3.Badge
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
@@ -31,6 +34,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextOverflow
@@ -47,7 +51,6 @@ import dev.mewdeko.mobile.core.ui.SectionCard
 import dev.mewdeko.mobile.core.ui.SectionCardHeader
 import dev.mewdeko.mobile.core.ui.SelectorKind
 import dev.mewdeko.mobile.core.ui.SelectorOption
-import dev.mewdeko.mobile.core.ui.SliderRow
 import dev.mewdeko.mobile.core.ui.StatTile
 import dev.mewdeko.mobile.core.ui.TagChip
 import dev.mewdeko.mobile.feature.embed.EmbedMessageEditor
@@ -68,6 +71,7 @@ fun AfkScreen(
 
     var pendingClearAll by remember { mutableStateOf(false) }
     var pendingClear by remember { mutableStateOf<UserWithAfk?>(null) }
+    var pendingClearSelected by remember { mutableStateOf(false) }
 
     FeatureScaffold(
         title = "AFK System",
@@ -90,12 +94,19 @@ fun AfkScreen(
     ) {
         SectionCard {
             SectionCardHeader("Auto-deletion", Icons.Default.Delete)
-            SliderRow(
-                label = "Delete after",
-                value = state.deletionSeconds.toFloat(),
-                onValueChange = { viewModel.setDeletionSeconds(it.toInt()) },
-                valueRange = 0f..300f,
-                valueLabel = if (state.deletionSeconds == 0) "Off" else "${state.deletionSeconds}s",
+            MewdekoTextField(
+                value = state.deletionSeconds.toString(),
+                onValueChange = { raw ->
+                    viewModel.setDeletionSeconds(raw.filter { it.isDigit() }.take(9).toIntOrNull() ?: 0)
+                },
+                label = "Delete after (seconds)",
+                numeric = true,
+                supportingText = if (state.deletionSeconds == 0) {
+                    "Off"
+                } else {
+                    AfkTime.secondsToString(state.deletionSeconds)
+                },
+                isError = state.deletionSeconds < 0,
             )
             Text(
                 text = "Time before AFK acknowledgement messages are deleted. " +
@@ -107,12 +118,15 @@ fun AfkScreen(
 
         SectionCard {
             SectionCardHeader("Max message length", Icons.Default.Notes)
-            SliderRow(
+            MewdekoTextField(
+                value = state.maxLength.toString(),
+                onValueChange = { raw ->
+                    viewModel.setMaxLength(raw.filter { it.isDigit() }.take(4).toIntOrNull() ?: 0)
+                },
                 label = "Characters",
-                value = state.maxLength.toFloat(),
-                onValueChange = { viewModel.setMaxLength(it.toInt()) },
-                valueRange = 1f..4096f,
-                valueLabel = "${state.maxLength}",
+                numeric = true,
+                supportingText = "1 to 4096",
+                isError = state.maxLength !in 1..4096,
             )
             Text(
                 text = "Maximum allowed length for member-set AFK messages (1 to 4096).",
@@ -197,11 +211,38 @@ fun AfkScreen(
                 title = "Currently AFK",
                 icon = Icons.Default.Groups,
                 trailing = {
-                    if (state.afkUsers.isNotEmpty()) {
-                        TextButton(onClick = { pendingClearAll = true }) { Text("Clear all") }
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        if (state.selectedIds.isNotEmpty()) {
+                            TextButton(onClick = { pendingClearSelected = true }) {
+                                Text("Remove (${state.selectedIds.size})")
+                            }
+                        }
+                        if (state.afkUsers.isNotEmpty()) {
+                            TextButton(onClick = { pendingClearAll = true }) { Text("Clear all") }
+                        }
                     }
                 },
             )
+
+            if (state.afkUsers.isNotEmpty()) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { viewModel.toggleSelectAll() },
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    Checkbox(checked = state.allSelected, onCheckedChange = { viewModel.toggleSelectAll() })
+                    Text(
+                        text = "Select all (${state.afkUsers.size})",
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                }
+            }
+
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 StatTile("AFK members", "${state.afkUsers.size}", Modifier.weight(1f))
                 StatTile("Timed", "${state.timedAfkCount}", Modifier.weight(1f))
@@ -210,13 +251,21 @@ fun AfkScreen(
                     "${state.afkUsers.size - state.timedAfkCount}",
                     Modifier.weight(1f),
                 )
+                StatTile("Selected", "${state.selectedIds.size}", Modifier.weight(1f))
             }
 
             if (state.afkUsers.isEmpty()) {
                 EmptyState("Nobody is currently AFK.", icon = Icons.Default.DarkMode)
             } else {
                 state.afkUsers.forEach { user ->
-                    AfkUserRow(user = user, onClear = { pendingClear = user })
+                    AfkUserRow(
+                        user = user,
+                        selected = user.userId in state.selectedIds,
+                        expanded = user.userId in state.expandedIds,
+                        onToggleSelected = { viewModel.toggleSelected(user.userId) },
+                        onToggleExpanded = { viewModel.toggleExpanded(user.userId) },
+                        onClear = { pendingClear = user },
+                    )
                 }
             }
         }
@@ -232,6 +281,17 @@ fun AfkScreen(
         )
     }
 
+    if (pendingClearSelected) {
+        ConfirmDialog(
+            title = "Remove AFK status?",
+            message = "Remove AFK status from ${state.selectedIds.size} selected member" +
+                "${if (state.selectedIds.size == 1) "" else "s"}. This cannot be undone.",
+            confirmLabel = "Remove AFK status",
+            onConfirm = viewModel::clearSelected,
+            onDismiss = { pendingClearSelected = false },
+        )
+    }
+
     pendingClear?.let { user ->
         ConfirmDialog(
             title = "Clear AFK?",
@@ -244,41 +304,74 @@ fun AfkScreen(
 }
 
 @Composable
-private fun AfkUserRow(user: UserWithAfk, onClear: () -> Unit) {
+private fun AfkUserRow(
+    user: UserWithAfk,
+    selected: Boolean,
+    expanded: Boolean,
+    onToggleSelected: () -> Unit,
+    onToggleExpanded: () -> Unit,
+    onClear: () -> Unit,
+) {
     ListItem(
         headlineContent = {
             Row(
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
-                verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
+                verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text(
-                    text = user.displayName,
+                    text = user.username,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f, fill = false),
                 )
+                user.nickname?.takeIf { it.isNotBlank() }?.let { nickname ->
+                    TagChip(nickname)
+                }
                 if (user.afkStatus?.wasTimed == true) {
                     Badge { Text("Timed") }
                 }
             }
         },
         supportingContent = {
-            Column {
+            Column(modifier = Modifier.clickable(onClick = onToggleExpanded)) {
                 user.afkStatus?.message?.takeIf { it.isNotBlank() }?.let { message ->
-                    Text(message, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                    Text(
+                        text = message,
+                        maxLines = if (expanded) Int.MAX_VALUE else 2,
+                        overflow = TextOverflow.Ellipsis,
+                    )
                 }
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     user.afkStatus?.dateAdded?.let {
                         TagChip("Since ${it.relativeToNow()}", icon = Icons.Default.AccessTime)
                     }
-                    user.afkStatus?.`when`?.let {
-                        TagChip("Expires ${it.shortDateTime()}", icon = Icons.Default.Timer)
+                    if (user.afkStatus?.wasTimed == true) {
+                        user.afkStatus.`when`?.let {
+                            TagChip("Expires ${it.shortDateTime()}", icon = Icons.Default.Timer)
+                        }
+                    } else {
+                        TagChip("Permanent", icon = Icons.Default.AllInclusive)
+                    }
+                }
+                if (expanded) {
+                    user.afkStatus?.dateAdded?.let {
+                        Text(
+                            text = "Since ${it.shortDateTime()}",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
                     }
                 }
             }
         },
         leadingContent = {
-            Avatar(url = user.avatarUrl, contentDescription = user.displayName)
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Checkbox(checked = selected, onCheckedChange = { onToggleSelected() })
+                Avatar(url = user.avatarUrl, contentDescription = user.displayName)
+            }
         },
         trailingContent = {
             IconButton(onClick = onClear) {

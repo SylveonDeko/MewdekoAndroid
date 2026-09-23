@@ -6,7 +6,9 @@ import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.ManageAccounts
 import androidx.compose.material.icons.filled.Save
 import androidx.compose.material.icons.filled.Sync
 import androidx.compose.material.icons.filled.Tune
@@ -31,6 +33,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.mewdeko.mobile.core.ui.ConfirmDialog
 import dev.mewdeko.mobile.core.ui.DiscordSelector
+import dev.mewdeko.mobile.core.ui.DiscordSelectorSingle
 import dev.mewdeko.mobile.core.ui.EmptyState
 import dev.mewdeko.mobile.core.ui.FeatureScaffold
 import dev.mewdeko.mobile.core.ui.SearchField
@@ -58,8 +61,22 @@ fun RoleStatesScreen(
     var pendingClear by remember { mutableStateOf<UserRoleStateRecord?>(null) }
     var editingRoles by remember { mutableStateOf<UserRoleStateRecord?>(null) }
     var pendingSaveAll by remember { mutableStateOf(false) }
+    var pendingCopy by remember { mutableStateOf(false) }
+
+    var manageMemberId by remember { mutableStateOf<String?>(null) }
+    var manageRoleIds by remember { mutableStateOf<List<String>>(emptyList()) }
+    var copySourceId by remember { mutableStateOf<String?>(null) }
+    var copyTargetId by remember { mutableStateOf<String?>(null) }
 
     val roleOptions = state.availableRoles.map { SelectorOption(it.id, it.name) }
+    val memberOptions = state.members.map {
+        SelectorOption(it.id, it.displayName.ifBlank { it.username }, subtitle = it.username)
+    }
+    val savedStateOptions = state.users.mapNotNull { record ->
+        record.userId?.let {
+            SelectorOption(it, record.userName?.takeIf { name -> name.isNotBlank() } ?: it)
+        }
+    }
 
     FeatureScaffold(
         title = "Role States",
@@ -98,6 +115,7 @@ fun RoleStatesScreen(
             }
             OutlinedButton(
                 onClick = { pendingSaveAll = true },
+                enabled = state.settings.enabled,
                 modifier = Modifier.fillMaxWidth(),
             ) { Text("Snapshot every member's roles now") }
         }
@@ -115,18 +133,21 @@ fun RoleStatesScreen(
                 subtitle = "Discard a member's saved roles when they are banned",
                 checked = state.settings.clearOnBan,
                 onCheckedChange = { viewModel.toggleClearOnBan() },
+                enabled = state.settings.enabled,
             )
             SwitchRow(
                 title = "Ignore bots",
                 subtitle = "Do not save role states for bot accounts",
                 checked = state.settings.ignoreBots,
                 onCheckedChange = { viewModel.toggleIgnoreBots() },
+                enabled = state.settings.enabled,
             )
             SwitchRow(
                 title = "Skip auto-assign roles",
                 subtitle = "Do not restore roles the bot would grant automatically",
                 checked = state.settings.skipAutoAssignRoles,
                 onCheckedChange = viewModel::setSkipAutoAssign,
+                enabled = state.settings.enabled,
             )
             DiscordSelector(
                 kind = SelectorKind.Role,
@@ -134,9 +155,90 @@ fun RoleStatesScreen(
                 placeholder = "No roles excluded",
                 label = "Never save these roles",
                 multiple = true,
+                enabled = state.settings.enabled,
                 selection = state.settings.deniedRoleIds,
                 onSelectionChange = viewModel::setDeniedRoles,
             )
+            DiscordSelector(
+                kind = SelectorKind.User,
+                options = memberOptions,
+                placeholder = "No members excluded",
+                label = "Never save roles for these members",
+                multiple = true,
+                enabled = state.settings.enabled,
+                selection = state.settings.deniedUserIds,
+                onSelectionChange = viewModel::setDeniedUsers,
+            )
+        }
+
+        SectionCard {
+            SectionCardHeader("Manage user roles", Icons.Default.ManageAccounts)
+            DiscordSelectorSingle(
+                kind = SelectorKind.User,
+                options = memberOptions,
+                placeholder = "Choose a member",
+                label = "Member",
+                selectedId = manageMemberId,
+                onSelect = { manageMemberId = it },
+            )
+            DiscordSelector(
+                kind = SelectorKind.Role,
+                options = roleOptions,
+                placeholder = "No roles selected",
+                label = "Roles",
+                multiple = true,
+                selection = manageRoleIds,
+                onSelectionChange = { manageRoleIds = it },
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(
+                    onClick = {
+                        manageMemberId?.let { viewModel.addRolesToUser(it, manageRoleIds) }
+                    },
+                    enabled = manageMemberId != null && manageRoleIds.isNotEmpty(),
+                    modifier = Modifier.weight(1f),
+                ) { Text("Add roles") }
+                OutlinedButton(
+                    onClick = {
+                        manageMemberId?.let { viewModel.removeRolesFromUser(it, manageRoleIds) }
+                    },
+                    enabled = manageMemberId != null && manageRoleIds.isNotEmpty(),
+                    modifier = Modifier.weight(1f),
+                ) { Text("Remove roles") }
+            }
+        }
+
+        SectionCard {
+            SectionCardHeader("Copy role state", Icons.Default.ContentCopy)
+            if (savedStateOptions.isEmpty()) {
+                EmptyState(
+                    message = "No saved role states to copy from yet.",
+                    icon = Icons.Default.ContentCopy,
+                )
+            } else {
+                DiscordSelectorSingle(
+                    kind = SelectorKind.User,
+                    options = savedStateOptions,
+                    placeholder = "Choose a source member",
+                    label = "Source (has a saved state)",
+                    selectedId = copySourceId,
+                    onSelect = { copySourceId = it },
+                )
+                DiscordSelectorSingle(
+                    kind = SelectorKind.User,
+                    options = memberOptions,
+                    placeholder = "Choose a target member",
+                    label = "Target",
+                    selectedId = copyTargetId,
+                    onSelect = { copyTargetId = it },
+                )
+                Button(
+                    onClick = { pendingCopy = true },
+                    enabled = copySourceId != null && copyTargetId != null &&
+                        copySourceId != copyTargetId,
+                    modifier = Modifier.fillMaxWidth(),
+                ) { Text("Apply role state") }
+            }
         }
 
         SectionCard {
@@ -244,6 +346,27 @@ fun RoleStatesScreen(
             destructive = false,
             onConfirm = viewModel::saveAll,
             onDismiss = { pendingSaveAll = false },
+        )
+    }
+
+    if (pendingCopy) {
+        val sourceId = copySourceId
+        val targetId = copyTargetId
+        val sourceName = savedStateOptions.firstOrNull { it.id == sourceId }?.name
+            ?: sourceId.orEmpty()
+        val targetName = memberOptions.firstOrNull { it.id == targetId }?.name
+            ?: targetId.orEmpty()
+        ConfirmDialog(
+            title = "Apply role state?",
+            message = "$sourceName's saved roles are granted to $targetName.",
+            confirmLabel = "Apply",
+            destructive = false,
+            onConfirm = {
+                if (sourceId != null && targetId != null) {
+                    viewModel.copyRoleState(sourceId, targetId)
+                }
+            },
+            onDismiss = { pendingCopy = false },
         )
     }
 }

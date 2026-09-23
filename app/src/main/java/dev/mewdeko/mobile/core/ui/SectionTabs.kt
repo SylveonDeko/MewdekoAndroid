@@ -125,7 +125,7 @@ fun SearchField(
             }
         },
         singleLine = true,
-        shape = androidx.compose.material3.MaterialTheme.shapes.medium,
+        shape = MaterialTheme.shapes.medium,
         modifier = modifier.fillMaxWidth(),
     )
 }

@@ -1,5 +1,6 @@
 package dev.mewdeko.mobile.feature.chattriggers
 
+import android.net.Uri
 import androidx.lifecycle.SavedStateHandle
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dev.mewdeko.mobile.core.auth.SessionHolder
@@ -102,6 +103,33 @@ enum class ChatTriggerRoleGrantType(val raw: Int, val label: String) {
     }
 }
 
+/**
+ * One of the ways a trigger's [ChatTriggerModel.validTriggerTypes] bitmask can fire.
+ *
+ * Values mirror ChatTriggerType in the bot. Event (32) is left out since it is set through
+ * [ChatTriggerEventType] rather than a toggle of its own.
+ */
+enum class ChatTriggerFireType(val raw: Int, val label: String) {
+    MESSAGE(1, "Message"),
+    INTERACTION(2, "Slash or context command"),
+    BUTTON(4, "Button press"),
+    REACTIONS(8, "Reaction added"),
+    REACTIONS_REMOVED(16, "Reaction removed"),
+}
+
+/** Whether a trigger also registers as a Discord application command. */
+enum class ChatTriggerApplicationCommandType(val raw: Int, val label: String) {
+    NONE(0, "Not a command"),
+    SLASH(1, "Slash command"),
+    MESSAGE(2, "Message context menu"),
+    USER(3, "User context menu");
+
+    companion object {
+        /** Maps a wire value onto a command type, defaulting to [NONE]. */
+        fun from(raw: Int) = entries.firstOrNull { it.raw == raw } ?: NONE
+    }
+}
+
 /** A custom keyword reaction. */
 @Serializable
 data class ChatTriggerModel(
@@ -177,6 +205,20 @@ data class ChatTriggerModel(
     /** The typed form of [eventType]. */
     val event: ChatTriggerEventType get() = ChatTriggerEventType.from(eventType)
 
+    /** The typed form of [applicationCommandType]. */
+    val commandType: ChatTriggerApplicationCommandType
+        get() = ChatTriggerApplicationCommandType.from(applicationCommandType)
+
+    /** Whether [validTriggerTypes] includes [type]. */
+    fun hasFireType(type: ChatTriggerFireType): Boolean = (validTriggerTypes and type.raw) != 0
+
+    /** A copy with [type] turned on or off in [validTriggerTypes]. */
+    fun withFireType(type: ChatTriggerFireType, enabled: Boolean): ChatTriggerModel =
+        copy(
+            validTriggerTypes = if (enabled) validTriggerTypes or type.raw
+            else validTriggerTypes and type.raw.inv(),
+        )
+
     /** Extra responses beyond the primary one. */
     val extraResponses: List<String>
         get() = additionalResponses.orEmpty().split("@@@").map { it.trim() }.filter { it.isNotEmpty() }
@@ -204,8 +246,14 @@ data class ChatTriggerModel(
         get() = removedRoles.orEmpty().split(' ', '@').map { it.trim() }.filter { it.isNotEmpty() }
 
     companion object {
-        /** A trigger with every field at its default, scoped to [guildId]. */
-        fun blank(guildId: Snowflake) = ChatTriggerModel(guildId = guildId)
+        /**
+         * A trigger with every field at its default, scoped to [guildId].
+         *
+         * Defaults [validTriggerTypes] to [ChatTriggerFireType.MESSAGE], matching the dashboard's
+         * default, so a freshly created trigger can already fire before the editor forces it on.
+         */
+        fun blank(guildId: Snowflake) =
+            ChatTriggerModel(guildId = guildId, validTriggerTypes = ChatTriggerFireType.MESSAGE.raw)
     }
 }
 
@@ -303,7 +351,13 @@ data class ChatTriggersState(
         get() {
             val q = query.trim().lowercase()
             return triggers
-                .filter { category == null || it.category.orEmpty() == category }
+                .filter {
+                    when (category) {
+                        null -> true
+                        UNGROUPED -> it.category.isNullOrBlank()
+                        else -> it.category.orEmpty() == category
+                    }
+                }
                 .filter {
                     q.isEmpty() ||
                         it.trigger.lowercase().contains(q) ||
@@ -317,11 +371,24 @@ data class ChatTriggersState(
             .distinct()
             .sortedBy(String::lowercase)
 
+    /** Whether any trigger has no category, so the "Ungrouped" filter chip is worth showing. */
+    val hasUngrouped: Boolean get() = triggers.any { it.category.isNullOrBlank() }
+
     /** Total fires across every trigger. */
     val totalUses: Long get() = triggers.sumOf { it.uses }
 
     /** How many triggers are currently paused. */
     val pausedCount: Int get() = triggers.count { it.isDisabled }
+
+    companion object {
+        /**
+         * Sentinel [category] value selecting triggers with no category.
+         *
+         * Kept distinct from any real category name (which cannot contain a NUL byte) and from
+         * `null`, which means "no filter" rather than "no category".
+         */
+        const val UNGROUPED = "\u0000__ungrouped__"
+    }
 }
 
 /** Custom keyword reactions. */
@@ -445,7 +512,7 @@ class ChatTriggersViewModel @Inject constructor(
     /** Deletes a counter along with every per-user value stored under its name. */
     fun deleteCounter(name: String) = launchAction("Failed to delete counter.") {
         api.sendIgnoringBody(
-            Endpoint("api/ChatTriggers/$guildId/counters/$name", HttpMethod.DELETE)
+            Endpoint("api/ChatTriggers/$guildId/counters/${Uri.encode(name)}", HttpMethod.DELETE)
         )
         loadCounters()
     }

@@ -21,6 +21,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.serialization.builtins.ListSerializer
+import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.booleanOrNull
@@ -39,6 +40,11 @@ data class SettingsState(
     val streamMessage: EmbedMessage = EmbedMessage(),
     val warningLogChannelId: Snowflake? = null,
     val warnExpireHours: Int = 0,
+    val locale: String = "",
+    val muteRoleName: String = "",
+    val removeRolesOnMute: Boolean = false,
+    val snipeset: Boolean = false,
+    val previewLinks: Boolean = false,
     val availableChannels: List<TextChannelLite> = emptyList(),
     val availableRoles: List<GuildRole> = emptyList(),
     val hasUnsaved: Boolean = false,
@@ -108,6 +114,11 @@ class SettingsViewModel @Inject constructor(
                     streamMessage = EmbedMessage.parse(loadedConfig.stringAt("StreamMessage")),
                     warningLogChannelId = loadedConfig.snowflakeAt("WarnlogChannelId"),
                     warnExpireHours = loadedConfig.intAt("WarnExpireHours") ?: 0,
+                    locale = loadedConfig.stringAt("Locale").orEmpty(),
+                    muteRoleName = loadedConfig.stringAt("MuteRoleName").orEmpty(),
+                    removeRolesOnMute = (loadedConfig.intAt("Removeroles") ?: 0) != 0,
+                    snipeset = loadedConfig.boolAt("Snipeset"),
+                    previewLinks = (loadedConfig.intAt("PreviewLinks") ?: 0) != 0,
                     availableChannels = channels.await()
                         .sortedBy { channel -> channel.name.lowercase() },
                     availableRoles = roles.await()
@@ -140,6 +151,21 @@ class SettingsViewModel @Inject constructor(
     /** Sets how long a warning stays active, in hours; zero means never. */
     fun setWarnExpireHours(value: Int) = edit { it.copy(warnExpireHours = value) }
 
+    /** Sets the locale the bot replies in for this guild; empty means bot default. */
+    fun setLocale(value: String) = edit { it.copy(locale = value) }
+
+    /** Sets the name of the role applied by mute commands. */
+    fun setMuteRoleName(value: String) = edit { it.copy(muteRoleName = value) }
+
+    /** Sets whether all other roles are stripped while a member is muted. */
+    fun setRemoveRolesOnMute(value: Boolean) = edit { it.copy(removeRolesOnMute = value) }
+
+    /** Sets whether message sniping is enabled. */
+    fun setSnipeset(value: Boolean) = edit { it.copy(snipeset = value) }
+
+    /** Sets whether Discord message links are expanded with a preview. */
+    fun setPreviewLinks(value: Boolean) = edit { it.copy(previewLinks = value) }
+
     /** Sets the guild's default AFK message template. */
     fun setAfkMessage(value: EmbedMessage) = edit { it.copy(afkMessage = value) }
 
@@ -162,6 +188,14 @@ class SettingsViewModel @Inject constructor(
             put("StreamMessage", JsonPrimitive(current.streamMessage.serialize()))
             put("WarnlogChannelId", JsonPrimitive(current.warningLogChannelId.asId()))
             put("WarnExpireHours", JsonPrimitive(current.warnExpireHours))
+            put("Locale", current.locale.takeIf { it.isNotBlank() }?.let { JsonPrimitive(it) } ?: JsonNull)
+            put(
+                "MuteRoleName",
+                current.muteRoleName.trim().takeIf { it.isNotEmpty() }?.let { JsonPrimitive(it) } ?: JsonNull,
+            )
+            put("Removeroles", JsonPrimitive(if (current.removeRolesOnMute) 1 else 0))
+            put("Snipeset", JsonPrimitive(current.snipeset))
+            put("PreviewLinks", JsonPrimitive(if (current.previewLinks) 1 else 0))
         }
 
         val ok = runCatching {

@@ -1,16 +1,21 @@
 package dev.mewdeko.mobile.feature.giveaways
 
+import android.app.DatePickerDialog
+import android.app.TimePickerDialog
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.CardGiftcard
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.EmojiEmotions
+import androidx.compose.material.icons.filled.Event
 import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.Tag
 import androidx.compose.material3.AlertDialog
@@ -23,11 +28,11 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -44,7 +49,6 @@ import dev.mewdeko.mobile.core.ui.SectionTab
 import dev.mewdeko.mobile.core.ui.SectionTabs
 import dev.mewdeko.mobile.core.ui.SelectorKind
 import dev.mewdeko.mobile.core.ui.SelectorOption
-import dev.mewdeko.mobile.core.ui.SliderRow
 import dev.mewdeko.mobile.core.ui.StatTile
 import dev.mewdeko.mobile.core.ui.SwitchRow
 import dev.mewdeko.mobile.core.ui.TagChip
@@ -52,6 +56,8 @@ import dev.mewdeko.mobile.navigation.GuildRouteArgs
 import dev.mewdeko.mobile.util.relativeToNow
 import dev.mewdeko.mobile.util.shortDateTime
 import java.time.Instant
+import java.time.ZoneId
+import java.time.ZonedDateTime
 import java.time.temporal.ChronoUnit
 
 private val Tabs = listOf(
@@ -160,15 +166,32 @@ fun GiveawaysScreen(
     }
 
     if (showCreate) {
+        val emojiOptions = remember(state.availableEmojiGuilds) {
+            buildList {
+                add(SelectorOption(id = "🎉", name = "🎉 Party popper (default)"))
+                state.availableEmojiGuilds.forEach { guildEmojis ->
+                    guildEmojis.emojis.forEach { emoji ->
+                        add(
+                            SelectorOption(
+                                id = emoji.formatted,
+                                name = ":${emoji.name}:",
+                                subtitle = guildEmojis.guild.name,
+                            )
+                        )
+                    }
+                }
+            }
+        }
         CreateGiveawayDialog(
             channelOptions = state.availableChannels.map { SelectorOption(it.id, it.name) },
             roleOptions = state.availableRoles.map { SelectorOption(it.id, it.name) },
+            emojiOptions = emojiOptions,
             onDismiss = { showCreate = false },
-            onCreate = { item, channelId, hours, winners, useButton, useCaptcha, msgReq, emote, roles ->
+            onCreate = { item, channelId, endsAt, winners, useButton, useCaptcha, msgReq, emote, roles ->
                 viewModel.create(
                     item = item,
                     channelId = channelId,
-                    endsAt = Instant.now().plus(hours.toLong(), ChronoUnit.HOURS),
+                    endsAt = endsAt,
                     winners = winners,
                     useButton = useButton,
                     useCaptcha = useCaptcha,
@@ -198,11 +221,12 @@ fun GiveawaysScreen(
 private fun CreateGiveawayDialog(
     channelOptions: List<SelectorOption>,
     roleOptions: List<SelectorOption>,
+    emojiOptions: List<SelectorOption>,
     onDismiss: () -> Unit,
     onCreate: (
         item: String,
         channelId: String,
-        hours: Int,
+        endsAt: Instant,
         winners: Int,
         useButton: Boolean,
         useCaptcha: Boolean,
@@ -213,12 +237,12 @@ private fun CreateGiveawayDialog(
 ) {
     var item by remember { mutableStateOf("") }
     var channelId by remember { mutableStateOf<String?>(null) }
-    var hours by remember { mutableIntStateOf(24) }
-    var winners by remember { mutableIntStateOf(1) }
+    var endsAt by remember { mutableStateOf(Instant.now().plus(1, ChronoUnit.DAYS)) }
+    var winners by remember { mutableStateOf("1") }
     var useButton by remember { mutableStateOf(true) }
     var useCaptcha by remember { mutableStateOf(false) }
     var messageReq by remember { mutableStateOf("0") }
-    var emote by remember { mutableStateOf("") }
+    var emote by remember { mutableStateOf("🎉") }
     var restrictRoles by remember { mutableStateOf(emptyList<String>()) }
 
     AlertDialog(
@@ -227,7 +251,7 @@ private fun CreateGiveawayDialog(
         text = {
             Column(
                 modifier = Modifier
-                    .heightIn(max = 480.dp)
+                    .heightIn(max = 560.dp)
                     .verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
@@ -245,19 +269,14 @@ private fun CreateGiveawayDialog(
                     selectedId = channelId,
                     onSelect = { channelId = it },
                 )
-                SliderRow(
-                    label = "Runs for",
-                    value = hours.toFloat(),
-                    onValueChange = { hours = it.toInt().coerceAtLeast(1) },
-                    valueRange = 1f..720f,
-                    valueLabel = if (hours < 24) "${hours}h" else "${hours / 24}d ${hours % 24}h",
-                )
-                SliderRow(
-                    label = "Winners",
-                    value = winners.toFloat(),
-                    onValueChange = { winners = it.toInt().coerceAtLeast(1) },
-                    valueRange = 1f..25f,
-                    valueLabel = "$winners",
+                EndTimeField(value = endsAt, onChange = { endsAt = it })
+                MewdekoTextField(
+                    value = winners,
+                    onValueChange = { winners = it.filter(Char::isDigit) },
+                    label = "Number of winners",
+                    numeric = true,
+                    supportingText = "At least 1",
+                    isError = (winners.toIntOrNull() ?: 0) < 1,
                 )
                 SwitchRow(
                     title = "Button entry",
@@ -272,10 +291,18 @@ private fun CreateGiveawayDialog(
                     onCheckedChange = { useCaptcha = it },
                 )
                 if (!useButton) {
+                    DiscordSelectorSingle(
+                        kind = SelectorKind.Custom(Icons.Default.EmojiEmotions),
+                        options = emojiOptions,
+                        placeholder = "🎉 Party popper (default)",
+                        label = "Reaction emoji",
+                        selectedId = emote.takeIf { it.isNotBlank() },
+                        onSelect = { emote = it.orEmpty() },
+                    )
                     MewdekoTextField(
                         value = emote,
                         onValueChange = { emote = it },
-                        label = "Entry emote",
+                        label = "Or paste a custom emoji code",
                         placeholder = "🎉",
                     )
                 }
@@ -303,8 +330,8 @@ private fun CreateGiveawayDialog(
                         onCreate(
                             item.trim(),
                             it,
-                            hours,
-                            winners,
+                            endsAt,
+                            winners.toIntOrNull()?.coerceAtLeast(1) ?: 1,
                             useButton,
                             useCaptcha,
                             messageReq.toIntOrNull() ?: 0,
@@ -313,9 +340,59 @@ private fun CreateGiveawayDialog(
                         )
                     }
                 },
-                enabled = item.isNotBlank() && channelId != null,
+                enabled = item.isNotBlank() && channelId != null &&
+                    endsAt.isAfter(Instant.now()) && (winners.toIntOrNull() ?: 0) >= 1,
             ) { Text("Create") }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
     )
+}
+
+/**
+ * Picks the moment a giveaway ends via the platform date and time dialogs,
+ * so runs can be any length instead of a bounded hour count.
+ */
+@Composable
+private fun EndTimeField(value: Instant, onChange: (Instant) -> Unit) {
+    val context = LocalContext.current
+    Column(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Text(
+            text = "Ends",
+            style = MaterialTheme.typography.labelLarge,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        OutlinedButton(
+            onClick = {
+                val base = ZonedDateTime.ofInstant(value, ZoneId.systemDefault())
+                DatePickerDialog(
+                    context,
+                    { _, year, month, day ->
+                        TimePickerDialog(
+                            context,
+                            { _, hour, minute ->
+                                val zoned = ZonedDateTime.of(
+                                    year, month + 1, day, hour, minute, 0, 0, ZoneId.systemDefault(),
+                                )
+                                onChange(zoned.toInstant())
+                            },
+                            base.hour,
+                            base.minute,
+                            false,
+                        ).show()
+                    },
+                    base.year,
+                    base.monthValue - 1,
+                    base.dayOfMonth,
+                ).show()
+            },
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Icon(Icons.Default.Event, contentDescription = null, modifier = Modifier.size(18.dp))
+            Text(
+                text = "  ${value.shortDateTime()} (${value.relativeToNow()})",
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+    }
 }

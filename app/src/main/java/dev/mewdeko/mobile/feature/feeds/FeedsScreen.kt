@@ -4,8 +4,10 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.BarChart
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.RssFeed
 import androidx.compose.material.icons.filled.Tag
@@ -41,6 +43,7 @@ import dev.mewdeko.mobile.core.ui.SelectorOption
 import dev.mewdeko.mobile.core.ui.StatTile
 import dev.mewdeko.mobile.core.ui.TagChip
 import dev.mewdeko.mobile.feature.embed.EmbedMessageEditor
+import dev.mewdeko.mobile.feature.embed.EmbedPreview
 import dev.mewdeko.mobile.navigation.GuildRouteArgs
 import dev.mewdeko.mobile.util.relativeToNow
 
@@ -85,10 +88,39 @@ fun FeedsScreen(
                     modifier = Modifier.weight(1f),
                 )
                 StatTile(
+                    label = "Unique",
+                    value = "${state.uniqueFeedCount}",
+                    modifier = Modifier.weight(1f),
+                )
+                StatTile(
                     label = "Channels",
                     value = "${state.feeds.map { it.channelId }.distinct().size}",
                     modifier = Modifier.weight(1f),
                 )
+            }
+        }
+
+        state.stats?.feedsByChannel?.takeIf { it.isNotEmpty() }?.let { breakdown ->
+            SectionCard {
+                SectionCardHeader("Feeds by channel", Icons.Default.BarChart)
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    breakdown.forEach { entry ->
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                        ) {
+                            Text(
+                                text = "#${state.channelName(entry.channelId)}",
+                                style = MaterialTheme.typography.bodyMedium,
+                            )
+                            Text(
+                                text = "${entry.count} feed${if (entry.count == 1) "" else "s"}",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
+                }
             }
         }
 
@@ -126,6 +158,17 @@ fun FeedsScreen(
                                 Icons.Default.Delete,
                                 contentDescription = "Remove feed",
                                 tint = MaterialTheme.colorScheme.error,
+                            )
+                        }
+                    }
+                    if (!feed.message.isNullOrBlank()) {
+                        val parsed = remember(feed.message) { EmbedMessage.parse(feed.message) }
+                        if (!parsed.isEmpty) {
+                            EmbedPreview(
+                                message = parsed,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(top = 4.dp, bottom = 4.dp),
                             )
                         }
                     }

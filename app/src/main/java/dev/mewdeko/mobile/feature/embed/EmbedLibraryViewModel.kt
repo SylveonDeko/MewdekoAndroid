@@ -22,12 +22,14 @@ import kotlinx.serialization.KSerializer
 import kotlinx.serialization.builtins.ListSerializer
 import javax.inject.Inject
 
-/** The saved embeds, personas, and channels available to the composer. */
+/** The saved embeds, personas, channels, triggers, and emojis available to the composer. */
 data class EmbedLibraryState(
     val userEmbeds: List<SavedEmbed> = emptyList(),
     val guildEmbeds: List<SavedEmbed> = emptyList(),
     val personas: List<EmbedPersona> = emptyList(),
     val channels: List<SendableChannel> = emptyList(),
+    val chatTriggers: List<EmbedTriggerOption> = emptyList(),
+    val emojiGroups: List<EmbedGuildEmojis> = emptyList(),
     val isLoading: Boolean = false,
     val isSending: Boolean = false,
     val lastSend: SendEmbedResult? = null,
@@ -63,7 +65,7 @@ class EmbedLibraryViewModel @Inject constructor(
         refresh()
     }
 
-    /** Reloads saved embeds, personas, and sendable channels. */
+    /** Reloads saved embeds, personas, sendable channels, triggers, and emojis. */
     fun refresh() = viewModelScope.launch {
         _library.update { it.copy(isLoading = true) }
         coroutineScope {
@@ -78,12 +80,20 @@ class EmbedLibraryViewModel @Inject constructor(
             val channels = async {
                 list("api/Embeds/channels/$guildId?userId=$userId", SendableChannel.serializer())
             }
+            val triggers = async {
+                list("api/ChatTriggers/$guildId", EmbedTriggerOption.serializer())
+            }
+            val guildEmojis = async {
+                list("api/ClientOperations/emojis/$userId?adminOnly=false", EmbedGuildEmojis.serializer())
+            }
             _library.update {
                 it.copy(
                     userEmbeds = user.await(),
                     guildEmbeds = guild.await(),
                     personas = userPersonas.await() + guildPersonas.await(),
                     channels = channels.await().sortedBy { channel -> channel.position },
+                    chatTriggers = triggers.await(),
+                    emojiGroups = guildEmojis.await(),
                     isLoading = false,
                 )
             }
@@ -143,6 +153,72 @@ class EmbedLibraryViewModel @Inject constructor(
             )
         }
         postSuccess("Deleted.")
+    }
+
+    /**
+     * Creates a "send as" persona, optionally sharing it with the guild.
+     *
+     * [avatarUrl] and [avatarData] are mutually exclusive; a non-blank
+     * [avatarData] (raw base64 or a `data:` URI) wins when both are set.
+     */
+    fun createPersona(
+        name: String,
+        avatarUrl: String?,
+        avatarData: String?,
+        shared: Boolean,
+    ) = launchAction("Failed to save persona.") {
+        api.sendIgnoringBody(
+            Endpoint(
+                "api/Embeds/personas",
+                HttpMethod.POST,
+                jsonBody(
+                    "userId" to userId.asSnowflakeNumber(),
+                    "guildId" to if (shared) guildId.asSnowflakeNumber() else null,
+                    "name" to name.trim(),
+                    "avatarUrl" to avatarUrl?.takeIf { it.isNotBlank() },
+                    "avatarData" to avatarData?.takeIf { it.isNotBlank() },
+                    "isGuildShared" to shared,
+                ),
+            )
+        )
+        refresh()
+    }
+
+    /** Renames a persona, replaces its avatar, or clears it entirely. */
+    fun updatePersona(
+        persona: EmbedPersona,
+        name: String,
+        avatarUrl: String?,
+        avatarData: String?,
+        clearAvatar: Boolean,
+    ) = launchAction("Failed to update persona.") {
+        api.sendIgnoringBody(
+            Endpoint(
+                "api/Embeds/personas/${persona.id}",
+                HttpMethod.PUT,
+                jsonBody(
+                    "userId" to userId.asSnowflakeNumber(),
+                    "name" to name.trim(),
+                    "avatarUrl" to if (clearAvatar) null else avatarUrl?.takeIf { it.isNotBlank() },
+                    "avatarData" to if (clearAvatar) null else avatarData?.takeIf { it.isNotBlank() },
+                    "clearAvatar" to clearAvatar,
+                ),
+            )
+        )
+        refresh()
+    }
+
+    /** Deletes a "send as" persona. */
+    fun deletePersona(persona: EmbedPersona) = launchAction("Failed to delete persona.") {
+        api.sendIgnoringBody(
+            Endpoint(
+                "api/Embeds/personas/${persona.id}?userId=${userId.asSnowflakeNumber()}",
+                HttpMethod.DELETE,
+            )
+        )
+        _library.update {
+            it.copy(personas = it.personas.filterNot { persona2 -> persona2.id == persona.id })
+        }
     }
 
     /**

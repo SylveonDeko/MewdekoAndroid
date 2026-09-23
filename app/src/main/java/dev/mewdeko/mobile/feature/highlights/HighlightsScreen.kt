@@ -227,6 +227,11 @@ fun HighlightsScreen(
                                     }
                                 },
                             )
+                            Text(
+                                text = "${group.words.size} highlight${if (group.words.size == 1) "" else "s"}",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
                             FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                                 group.words.forEach { highlight ->
                                     InputChip(

@@ -1,10 +1,15 @@
 package dev.mewdeko.mobile.feature.statchannels
 
+import android.app.DatePickerDialog
+import android.app.TimePickerDialog
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -13,15 +18,21 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Dns
 import androidx.compose.material.icons.filled.Equalizer
+import androidx.compose.material.icons.filled.Event
 import androidx.compose.material.icons.filled.Numbers
 import androidx.compose.material.icons.filled.Rotate90DegreesCcw
 import androidx.compose.material.icons.filled.Tag
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.SegmentedButton
+import androidx.compose.material3.SegmentedButtonDefaults
+import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -33,6 +44,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -41,18 +53,21 @@ import dev.mewdeko.mobile.core.ui.ConfirmDialog
 import dev.mewdeko.mobile.core.ui.DiscordSelectorSingle
 import dev.mewdeko.mobile.core.ui.EmptyState
 import dev.mewdeko.mobile.core.ui.FeatureScaffold
+import dev.mewdeko.mobile.core.ui.InfoRow
 import dev.mewdeko.mobile.core.ui.MewdekoTextField
 import dev.mewdeko.mobile.core.ui.SectionCard
 import dev.mewdeko.mobile.core.ui.SectionCardHeader
 import dev.mewdeko.mobile.core.ui.SelectorKind
 import dev.mewdeko.mobile.core.ui.SelectorOption
-import dev.mewdeko.mobile.core.ui.SliderRow
 import dev.mewdeko.mobile.core.ui.StatTile
 import dev.mewdeko.mobile.core.ui.TagChip
 import dev.mewdeko.mobile.navigation.GuildRouteArgs
+import dev.mewdeko.mobile.util.relativeToNow
 import dev.mewdeko.mobile.util.shortDate
+import dev.mewdeko.mobile.util.shortDateTime
 import java.time.Instant
-import java.time.temporal.ChronoUnit
+import java.time.ZoneId
+import java.time.ZonedDateTime
 
 /** Voice channels whose names carry live server statistics. */
 @Composable
@@ -67,6 +82,7 @@ fun StatChannelsScreen(
 
     var showAdd by remember { mutableStateOf(false) }
     var showDefaults by remember { mutableStateOf(false) }
+    var showCatalog by remember { mutableStateOf(false) }
     var pendingDelete by remember { mutableStateOf<StatChannel?>(null) }
     var editingTemplate by remember { mutableStateOf<StatChannel?>(null) }
     var editingDelivery by remember { mutableStateOf<StatChannel?>(null) }
@@ -105,7 +121,10 @@ fun StatChannelsScreen(
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-            TextButton(onClick = { showDefaults = true }) { Text("Defaults for new channels") }
+            Row {
+                TextButton(onClick = { showDefaults = true }) { Text("Defaults for new channels") }
+                TextButton(onClick = { showCatalog = true }) { Text("Browse counters") }
+            }
         }
 
         if (state.channels.isEmpty()) {
@@ -167,6 +186,7 @@ fun StatChannelsScreen(
             metadata = state.metadata,
             settings = state.settings,
             voiceOptions = state.availableVoiceChannels.map { SelectorOption(it.id, it.name) },
+            categoryOptions = state.availableCategories.map { SelectorOption(it.id, it.name) },
             roleOptions = state.availableRoles.map { SelectorOption(it.id, it.name) },
             countingOptions = state.countingChannels.map {
                 SelectorOption(
@@ -185,18 +205,14 @@ fun StatChannelsScreen(
             preview = state.preview,
             previewPending = state.previewPending,
             minimumInterval = viewModel::minimumInterval,
-            onPreviewInputsChanged = { definition, template, style, roleId, days, goal, targetId, counterName ->
+            onPreviewInputsChanged = { definition, template, style, roleId, countdownDate, goal, targetId, counterName ->
                 if (definition != null) {
                     viewModel.refreshPreview(
                         statType = definition.type,
                         template = template,
                         displayStyle = style,
                         roleId = roleId.takeIf { definition.needs == StatRequirement.ROLE },
-                        countdownDate = if (definition.needs == StatRequirement.DATE) {
-                            Instant.now().plus(days.toLong(), ChronoUnit.DAYS)
-                        } else {
-                            null
-                        },
+                        countdownDate = countdownDate.takeIf { definition.needs == StatRequirement.DATE },
                         goalTarget = goal.takeIf { definition.needs == StatRequirement.GOAL },
                         targetId = targetId?.toLongOrNull(),
                         targetName = counterName.takeIf {
@@ -209,20 +225,18 @@ fun StatChannelsScreen(
                 showAdd = false
                 viewModel.clearPreview()
             },
-            onAdd = { channelId, definition, template, style, mechanism, interval, roleId, days, goal, targetId, counterName ->
+            onAdd = { channelId, categoryId, definition, template, style, mechanism, interval, roleId,
+                countdownDate, goal, targetId, counterName ->
                 viewModel.add(
                     channelId = channelId,
+                    categoryId = categoryId,
                     statType = definition.type,
                     template = template,
                     displayStyle = style,
                     mechanism = mechanism,
                     intervalMinutes = interval,
                     roleId = roleId.takeIf { definition.needs == StatRequirement.ROLE },
-                    countdownDate = if (definition.needs == StatRequirement.DATE) {
-                        Instant.now().plus(days.toLong(), ChronoUnit.DAYS)
-                    } else {
-                        null
-                    },
+                    countdownDate = countdownDate.takeIf { definition.needs == StatRequirement.DATE },
                     goalTarget = goal.takeIf { definition.needs == StatRequirement.GOAL },
                     targetId = targetId?.toLongOrNull(),
                     targetName = counterName.takeIf {
@@ -233,6 +247,10 @@ fun StatChannelsScreen(
                 viewModel.clearPreview()
             },
         )
+    }
+
+    if (showCatalog) {
+        CounterCatalogDialog(metadata = state.metadata, onDismiss = { showCatalog = false })
     }
 
     if (showDefaults) {
@@ -262,18 +280,12 @@ fun StatChannelsScreen(
                         label = "Template",
                         placeholder = definition?.defaultTemplate ?: "Members: %count%",
                     )
-                    val placeholders = buildList {
-                        addAll(state.metadata?.commonPlaceholders.orEmpty())
-                        addAll(definition?.placeholders.orEmpty())
-                    }
-                    Text(
-                        text = if (placeholders.isEmpty()) {
-                            "Use %count% for the current value."
-                        } else {
-                            "Placeholders: " + placeholders.joinToString(", ")
+                    PlaceholderChips(
+                        placeholders = buildList {
+                            addAll(state.metadata?.commonPlaceholders.orEmpty())
+                            addAll(definition?.placeholders.orEmpty())
                         },
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        onInsert = { draft += it },
                     )
                 }
             },
@@ -292,11 +304,13 @@ fun StatChannelsScreen(
     }
 
     editingDelivery?.let { channel ->
+        val definition = state.metadata?.statTypes?.firstOrNull { it.type == channel.statType }
         var style by remember(channel.channelId) { mutableIntStateOf(channel.displayStyle) }
         var mechanism by remember(channel.channelId) { mutableStateOf(channel.mechanism) }
         var interval by remember(channel.channelId) {
             mutableIntStateOf(channel.updateIntervalMinutes)
         }
+        val minimum = viewModel.minimumInterval(mechanism)
 
         AlertDialog(
             onDismissRequest = { editingDelivery = null },
@@ -308,14 +322,15 @@ fun StatChannelsScreen(
                         .verticalScroll(rememberScrollState()),
                     verticalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
-                    StylePicker(state.metadata, style) { style = it }
+                    StylePicker(state.metadata, style, definition) { style = it }
                     MechanismPicker(mechanism) {
                         mechanism = it
                         interval = interval.coerceAtLeast(viewModel.minimumInterval(it))
                     }
-                    IntervalSlider(
+                    IntervalField(
                         interval = interval,
-                        minimum = viewModel.minimumInterval(mechanism),
+                        minimum = minimum,
+                        realtimeHint = definition?.realtime == true,
                         onChange = { interval = it },
                     )
                 }
@@ -326,6 +341,7 @@ fun StatChannelsScreen(
                         viewModel.updateDelivery(channel.channelId, style, mechanism, interval)
                         editingDelivery = null
                     },
+                    enabled = interval >= minimum,
                 ) { Text("Save") }
             },
             dismissButton = {
@@ -376,11 +392,15 @@ private fun PreviewRow(preview: String, pending: Boolean) {
     }
 }
 
-/** Picks how the resolved number is rendered, showing each style's worked example. */
+/**
+ * Picks how the resolved number is rendered, showing each style's worked example. When
+ * [definition] does not produce a plain number, notes that the style only affects `%count.raw%`.
+ */
 @Composable
 private fun StylePicker(
     metadata: StatChannelMetadata?,
     selected: Int,
+    definition: StatTypeDefinition? = null,
     onSelect: (Int) -> Unit,
 ) {
     val options = metadata?.displayStyles.orEmpty().map {
@@ -396,6 +416,14 @@ private fun StylePicker(
         selectedId = selected.toString(),
         onSelect = { raw -> onSelect(raw?.toIntOrNull() ?: selected) },
     )
+    if (definition != null && definition.valueKind != 0) {
+        Text(
+            text = "This counter produces ${definition.valueKindName.lowercase()} rather than a " +
+                "number, so the style only affects %count.raw%.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
 }
 
 /** Picks how updates reach Discord, surfacing the tradeoff for the chosen mechanism. */
@@ -424,21 +452,105 @@ private fun MechanismPicker(
     }
 }
 
-/** Chooses the refresh cadence, floored at what the chosen mechanism can sustain. */
+/**
+ * Chooses the refresh cadence in minutes, from what the chosen mechanism can sustain up to the
+ * bot's cap of 1440 (one day). A plain number field, since a slider cannot address that range with
+ * useful precision.
+ */
 @Composable
-private fun IntervalSlider(interval: Int, minimum: Int, onChange: (Int) -> Unit) {
-    SliderRow(
-        label = "Refresh every",
-        value = interval.toFloat(),
-        onValueChange = { onChange(it.toInt().coerceAtLeast(minimum)) },
-        valueRange = minimum.toFloat()..120f,
-        valueLabel = "${interval}m",
+private fun IntervalField(
+    interval: Int,
+    minimum: Int,
+    realtimeHint: Boolean = false,
+    onChange: (Int) -> Unit,
+) {
+    var text by remember(interval) { mutableStateOf(interval.toString()) }
+    MewdekoTextField(
+        value = text,
+        onValueChange = { raw ->
+            val digits = raw.filter(Char::isDigit).take(4)
+            text = digits
+            digits.toIntOrNull()?.let { onChange(it.coerceIn(1, MaxIntervalMinutes)) }
+        },
+        label = "Refresh every (minutes)",
+        numeric = true,
+        isError = interval < minimum,
+        supportingText = buildString {
+            append("Minimum $minimum minute${if (minimum == 1) "" else "s"} for this mechanism, up to $MaxIntervalMinutes.")
+            if (realtimeHint) append(" This counter changes constantly, so a short interval is worth it.")
+        },
     )
-    Text(
-        text = "Minimum $minimum minute${if (minimum == 1) "" else "s"} for this mechanism.",
-        style = MaterialTheme.typography.bodySmall,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
-    )
+}
+
+/** Tappable chips that insert a placeholder token at the end of the template on tap. */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun PlaceholderChips(placeholders: List<String>, onInsert: (String) -> Unit) {
+    if (placeholders.isEmpty()) {
+        Text(
+            text = "Use %count% for the current value.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        return
+    }
+    FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        placeholders.forEach { placeholder ->
+            TagChip(label = placeholder, onClick = { onInsert(placeholder) })
+        }
+    }
+}
+
+/**
+ * Picks an exact target date and time for a countdown stat, via the platform date and time
+ * pickers. Unlike a relative day slider, the target stays fixed once chosen.
+ */
+@Composable
+private fun CountdownDateField(value: Instant?, onChange: (Instant?) -> Unit) {
+    val context = LocalContext.current
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Text(
+            text = "Target date",
+            style = MaterialTheme.typography.labelLarge,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            OutlinedButton(
+                onClick = {
+                    val base = value?.let { ZonedDateTime.ofInstant(it, ZoneId.systemDefault()) }
+                        ?: ZonedDateTime.now().plusDays(1)
+                    DatePickerDialog(
+                        context,
+                        { _, year, month, day ->
+                            TimePickerDialog(
+                                context,
+                                { _, hour, minute ->
+                                    val zoned = ZonedDateTime.of(
+                                        year, month + 1, day, hour, minute, 0, 0, ZoneId.systemDefault(),
+                                    )
+                                    onChange(zoned.toInstant())
+                                },
+                                base.hour,
+                                base.minute,
+                                false,
+                            ).show()
+                        },
+                        base.year,
+                        base.monthValue - 1,
+                        base.dayOfMonth,
+                    ).show()
+                },
+                modifier = Modifier.weight(1f),
+            ) {
+                Icon(Icons.Default.Event, contentDescription = null, modifier = Modifier.size(18.dp))
+                Text(
+                    text = value?.let { "  ${it.shortDateTime()} (${it.relativeToNow()})" } ?: "  Pick a date",
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
+    }
 }
 
 @Composable
@@ -469,14 +581,15 @@ private fun DefaultsDialog(
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-                StylePicker(metadata, style) { style = it }
+                StylePicker(metadata, style, onSelect = { style = it })
                 MechanismPicker(mechanism) {
                     mechanism = it
                     interval = interval.coerceAtLeast(minimumInterval(it))
                 }
-                IntervalSlider(
+                val defaultsMinimum = minimumInterval(mechanism)
+                IntervalField(
                     interval = interval,
-                    minimum = minimumInterval(mechanism),
+                    minimum = defaultsMinimum,
                     onChange = { interval = it },
                 )
             }
@@ -492,17 +605,20 @@ private fun DefaultsDialog(
                         )
                     )
                 },
+                enabled = interval >= minimumInterval(mechanism),
             ) { Text("Save") }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
     )
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun AddStatChannelDialog(
     metadata: StatChannelMetadata?,
     settings: StatChannelSettings,
     voiceOptions: List<SelectorOption>,
+    categoryOptions: List<SelectorOption>,
     roleOptions: List<SelectorOption>,
     countingOptions: List<SelectorOption>,
     minecraftOptions: List<SelectorOption>,
@@ -514,7 +630,7 @@ private fun AddStatChannelDialog(
         template: String,
         style: Int,
         roleId: String?,
-        days: Int,
+        countdownDate: Instant?,
         goal: Int,
         targetId: String?,
         counterName: String,
@@ -522,20 +638,23 @@ private fun AddStatChannelDialog(
     onDismiss: () -> Unit,
     onAdd: (
         channelId: String,
+        categoryId: String?,
         definition: StatTypeDefinition,
         template: String,
         style: Int,
         mechanism: StatMechanism,
         interval: Int,
         roleId: String?,
-        days: Int,
+        countdownDate: Instant?,
         goal: Int,
         targetId: String?,
         counterName: String,
     ) -> Unit,
 ) {
     val definitions = metadata?.statTypes.orEmpty()
+    var createNew by remember { mutableStateOf(true) }
     var channelId by remember { mutableStateOf<String?>(null) }
+    var categoryId by remember { mutableStateOf<String?>(null) }
     var definition by remember(definitions) { mutableStateOf(definitions.firstOrNull()) }
     var template by remember(definitions) {
         mutableStateOf(definitions.firstOrNull()?.defaultTemplate.orEmpty())
@@ -544,20 +663,21 @@ private fun AddStatChannelDialog(
     var mechanism by remember { mutableStateOf(StatMechanism.from(settings.defaultMechanism)) }
     var interval by remember { mutableIntStateOf(settings.defaultIntervalMinutes) }
     var roleId by remember { mutableStateOf<String?>(null) }
-    var days by remember { mutableIntStateOf(30) }
+    var countdownDate by remember { mutableStateOf<Instant?>(null) }
     var goal by remember { mutableStateOf("100") }
     var counterName by remember { mutableStateOf("") }
     var targetId by remember { mutableStateOf<String?>(null) }
 
     val needs = definition?.needs ?: StatRequirement.NONE
+    val minimum = minimumInterval(mechanism)
 
-    LaunchedEffect(definition, template, style, roleId, days, goal, targetId, counterName) {
+    LaunchedEffect(definition, template, style, roleId, countdownDate, goal, targetId, counterName) {
         onPreviewInputsChanged(
             definition,
             template,
             style,
             roleId,
-            days,
+            countdownDate,
             goal.toIntOrNull() ?: 0,
             targetId,
             counterName,
@@ -574,14 +694,38 @@ private fun AddStatChannelDialog(
                     .verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
-                DiscordSelectorSingle(
-                    kind = SelectorKind.Custom(Icons.AutoMirrored.Filled.VolumeUp),
-                    options = voiceOptions,
-                    placeholder = "Pick a voice channel",
-                    label = "Channel",
-                    selectedId = channelId,
-                    onSelect = { channelId = it },
-                )
+                SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
+                    SegmentedButton(
+                        selected = createNew,
+                        onClick = { createNew = true },
+                        shape = SegmentedButtonDefaults.itemShape(index = 0, count = 2),
+                    ) { Text("Create new channel") }
+                    SegmentedButton(
+                        selected = !createNew,
+                        onClick = { createNew = false },
+                        shape = SegmentedButtonDefaults.itemShape(index = 1, count = 2),
+                    ) { Text("Use existing channel") }
+                }
+
+                if (createNew) {
+                    DiscordSelectorSingle(
+                        kind = SelectorKind.Custom(Icons.Default.Tag),
+                        options = categoryOptions,
+                        placeholder = "No category",
+                        label = "Category (optional)",
+                        selectedId = categoryId,
+                        onSelect = { categoryId = it },
+                    )
+                } else {
+                    DiscordSelectorSingle(
+                        kind = SelectorKind.Custom(Icons.AutoMirrored.Filled.VolumeUp),
+                        options = voiceOptions,
+                        placeholder = "Pick a voice channel",
+                        label = "Channel",
+                        selectedId = channelId,
+                        onSelect = { channelId = it },
+                    )
+                }
 
                 if (definitions.isEmpty()) {
                     Text(
@@ -611,6 +755,7 @@ private fun AddStatChannelDialog(
                                 roleId = null
                                 counterName = ""
                                 targetId = null
+                                countdownDate = null
                                 if (picked.realtime && mechanism != StatMechanism.RENAME) {
                                     interval = minimumInterval(mechanism)
                                 }
@@ -631,22 +776,26 @@ private fun AddStatChannelDialog(
                     value = template,
                     onValueChange = { template = it },
                     label = "Name template",
-                    supportingText = buildList {
+                )
+                PlaceholderChips(
+                    placeholders = buildList {
                         addAll(metadata?.commonPlaceholders.orEmpty())
                         addAll(definition?.placeholders.orEmpty())
-                    }.joinToString(", ").ifEmpty { "Use %count% for the current value." },
+                    },
+                    onInsert = { template += it },
                 )
 
                 PreviewRow(preview = preview, pending = previewPending)
 
-                StylePicker(metadata, style) { style = it }
+                StylePicker(metadata, style, definition) { style = it }
                 MechanismPicker(mechanism) {
                     mechanism = it
                     interval = interval.coerceAtLeast(minimumInterval(it))
                 }
-                IntervalSlider(
+                IntervalField(
                     interval = interval,
-                    minimum = minimumInterval(mechanism),
+                    minimum = minimum,
+                    realtimeHint = definition?.realtime == true,
                     onChange = { interval = it },
                 )
 
@@ -661,13 +810,7 @@ private fun AddStatChannelDialog(
                     )
                 }
                 if (needs == StatRequirement.DATE) {
-                    SliderRow(
-                        label = "Counts down over",
-                        value = days.toFloat(),
-                        onValueChange = { days = it.toInt().coerceAtLeast(1) },
-                        valueRange = 1f..365f,
-                        valueLabel = "${days}d",
-                    )
+                    CountdownDateField(value = countdownDate, onChange = { countdownDate = it })
                 }
                 if (needs == StatRequirement.GOAL) {
                     MewdekoTextField(
@@ -726,26 +869,27 @@ private fun AddStatChannelDialog(
             Button(
                 onClick = {
                     val picked = definition ?: return@Button
-                    channelId?.let {
-                        onAdd(
-                            it,
-                            picked,
-                            template,
-                            style,
-                            mechanism,
-                            interval,
-                            roleId,
-                            days,
-                            goal.toIntOrNull() ?: 0,
-                            targetId,
-                            counterName,
-                        )
-                    }
+                    onAdd(
+                        if (createNew) "0" else channelId.orEmpty(),
+                        if (createNew) categoryId else null,
+                        picked,
+                        template,
+                        style,
+                        mechanism,
+                        interval,
+                        roleId,
+                        countdownDate,
+                        goal.toIntOrNull() ?: 0,
+                        targetId,
+                        counterName,
+                    )
                 },
-                enabled = channelId != null &&
+                enabled = (createNew || channelId != null) &&
                     definition != null &&
                     template.isNotBlank() &&
+                    interval >= minimum &&
                     (needs != StatRequirement.ROLE || roleId != null) &&
+                    (needs != StatRequirement.DATE || countdownDate != null) &&
                     (needs != StatRequirement.COUNTER_NAME || counterName.isNotBlank()) &&
                     (needs != StatRequirement.COUNTING_CHANNEL || targetId != null) &&
                     (needs != StatRequirement.MINECRAFT_SERVER || targetId != null),
@@ -754,3 +898,88 @@ private fun AddStatChannelDialog(
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
     )
 }
+
+/** Read-only reference: how each counter style renders, and every counter grouped by category. */
+@Composable
+private fun CounterCatalogDialog(metadata: StatChannelMetadata?, onDismiss: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Counter catalogue") },
+        text = {
+            Column(
+                modifier = Modifier
+                    .heightIn(max = 520.dp)
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(16.dp),
+            ) {
+                if (metadata == null) {
+                    Text(
+                        text = "Could not load the catalogue. Pull to refresh and try again.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                    return@Column
+                }
+
+                Text(
+                    text = "Counter styles",
+                    style = MaterialTheme.typography.titleSmall,
+                    color = MaterialTheme.colorScheme.onSurface,
+                )
+                Text(
+                    text = "How each style renders 1,234 against a target of 2,000.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                metadata.displayStyles.forEach { style ->
+                    InfoRow(label = style.name, value = style.example)
+                }
+
+                Text(
+                    text = "Available counters",
+                    style = MaterialTheme.typography.titleSmall,
+                    color = MaterialTheme.colorScheme.onSurface,
+                )
+                metadata.statTypes.groupBy { it.category }.forEach { (category, definitions) ->
+                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Text(
+                            text = category,
+                            style = MaterialTheme.typography.labelLarge,
+                            color = MaterialTheme.colorScheme.primary,
+                        )
+                        definitions.forEach { definition ->
+                            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                Row(
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    Text(
+                                        text = definition.name,
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = MaterialTheme.colorScheme.onSurface,
+                                    )
+                                    if (definition.realtime) {
+                                        TagChip("Live")
+                                    }
+                                }
+                                Text(
+                                    text = definition.description,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                                Text(
+                                    text = "Example: ${definition.example}",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.primary,
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = onDismiss) { Text("Close") } },
+    )
+}
+
+private const val MaxIntervalMinutes = 1440

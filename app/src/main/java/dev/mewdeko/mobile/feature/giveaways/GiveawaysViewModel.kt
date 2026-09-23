@@ -53,11 +53,41 @@ data class GiveawayRecord(
         get() = restrictTo.orEmpty().split(' ').filter { it.isNotBlank() }
 }
 
+/** A guild's emoji list, as returned by the mutual-guild emoji picker endpoint. */
+@Serializable
+data class GuildEmojiInfo(
+    val guild: EmojiGuildSummary = EmojiGuildSummary(),
+    val emojis: List<GiveawayEmoji> = emptyList(),
+)
+
+/** Basic guild identity attached to a [GuildEmojiInfo] entry. */
+@Serializable
+data class EmojiGuildSummary(
+    @Serializable(with = SnowflakeSerializer::class) val id: Snowflake = "",
+    val name: String = "",
+    val iconUrl: String? = null,
+)
+
+/** A single guild emoji available for the reaction entry method. */
+@Serializable
+data class GiveawayEmoji(
+    @Serializable(with = SnowflakeSerializer::class) val id: Snowflake = "",
+    val name: String = "",
+    val animated: Boolean = false,
+    val isAvailable: Boolean? = null,
+    val requireColons: Boolean = false,
+    val url: String = "",
+) {
+    /** Discord message-format representation, e.g. `<:name:id>` or `<a:name:id>`. */
+    val formatted: String get() = "<${if (animated) "a" else ""}:$name:$id>"
+}
+
 /** Giveaways screen state. */
 data class GiveawaysState(
     val giveaways: List<GiveawayRecord> = emptyList(),
     val availableChannels: List<TextChannelLite> = emptyList(),
     val availableRoles: List<GuildRole> = emptyList(),
+    val availableEmojiGuilds: List<GuildEmojiInfo> = emptyList(),
     val section: String = "active",
 ) {
     /** Draws still accepting entries. */
@@ -119,6 +149,14 @@ class GiveawaysViewModel @Inject constructor(
                     )
                 }.getOrDefault(emptyList())
             }
+            val emojis = async {
+                runCatching {
+                    api.send(
+                        Endpoint("api/ClientOperations/emojis/$userId?adminOnly=true"),
+                        ListSerializer(GuildEmojiInfo.serializer()),
+                    )
+                }.getOrDefault(emptyList())
+            }
 
             _state.update {
                 it.copy(
@@ -129,6 +167,7 @@ class GiveawaysViewModel @Inject constructor(
                     availableRoles = roles.await()
                         .filter { role -> role.id != guildId }
                         .sortedBy { role -> role.name.lowercase() },
+                    availableEmojiGuilds = emojis.await(),
                 )
             }
         }

@@ -21,10 +21,10 @@ data class OAuthResult(
 /** Errors surfaced from [DiscordOAuthFlow]. */
 sealed class DiscordOAuthError(message: String) : Exception(message) {
     /** The user dismissed the browser without authorizing. */
-    data object UserCancelled : DiscordOAuthError("Sign-in cancelled")
+    data class UserCancelled : DiscordOAuthError("Sign-in cancelled")
 
     /** The callback URL was missing a code, or its state did not match. */
-    data object MalformedCallback : DiscordOAuthError("Malformed OAuth callback")
+    data class MalformedCallback : DiscordOAuthError("Malformed OAuth callback")
 
     /** Discord returned an explicit error in the callback. */
     data class DiscordRejected(val reason: String) : DiscordOAuthError("Discord error: $reason")
@@ -62,7 +62,7 @@ class DiscordOAuthFlow @Inject constructor() {
         val deferred = CompletableDeferred<OAuthResult>()
 
         lock.withLock {
-            pending?.deferred?.completeExceptionally(DiscordOAuthError.UserCancelled)
+            pending?.deferred?.completeExceptionally(DiscordOAuthError.UserCancelled())
             pending = PendingAuthorization(state, verifier, config.redirectUri, deferred)
         }
 
@@ -95,7 +95,7 @@ class DiscordOAuthFlow @Inject constructor() {
 
         val returnedState = uri.getQueryParameter("state")
         if (returnedState != current.state) {
-            current.deferred.completeExceptionally(DiscordOAuthError.MalformedCallback)
+            current.deferred.completeExceptionally(DiscordOAuthError.MalformedCallback())
             return@withLock true
         }
         uri.getQueryParameter("error")?.let { error ->
@@ -104,7 +104,7 @@ class DiscordOAuthFlow @Inject constructor() {
         }
         val code = uri.getQueryParameter("code")
         if (code == null) {
-            current.deferred.completeExceptionally(DiscordOAuthError.MalformedCallback)
+            current.deferred.completeExceptionally(DiscordOAuthError.MalformedCallback())
             return@withLock true
         }
         current.deferred.complete(
@@ -118,7 +118,7 @@ class DiscordOAuthFlow @Inject constructor() {
      * callback, which means the user backed out of the Custom Tab.
      */
     suspend fun cancelPending() = lock.withLock {
-        pending?.deferred?.completeExceptionally(DiscordOAuthError.UserCancelled)
+        pending?.deferred?.completeExceptionally(DiscordOAuthError.UserCancelled())
         pending = null
     }
 
