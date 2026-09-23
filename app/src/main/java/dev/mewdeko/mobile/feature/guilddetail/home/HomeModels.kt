@@ -24,25 +24,6 @@ data class XpServerStats(
     val highestLevel: Int = 0,
 )
 
-/** One rank on the XP leaderboard. */
-@Serializable
-data class XpLeader(
-    @Serializable(with = SnowflakeSerializer::class) val userId: Snowflake = "",
-    val username: String = "Unknown",
-    val avatarUrl: String? = null,
-    val totalXp: Long = 0,
-    val level: Int = 0,
-    val rank: Int = 0,
-)
-
-/** Message counter totals, including whether counting is switched on at all. */
-@Serializable
-data class DailyMessageStats(
-    val enabled: Boolean = false,
-    val dailyMessages: Long = 0,
-    val totalMessages: Long = 0,
-)
-
 /** Birthday counts for the guild. */
 @Serializable
 data class BirthdaySummary(

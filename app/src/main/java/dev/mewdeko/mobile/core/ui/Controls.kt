@@ -1,6 +1,8 @@
 package dev.mewdeko.mobile.core.ui
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -31,7 +33,10 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.ui.platform.LocalFocusManager
@@ -235,7 +240,13 @@ fun ConfirmDialog(
     )
 }
 
-/** Circular avatar backed by Coil, with a glyph placeholder. */
+/**
+ * Avatar backed by Coil, with a glyph or initial placeholder.
+ *
+ * Circular by default. A [ring] draws around the image, which is inset by the
+ * ring's width so the two never overlap. When there is no image and
+ * [fallbackText] is set, the first letter of it replaces the glyph.
+ */
 @Composable
 fun Avatar(
     url: String?,
@@ -243,26 +254,55 @@ fun Avatar(
     modifier: Modifier = Modifier,
     size: Int = 40,
     fallbackIcon: ImageVector = Icons.Default.Person,
+    shape: Shape = CircleShape,
+    ring: BorderStroke? = null,
+    fallbackText: String? = null,
 ) {
     Box(
         modifier = modifier
             .size(size.dp)
-            .clip(CircleShape),
+            .then(
+                if (ring != null) {
+                    Modifier
+                        .border(ring, shape)
+                        .padding(ring.width)
+                } else {
+                    Modifier
+                }
+            )
+            .clip(shape),
         contentAlignment = Alignment.Center,
     ) {
-        if (url.isNullOrEmpty()) {
-            Icon(
+        val initial = fallbackText?.trim()?.firstOrNull()?.uppercaseChar()
+        when {
+            !url.isNullOrEmpty() -> AsyncImage(
+                model = url,
+                contentDescription = contentDescription,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.matchParentSize(),
+            )
+
+            initial != null -> Box(
+                modifier = Modifier
+                    .matchParentSize()
+                    .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.16f)),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    text = initial.toString(),
+                    style = MaterialTheme.typography.titleLarge,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.semantics {
+                        if (contentDescription != null) this.contentDescription = contentDescription
+                    },
+                )
+            }
+
+            else -> Icon(
                 fallbackIcon,
                 contentDescription = contentDescription,
                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.size((size * 0.6).dp),
-            )
-        } else {
-            AsyncImage(
-                model = url,
-                contentDescription = contentDescription,
-                contentScale = ContentScale.Crop,
-                modifier = Modifier.size(size.dp),
             )
         }
     }

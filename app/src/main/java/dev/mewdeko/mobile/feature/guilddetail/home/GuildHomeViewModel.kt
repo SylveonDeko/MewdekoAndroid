@@ -5,11 +5,17 @@ import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dev.mewdeko.mobile.core.auth.SessionHolder
 import dev.mewdeko.mobile.core.model.AutoAssignRolesResponse
+import dev.mewdeko.mobile.core.model.BirthdayUser
+import dev.mewdeko.mobile.core.model.CountingChannel
+import dev.mewdeko.mobile.core.model.FormSummary
 import dev.mewdeko.mobile.core.model.MusicStatus
+import dev.mewdeko.mobile.core.model.XpLeaderboardEntry
 import dev.mewdeko.mobile.core.net.ApiClient
 import dev.mewdeko.mobile.core.net.Endpoint
 import dev.mewdeko.mobile.core.net.snowflakeIds
 import dev.mewdeko.mobile.core.ui.FeatureViewModel
+import dev.mewdeko.mobile.feature.giveaways.GiveawayRecord
+import dev.mewdeko.mobile.feature.messagestats.MessageStatsDetail
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
@@ -27,9 +33,9 @@ import javax.inject.Inject
 /**
  * One band of the guild home.
  *
- * Overview is the landing content and loads immediately; the rest fetch the
- * first time they scroll into view, so opening a guild costs one round of
- * calls rather than twenty.
+ * Community, entertainment and security load with the screen because the
+ * pulse tiles and the now playing card need them above the fold; actions and
+ * settings fetch the first time the automation band composes.
  */
 enum class HomeSection(val id: String, val label: String) {
     OVERVIEW("overview", "Overview"),
@@ -40,51 +46,47 @@ enum class HomeSection(val id: String, val label: String) {
     SETTINGS("settings", "Settings"),
 }
 
-/** Everything the community band renders. */
+/** Everything the community band and the pulse tiles read. */
 data class CommunityData(
     val xpStats: XpServerStats? = null,
-    val xpTop: List<XpLeader> = emptyList(),
-    val messages: DailyMessageStats? = null,
+    val xpTop: List<XpLeaderboardEntry> = emptyList(),
+    val messages: MessageStatsDetail? = null,
     val birthdays: BirthdaySummary? = null,
+    val birthdaysToday: List<BirthdayUser> = emptyList(),
+    val birthdaysUpcoming: List<BirthdayUser> = emptyList(),
     val tickets: TicketStatistics? = null,
+    val ticketPanels: Int? = null,
     val highlights: List<StarboardHighlight> = emptyList(),
-    val activeForms: Int? = null,
-    val countingChannels: Int? = null,
+    val forms: List<FormSummary>? = null,
+    val counting: List<CountingChannel>? = null,
     val patreonConnected: Boolean? = null,
     val patreonSupporters: Int? = null,
 )
 
-/** Everything the entertainment band renders. */
+/** Everything the entertainment band and the now playing card read. */
 data class EntertainmentData(
     val music: MusicStatus? = null,
-    val giveaways: Int? = null,
+    val giveaways: List<GiveawayRecord>? = null,
     val customVoiceChannels: Int? = null,
 )
 
-/** Everything the actions band renders. */
+/** Automation counts the overview does not already own. */
 data class ActionsData(
-    val roleGreets: Int? = null,
-    val roleStates: Int? = null,
     val multiGreets: Int? = null,
     val repeaters: Int? = null,
 )
 
-/** Everything the security band renders. */
+/** Everything the safety band and the mod actions tile read. */
 data class SecurityData(
-    val activeProtections: Int? = null,
-    val totalProtections: Int = 5,
-    val recentActions: List<RecentModerationAction> = emptyList(),
-    val warnings: Int? = null,
-    val loggingEnabled: Int? = null,
+    val protection: ProtectionFlags? = null,
+    val warnings: List<RecentModerationAction>? = null,
 )
 
-/** Everything the settings band renders. */
+/** Role assignment counts shown as automation chips. */
 data class SettingsData(
-    val prefix: String? = null,
     val autoAssignHumans: Int? = null,
     val autoAssignBots: Int? = null,
     val selfAssignable: Int? = null,
-    val ticketPanels: Int? = null,
 )
 
 /** Guild home state. Each band tracks its own load so one failure is local. */
@@ -123,36 +125,46 @@ class GuildHomeViewModel @Inject constructor(
 
     init {
         loadProfile()
+        ensureLoaded(HomeSection.COMMUNITY)
+        ensureLoaded(HomeSection.ENTERTAINMENT)
+        ensureLoaded(HomeSection.SECURITY)
     }
 
-    /**
-     * Fetches [section] unless it is already loaded or in flight.
-     *
-     * Called when a band scrolls into view.
-     */
+    /** Fetches [section] unless it is already loaded or in flight. */
     fun ensureLoaded(section: HomeSection) {
         val current = _state.value
         if (section in current.loaded || section in current.loading) return
         _state.update { it.copy(loading = it.loading + section) }
         viewModelScope.launch {
-            when (section) {
-                HomeSection.OVERVIEW -> Unit
-                HomeSection.COMMUNITY -> loadCommunity()
-                HomeSection.ENTERTAINMENT -> loadEntertainment()
-                HomeSection.ACTIONS -> loadActions()
-                HomeSection.SECURITY -> loadSecurity()
-                HomeSection.SETTINGS -> loadSettings()
-            }
+            runLoader(section)
             _state.update {
                 it.copy(loading = it.loading - section, loaded = it.loaded + section)
             }
         }
     }
 
-    /** Drops every cached band so the next view refetches. */
-    fun invalidate() {
-        _state.update { GuildHomeState() }
+    /**
+     * Refetches the profile and every band that has already loaded.
+     *
+     * Existing values stay on screen and are replaced in place as each call
+     * lands, so a pull to refresh never empties a band.
+     */
+    fun refresh() {
         loadProfile()
+        _state.value.loaded.forEach { section ->
+            viewModelScope.launch { runLoader(section) }
+        }
+    }
+
+    private suspend fun runLoader(section: HomeSection) {
+        when (section) {
+            HomeSection.OVERVIEW -> Unit
+            HomeSection.COMMUNITY -> loadCommunity()
+            HomeSection.ENTERTAINMENT -> loadEntertainment()
+            HomeSection.ACTIONS -> loadActions()
+            HomeSection.SECURITY -> loadSecurity()
+            HomeSection.SETTINGS -> loadSettings()
+        }
     }
 
     private fun loadProfile() = viewModelScope.launch {
@@ -170,11 +182,11 @@ class GuildHomeViewModel @Inject constructor(
                     ?.let { v -> edit { it.copy(xpStats = v) } }
             },
             async {
-                many("api/Xp/$guildId/leaderboard?page=1&pageSize=5", XpLeader.serializer())
+                many("api/Xp/$guildId/leaderboard?page=1&pageSize=5", XpLeaderboardEntry.serializer())
                     ?.let { v -> edit { it.copy(xpTop = v) } }
             },
             async {
-                one("api/messagecount/$guildId/daily", DailyMessageStats.serializer())
+                one("api/messagecount/$guildId/stats", MessageStatsDetail.serializer())
                     ?.let { v -> edit { it.copy(messages = v) } }
             },
             async {
@@ -182,20 +194,33 @@ class GuildHomeViewModel @Inject constructor(
                     ?.let { v -> edit { it.copy(birthdays = v) } }
             },
             async {
+                many("api/birthday/$guildId/today", BirthdayUser.serializer())
+                    ?.let { v -> edit { it.copy(birthdaysToday = v) } }
+            },
+            async {
+                many("api/birthday/$guildId/upcoming?days=7", BirthdayUser.serializer())
+                    ?.let { v ->
+                        edit { it.copy(birthdaysUpcoming = v.filter { user -> user.daysUntil > 0 }.take(5)) }
+                    }
+            },
+            async {
                 one("api/ticket/$guildId/statistics", TicketStatistics.serializer())
                     ?.let { v -> edit { it.copy(tickets = v) } }
+            },
+            async {
+                count("api/Ticket/$guildId/panels")?.let { v -> edit { it.copy(ticketPanels = v) } }
             },
             async {
                 many("api/Starboard/$guildId/highlights?limit=5", StarboardHighlight.serializer())
                     ?.let { v -> edit { it.copy(highlights = v) } }
             },
             async {
-                count("api/forms/guild/$guildId?activeOnly=true")
-                    ?.let { v -> edit { it.copy(activeForms = v) } }
+                many("api/forms/guild/$guildId?activeOnly=true", FormSummary.serializer())
+                    ?.let { v -> edit { it.copy(forms = v) } }
             },
             async {
-                count("api/Counting/$guildId/channels")
-                    ?.let { v -> edit { it.copy(countingChannels = v) } }
+                many("api/Counting/$guildId/channels", CountingChannel.serializer())
+                    ?.let { v -> edit { it.copy(counting = v) } }
             },
             async {
                 one("api/patreon/oauth/status?guildId=$guildId", PatreonLinkStatus.serializer())
@@ -218,7 +243,8 @@ class GuildHomeViewModel @Inject constructor(
                     ?.let { v -> edit { it.copy(music = v) } }
             },
             async {
-                count("api/Giveaways/$guildId")?.let { v -> edit { it.copy(giveaways = v) } }
+                many("api/Giveaways/guild/$guildId", GiveawayRecord.serializer())
+                    ?.let { v -> edit { it.copy(giveaways = v.filterNot { g -> g.isEnded }) } }
             },
             async {
                 count("api/CustomVoice/$guildId/channels")
@@ -232,12 +258,6 @@ class GuildHomeViewModel @Inject constructor(
             _state.update { it.copy(actions = transform(it.actions)) }
 
         listOf(
-            async {
-                count("api/RoleGreet/$guildId")?.let { v -> edit { it.copy(roleGreets = v) } }
-            },
-            async {
-                count("api/RoleStates/$guildId/all")?.let { v -> edit { it.copy(roleStates = v) } }
-            },
             async {
                 count("api/MultiGreet/$guildId")?.let { v -> edit { it.copy(multiGreets = v) } }
             },
@@ -254,14 +274,11 @@ class GuildHomeViewModel @Inject constructor(
         listOf(
             async {
                 one("api/Administration/$guildId/protection/status", ProtectionFlags.serializer())
-                    ?.let { v -> edit { it.copy(activeProtections = v.activeCount) } }
+                    ?.let { v -> edit { it.copy(protection = v) } }
             },
             async {
-                many("api/Moderation/$guildId/recent?limit=10", RecentModerationAction.serializer())
-                    ?.let { v -> edit { it.copy(recentActions = v) } }
-            },
-            async {
-                count("api/Moderation/$guildId/warnings")?.let { v -> edit { it.copy(warnings = v) } }
+                many("api/Moderation/$guildId/warnings", RecentModerationAction.serializer())
+                    ?.let { v -> edit { it.copy(warnings = v) } }
             },
         ).awaitAll()
     }
@@ -284,9 +301,6 @@ class GuildHomeViewModel @Inject constructor(
             },
             async {
                 selfAssignableCount()?.let { v -> edit { it.copy(selfAssignable = v) } }
-            },
-            async {
-                count("api/Ticket/$guildId/panels")?.let { v -> edit { it.copy(ticketPanels = v) } }
             },
         ).awaitAll()
     }
@@ -313,7 +327,7 @@ class GuildHomeViewModel @Inject constructor(
     }.getOrNull()
 }
 
-/** The protection status payload, reduced to how many modules are switched on. */
+/** The protection status payload, reduced to which modules are switched on. */
 @Serializable
 data class ProtectionFlags(
     val antiRaid: Toggle = Toggle(),

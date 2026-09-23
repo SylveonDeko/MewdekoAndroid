@@ -1,65 +1,69 @@
 package dev.mewdeko.mobile.feature.guilddetail
 
-import androidx.compose.foundation.background
-import androidx.compose.foundation.border
-import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.animation.core.spring
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBars
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListScope
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.Login
-import androidx.compose.material.icons.automirrored.filled.Logout
 import androidx.compose.material.icons.filled.Apps
-import androidx.compose.material.icons.filled.CalendarMonth
-import androidx.compose.material.icons.filled.Groups
-import androidx.compose.material.icons.filled.Shield
-import androidx.compose.material.icons.filled.SmartToy
-import androidx.compose.material.icons.filled.Star
-import androidx.compose.material.icons.filled.Timeline
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.semantics.CustomAccessibilityAction
+import androidx.compose.ui.semantics.customActions
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import coil.compose.AsyncImage
 import dev.mewdeko.mobile.core.theme.MewdekoTheme
-import dev.mewdeko.mobile.core.ui.Avatar
+import dev.mewdeko.mobile.core.ui.ErrorState
 import dev.mewdeko.mobile.core.ui.FeatureScaffold
-import dev.mewdeko.mobile.core.ui.SectionCard
-import dev.mewdeko.mobile.core.ui.SectionCardHeader
-import dev.mewdeko.mobile.core.ui.StatTile
-import dev.mewdeko.mobile.core.ui.clickableRow
-import dev.mewdeko.mobile.feature.guilddetail.home.BotGuildProfile
+import dev.mewdeko.mobile.core.ui.ImmersiveBar
+import dev.mewdeko.mobile.core.ui.ImmersiveIconButton
+import dev.mewdeko.mobile.feature.guilddetail.home.AutomationBand
+import dev.mewdeko.mobile.feature.guilddetail.home.BotCard
+import dev.mewdeko.mobile.feature.guilddetail.home.CommunityBand
+import dev.mewdeko.mobile.feature.guilddetail.home.EnteredKeys
+import dev.mewdeko.mobile.feature.guilddetail.home.EntertainmentBand
+import dev.mewdeko.mobile.feature.guilddetail.home.GuildHero
 import dev.mewdeko.mobile.feature.guilddetail.home.GuildHomeViewModel
-import dev.mewdeko.mobile.feature.guilddetail.home.HomeSections
+import dev.mewdeko.mobile.feature.guilddetail.home.HeroMetrics
+import dev.mewdeko.mobile.feature.guilddetail.home.HomeDimens
+import dev.mewdeko.mobile.feature.guilddetail.home.HomeSection
+import dev.mewdeko.mobile.feature.guilddetail.home.HomeSeries
+import dev.mewdeko.mobile.feature.guilddetail.home.MemberFlowCard
+import dev.mewdeko.mobile.feature.guilddetail.home.NowPlayingCard
+import dev.mewdeko.mobile.feature.guilddetail.home.PulseGrid
+import dev.mewdeko.mobile.feature.guilddetail.home.SafetyBand
+import dev.mewdeko.mobile.feature.guilddetail.home.SetupRail
+import dev.mewdeko.mobile.feature.guilddetail.home.ShortcutStrip
+import dev.mewdeko.mobile.feature.guilddetail.home.hasContent
+import dev.mewdeko.mobile.feature.guilddetail.home.rememberHomeRoles
+import dev.mewdeko.mobile.feature.guilddetail.home.rememberReducedMotion
+import dev.mewdeko.mobile.feature.guilddetail.home.riseOnce
+import dev.mewdeko.mobile.feature.guilddetail.home.setupEntries
 import dev.mewdeko.mobile.navigation.GuildRouteArgs
-import java.time.ZoneId
-import java.time.format.DateTimeFormatter
-
-private val DateFormat: DateTimeFormatter =
-    DateTimeFormatter.ofPattern("d MMM yyyy").withZone(ZoneId.systemDefault())
 
 /**
- * The guild dashboard.
+ * The guild home, a single scrolling "Pulse" dashboard.
  *
  * Re-themes the whole subtree with the guild's derived palette, so every
  * Material component below picks up the server's identity automatically.
+ * The hero draws edge to edge under a pinned, transparent top app bar that
+ * fills and takes over the title once the guild name scrolls beneath it.
  */
 @Composable
 fun GuildDetailScreen(
@@ -77,278 +81,249 @@ fun GuildDetailScreen(
     val palette by viewModel.palette.collectAsStateWithLifecycle()
 
     MewdekoTheme(palette = palette) {
+        val listState = rememberLazyListState()
+        val heroMetrics = remember { HeroMetrics() }
+        val entered = remember { EnteredKeys() }
+        val density = LocalDensity.current
+        val barPx = WindowInsets.statusBars.getTop(density) + with(density) { 64.dp.toPx() }
+        val fadePx = with(density) { 48.dp.toPx() }
+        val titleSpanPx = with(density) { 24.dp.toPx() }
+        val immersive = remember(barPx, fadePx, titleSpanPx) {
+            ImmersiveBar(
+                containerFraction = {
+                    if (listState.firstVisibleItemIndex > 0) {
+                        1f
+                    } else {
+                        val start = heroMetrics.bannerBottomPx - barPx - fadePx
+                        ((listState.firstVisibleItemScrollOffset - start) / fadePx).coerceIn(0f, 1f)
+                    }
+                },
+                titleFraction = {
+                    if (listState.firstVisibleItemIndex > 0) {
+                        1f
+                    } else {
+                        val start = heroMetrics.nameBottomPx - barPx
+                        ((listState.firstVisibleItemScrollOffset - start) / titleSpanPx).coerceIn(0f, 1f)
+                    }
+                },
+            )
+        }
+        val scrollOffset = remember(listState) {
+            { if (listState.firstVisibleItemIndex == 0) listState.firstVisibleItemScrollOffset else 0 }
+        }
+        val roles = rememberHomeRoles()
+        val reduced = rememberReducedMotion()
+        val flow = remember(state.joinStats, state.leaveStats) {
+            HomeSeries.flow(state.joinStats, state.leaveStats)
+        }
+        val setup = remember(state, homeState) { setupEntries(state, homeState) }
+        val onRefresh: () -> Unit = {
+            viewModel.load(refreshing = true)
+            homeViewModel.refresh()
+        }
+        val isOwner = state.info?.ownerId?.let { it.isNotEmpty() && it == userId } == true
+        val loaded = homeState.loaded
+        val music = homeState.entertainment.music
+
         FeatureScaffold(
             title = guild.name.ifEmpty { state.info?.name.orEmpty() },
-            subtitle = state.info?.let { "${it.memberCount} members" },
+            subtitle = (state.memberStats?.total ?: state.info?.memberCount)?.let { "${it.formatted()} members" },
             onBack = onBack,
             loadState = loadState,
-            onRefresh = {
-                viewModel.load(refreshing = true)
-                homeViewModel.invalidate()
-            },
+            onRefresh = onRefresh,
             onRetry = { viewModel.load() },
             actions = {
-                IconButton(onClick = onOpenFeatureBrowser) {
-                    Icon(Icons.Default.Apps, contentDescription = "All features")
-                }
-            },
-        ) {
-            GuildHeader(guild = guild, state = state)
-
-            SectionCard {
-                SectionCardHeader("Members", Icons.Default.Groups)
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    StatTile(
-                        label = "Total",
-                        value = state.memberStats?.total?.formatted() ?: "-",
-                        modifier = Modifier.weight(1f),
-                    )
-                    StatTile(
-                        label = "Humans",
-                        value = state.memberStats?.humans?.formatted() ?: "-",
-                        modifier = Modifier.weight(1f),
-                    )
-                    StatTile(
-                        label = "Bots",
-                        value = state.memberStats?.bots?.formatted() ?: "-",
-                        modifier = Modifier.weight(1f),
-                    )
-                }
-            }
-
-            SectionCard {
-                SectionCardHeader("Roles", Icons.Default.Shield)
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    StatTile(
-                        label = "Roles",
-                        value = state.roleStats?.totalRoles?.formatted() ?: "-",
-                        modifier = Modifier.weight(1f),
-                    )
-                    StatTile(
-                        label = "Saved states",
-                        value = state.roleStats?.roleStates?.formatted() ?: "-",
-                        modifier = Modifier.weight(1f),
-                    )
-                    StatTile(
-                        label = "Role greets",
-                        value = state.roleStats?.roleGreets?.formatted() ?: "-",
-                        modifier = Modifier.weight(1f),
-                    )
-                }
-            }
-
-            SectionCard {
-                SectionCardHeader("Membership flow", Icons.Default.Timeline)
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    StatTile(
-                        label = "Joins (30d)",
-                        value = state.joinStats?.summary?.total?.formatted() ?: "-",
-                        icon = Icons.AutoMirrored.Filled.Login,
-                        tint = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.weight(1f),
-                    )
-                    StatTile(
-                        label = "Leaves (30d)",
-                        value = state.leaveStats?.summary?.total?.formatted() ?: "-",
-                        icon = Icons.AutoMirrored.Filled.Logout,
-                        tint = MaterialTheme.colorScheme.error,
-                        modifier = Modifier.weight(1f),
-                    )
-                }
-                val joins = state.joinStats?.dailyStats.orEmpty()
-                val leaves = state.leaveStats?.dailyStats.orEmpty()
-                if (joins.isNotEmpty() || leaves.isNotEmpty()) {
-                    JoinLeaveChart(
-                        joins = joins,
-                        leaves = leaves,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(180.dp),
-                    )
-                }
-            }
-
-            state.bot?.let { bot ->
-                SectionCard {
-                    SectionCardHeader("Bot", Icons.Default.SmartToy)
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        StatTile("Latency", "${bot.botLatency} ms", Modifier.weight(1f))
-                        StatTile("Commands", bot.commandsCount.formatted(), Modifier.weight(1f))
-                        StatTile("Modules", bot.modulesCount.formatted(), Modifier.weight(1f))
-                    }
-                    Text(
-                        text = "${bot.botName} ${bot.botVersion} on Discord.Net ${bot.dNetVersion}",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-            }
-
-            homeState.profile?.let { profile ->
-                BotProfileCard(profile)
-            }
-
-            HomeSections(
-                state = homeState,
-                onEnsureLoaded = homeViewModel::ensureLoaded,
-                onOpenFeature = onOpenFeature,
-            )
-        }
-    }
-}
-
-/** The bot's identity inside this guild, as the dashboard leads its overview. */
-@Composable
-private fun BotProfileCard(profile: BotGuildProfile) {
-    val hasAnything = listOfNotNull(
-        profile.nickname?.takeIf { it.isNotBlank() },
-        profile.bio?.takeIf { it.isNotBlank() },
-        profile.avatarUrl?.takeIf { it.isNotBlank() },
-    ).isNotEmpty()
-    if (!hasAnything) return
-
-    SectionCard {
-        SectionCardHeader("Bot profile", Icons.Default.SmartToy)
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            Avatar(
-                url = profile.avatarUrl,
-                contentDescription = null,
-                size = 44,
-                fallbackIcon = Icons.Default.SmartToy,
-            )
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    profile.nickname?.takeIf { it.isNotBlank() } ?: "No nickname set",
-                    style = MaterialTheme.typography.titleSmall,
+                ImmersiveIconButton(
+                    onClick = onOpenFeatureBrowser,
+                    icon = Icons.Default.Apps,
+                    contentDescription = "All features",
+                    fraction = immersive.containerFraction,
                 )
-                profile.bio?.takeIf { it.isNotBlank() }?.let {
-                    Text(
-                        it,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 3,
-                        overflow = TextOverflow.Ellipsis,
+            },
+            scrollable = false,
+            immersive = immersive,
+        ) {
+            LazyColumn(
+                state = listState,
+                modifier = Modifier
+                    .fillMaxSize()
+                    .semantics {
+                        customActions = listOf(
+                            CustomAccessibilityAction("Refresh") {
+                                onRefresh()
+                                true
+                            },
+                        )
+                    },
+                contentPadding = PaddingValues(bottom = 32.dp),
+            ) {
+                item(key = "hero", contentType = "hero") {
+                    GuildHero(
+                        guild = guild,
+                        info = state.info,
+                        memberStats = state.memberStats,
+                        flow = flow,
+                        bot = state.bot,
+                        profile = homeState.profile,
+                        isOwner = isOwner,
+                        metrics = heroMetrics,
+                        scrollOffset = scrollOffset,
+                        reduced = reduced,
+                        roles = roles,
                     )
+                }
+
+                if (loadState.showsError) {
+                    homeItem("error", entered, reduced, topGap = 16.dp) {
+                        ErrorState(loadState.error.orEmpty(), onRetry = { viewModel.load() })
+                    }
+                }
+
+                homeItem("shortcuts", entered, reduced, topGap = 20.dp) {
+                    ShortcutStrip(onOpenFeature = onOpenFeature, reduced = reduced)
+                }
+
+                if (music?.currentTrack != null) {
+                    homeItem("nowPlaying", entered, reduced) {
+                        NowPlayingCard(music = music, reduced = reduced, onOpen = { onOpenFeature("music") })
+                    }
+                }
+
+                homeItem("pulse", entered, reduced) {
+                    PulseGrid(
+                        info = state.info,
+                        memberStats = state.memberStats,
+                        roleStats = state.roleStats,
+                        flow = flow,
+                        community = homeState.community,
+                        communityLoaded = HomeSection.COMMUNITY in loaded,
+                        security = homeState.security,
+                        securityLoaded = HomeSection.SECURITY in loaded,
+                        roles = roles,
+                        reduced = reduced,
+                        entered = entered,
+                        onOpenFeature = onOpenFeature,
+                    )
+                }
+
+                homeItem("flow", entered, reduced) {
+                    MemberFlowCard(
+                        joinStats = state.joinStats,
+                        leaveStats = state.leaveStats,
+                        flow = flow,
+                        loading = !loadState.hasLoaded && state.joinStats == null && state.leaveStats == null,
+                        roles = roles,
+                        reduced = reduced,
+                        onOpenDetails = { onOpenFeature("serverstats") },
+                    )
+                }
+
+                homeItem("band-community", entered, reduced, inset = false) {
+                    CommunityBand(
+                        overview = state,
+                        community = homeState.community,
+                        loaded = HomeSection.COMMUNITY in loaded,
+                        roles = roles,
+                        reduced = reduced,
+                        onOpenFeature = onOpenFeature,
+                    )
+                }
+
+                val entertainmentLoaded = HomeSection.ENTERTAINMENT in loaded
+                if (!entertainmentLoaded || homeState.entertainment.hasContent()) {
+                    homeItem("band-entertainment", entered, reduced, inset = false) {
+                        EntertainmentBand(
+                            data = homeState.entertainment,
+                            loaded = entertainmentLoaded,
+                            roles = roles,
+                            onOpenFeature = onOpenFeature,
+                        )
+                    }
+                }
+
+                homeItem("band-automation", entered, reduced, inset = false) {
+                    AutomationBand(
+                        overview = state,
+                        actions = homeState.actions,
+                        settings = homeState.settings,
+                        actionsLoaded = HomeSection.ACTIONS in loaded,
+                        settingsLoaded = HomeSection.SETTINGS in loaded,
+                        roles = roles,
+                        onEnsureLoaded = homeViewModel::ensureLoaded,
+                        onOpenFeature = onOpenFeature,
+                    )
+                }
+
+                homeItem("band-safety", entered, reduced, inset = false) {
+                    SafetyBand(
+                        security = homeState.security,
+                        loaded = HomeSection.SECURITY in loaded,
+                        roles = roles,
+                        reduced = reduced,
+                        onOpenFeature = onOpenFeature,
+                    )
+                }
+
+                if (setup.isNotEmpty()) {
+                    homeItem("setup", entered, reduced, inset = false) {
+                        SetupRail(entries = setup, onOpenFeature = onOpenFeature)
+                    }
+                }
+
+                if (state.bot != null || homeState.profile != null || !loadState.hasLoaded) {
+                    homeItem("bot", entered, reduced) {
+                        BotCard(
+                            bot = state.bot,
+                            profile = homeState.profile,
+                            lastUpdated = state.lastUpdated,
+                            loading = !loadState.hasLoaded && state.bot == null,
+                        )
+                    }
                 }
             }
         }
     }
 }
 
-@Composable
-private fun GuildHeader(guild: GuildRouteArgs, state: GuildOverviewState) {
-    val bannerUrl = state.info?.bannerUrl?.takeIf { it.isNotBlank() }
-    val shape = MaterialTheme.shapes.large
-
-    /*
-     * With a banner the text sits on artwork and needs a scrim to stay
-     * readable. Without one the dashboard uses a low-alpha wash of the guild
-     * colour rather than a saturated fill, so ordinary theme text colours
-     * apply and contrast does not depend on whichever hues the icon produced.
-     */
-    val onBanner = bannerUrl != null
-    val titleColor = if (onBanner) Color.White else MaterialTheme.colorScheme.onSurface
-    val detailColor = if (onBanner) {
-        Color.White.copy(alpha = 0.85f)
-    } else {
-        MaterialTheme.colorScheme.onSurfaceVariant
-    }
-
-    Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(shape)
-            .then(
-                if (onBanner) {
-                    Modifier
-                } else {
-                    Modifier
-                        .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.08f))
-                        .border(
-                            width = 1.dp,
-                            color = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f),
-                            shape = shape,
-                        )
-                }
-            ),
-    ) {
-        if (bannerUrl != null) {
-            AsyncImage(
-                model = bannerUrl,
-                contentDescription = null,
-                contentScale = ContentScale.Crop,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(140.dp),
-            )
+/**
+ * Adds one top-level home block.
+ *
+ * Spacing is explicit per item rather than a list arrangement so the hero can
+ * sit flush. Each block is capped at 840dp and centred on wide screens, rises
+ * in once, and fades when it appears or disappears. With [inset] false the
+ * block handles its own horizontal padding, so rails can run edge to edge.
+ */
+private fun LazyListScope.homeItem(
+    key: String,
+    entered: EnteredKeys,
+    reduced: Boolean,
+    contentType: String = key,
+    topGap: Dp = HomeDimens.sectionGap,
+    inset: Boolean = true,
+    content: @Composable () -> Unit,
+) {
+    item(key = key, contentType = contentType) {
+        Box(
+            modifier = Modifier
+                .animateItem(
+                    fadeInSpec = spring(stiffness = 1600f),
+                    placementSpec = if (reduced) null else spring<IntOffset>(dampingRatio = 0.9f, stiffness = 700f),
+                    fadeOutSpec = spring(stiffness = 1600f),
+                )
+                .fillMaxWidth()
+                .padding(top = topGap),
+            contentAlignment = Alignment.TopCenter,
+        ) {
             Box(
                 modifier = Modifier
-                    .matchParentSize()
-                    .background(
-                        Brush.verticalGradient(
-                            listOf(Color.Transparent, Color.Black.copy(alpha = 0.65f)),
-                        )
-                    ),
-            )
-        }
-
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(16.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            Avatar(
-                url = guild.iconUrl ?: state.info?.iconUrl,
-                contentDescription = guild.name,
-                size = 56,
-                fallbackIcon = Icons.Default.Shield,
-            )
-            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                Text(
-                    text = guild.name.ifEmpty { state.info?.name.orEmpty() },
-                    style = MaterialTheme.typography.titleLarge,
-                    color = titleColor,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                state.info?.createdAt?.let { created ->
-                    HeaderDetail(
-                        icon = Icons.Default.CalendarMonth,
-                        text = "Created ${DateFormat.format(created)}",
-                        color = detailColor,
-                    )
-                }
-                state.info?.premiumTier?.takeIf { it > 0 }?.let { tier ->
-                    HeaderDetail(
-                        icon = Icons.Default.Star,
-                        text = "Boost tier $tier",
-                        color = detailColor,
-                    )
-                }
+                    .widthIn(max = 840.dp)
+                    .fillMaxWidth()
+                    .riseOnce(key, entered)
+                    .then(if (inset) Modifier.padding(horizontal = HomeDimens.inset) else Modifier),
+            ) {
+                content()
             }
         }
-    }
-}
-
-@Composable
-private fun HeaderDetail(icon: ImageVector, text: String, color: Color) {
-    Row(
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(6.dp),
-    ) {
-        Icon(
-            icon,
-            contentDescription = null,
-            tint = color,
-            modifier = Modifier.size(14.dp),
-        )
-        Text(text = text, style = MaterialTheme.typography.bodySmall, color = color)
     }
 }
 

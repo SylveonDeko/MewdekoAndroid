@@ -105,6 +105,29 @@ data class GuildPalette(
         }
     }
 
+    /**
+     * Builds a Material-style tone role for a palette slot, using the same
+     * lightness math as the secondary role so contrast holds by construction.
+     */
+    fun toneRole(rgb: Rgb, dark: Boolean): ToneRole {
+        val s = if (dark) rgb.adjustedForDarkUi() else rgb.adjustedForLightUi()
+        return if (dark) {
+            ToneRole(
+                color = s.atLightness(0.7).color,
+                onColor = s.toned(0.5, 0.14).color,
+                container = s.toned(0.4, 0.24).color,
+                onContainer = s.atLightness(0.9).color,
+            )
+        } else {
+            ToneRole(
+                color = s.atLightness(0.42).color,
+                onColor = Color.White,
+                container = s.toned(0.4, 0.9).color,
+                onContainer = s.atLightness(0.18).color,
+            )
+        }
+    }
+
     companion object {
         /** The default palette used before any guild icon has been processed. */
         val Default = GuildPalette(

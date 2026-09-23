@@ -1,12 +1,13 @@
 package dev.mewdeko.mobile.feature.guilddetail
 
+import androidx.compose.runtime.Immutable
 import androidx.lifecycle.SavedStateHandle
-import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dev.mewdeko.mobile.core.auth.SessionHolder
 import dev.mewdeko.mobile.core.model.BotStatus
 import dev.mewdeko.mobile.core.model.GraphStats
 import dev.mewdeko.mobile.core.model.GuildInfo
+import dev.mewdeko.mobile.core.model.GuildRole
 import dev.mewdeko.mobile.core.model.RoleGreet
 import dev.mewdeko.mobile.core.net.ApiClient
 import dev.mewdeko.mobile.core.net.Endpoint
@@ -21,9 +22,12 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.booleanOrNull
+import java.time.Instant
 import javax.inject.Inject
 
 /** Aggregate member metrics rendered on the guild overview. */
@@ -41,15 +45,26 @@ data class GuildRoleStats(
     val roleGreets: Int = 0,
 )
 
+/** A member's display identity, kept so ranked lists can show names instead of ids. */
+@Immutable
+data class MemberSummary(val name: String, val avatarUrl: String?)
+
 /** Guild overview screen state. Each panel publishes independently. */
 data class GuildOverviewState(
     val info: GuildInfo? = null,
     val bot: BotStatus? = null,
     val memberStats: GuildMemberStats? = null,
+    val memberDirectory: Map<String, MemberSummary> = emptyMap(),
     val roleStats: GuildRoleStats? = null,
+    val roleNames: Map<String, String> = emptyMap(),
+    val roleGreets: List<RoleGreet>? = null,
     val joinStats: GraphStats? = null,
     val leaveStats: GraphStats? = null,
+    val lastUpdated: Instant? = null,
 )
+
+/** The largest guild whose member directory is kept in memory. */
+private const val MemberDirectoryLimit = 25_000
 
 /**
  * Loads every overview panel concurrently and publishes each as it resolves,
@@ -89,6 +104,7 @@ class GuildOverviewViewModel @Inject constructor(
                 async { loadJoinLeave() },
             ).awaitAll()
         }
+        _state.update { it.copy(lastUpdated = Instant.now()) }
     }
 
     private suspend fun loadInfo() = runCatching {
@@ -100,26 +116,55 @@ class GuildOverviewViewModel @Inject constructor(
     }.getOrNull()?.let { bot -> _state.update { it.copy(bot = bot) } }
 
     /**
-     * Counts humans and bots without decoding the member list, which can run
-     * to several megabytes on a large guild.
+     * Counts humans and bots without decoding the member list into models,
+     * which can run to several megabytes on a large guild.
+     *
+     * The same pass keeps a name and avatar per member so ranked lists can
+     * resolve ids, but only up to [MemberDirectoryLimit] members; above that
+     * the directory stays empty.
      */
     private suspend fun loadMembers() {
-        val stats = runCatching {
+        val result = runCatching {
             val array = api.sendRaw(Endpoint("api/ClientOperations/members/$guildId")) as? JsonArray
-                ?: return@runCatching GuildMemberStats()
-            val bots = array.count { element ->
-                val obj = element as? JsonObject ?: return@count false
-                val flag = obj["isBot"] ?: obj["IsBot"]
-                (flag as? JsonPrimitive)?.booleanOrNull == true
+                ?: return@runCatching GuildMemberStats() to emptyMap<String, MemberSummary>()
+            val keepDirectory = array.size <= MemberDirectoryLimit
+            val directory = HashMap<String, MemberSummary>(if (keepDirectory) array.size else 0)
+            var bots = 0
+            array.forEach { element ->
+                val obj = element as? JsonObject ?: return@forEach
+                if ((obj.field("isBot") as? JsonPrimitive)?.booleanOrNull == true) bots++
+                if (keepDirectory) {
+                    val id = obj.text("id") ?: return@forEach
+                    val name = obj.text("displayName")?.takeIf { it.isNotBlank() }
+                        ?: obj.text("username").orEmpty()
+                    directory[id] = MemberSummary(name = name, avatarUrl = obj.text("avatarUrl"))
+                }
             }
-            GuildMemberStats(total = array.size, humans = array.size - bots, bots = bots)
+            GuildMemberStats(total = array.size, humans = array.size - bots, bots = bots) to
+                directory.toMap()
         }.getOrNull() ?: return
-        _state.update { it.copy(memberStats = stats) }
+        _state.update { it.copy(memberStats = result.first, memberDirectory = result.second) }
+    }
+
+    /** Reads [name] in either camelCase or PascalCase, since raw payloads are not normalized. */
+    private fun JsonObject.field(name: String): JsonElement? =
+        this[name] ?: this[name.replaceFirstChar { it.uppercaseChar() }]
+
+    /** Reads [name] as text, treating JSON null as absent. */
+    private fun JsonObject.text(name: String): String? {
+        val primitive = field(name) as? JsonPrimitive ?: return null
+        if (primitive is JsonNull) return null
+        return primitive.content
     }
 
     private suspend fun loadRoles() = coroutineScope {
         val rolesDeferred = async {
-            runCatching { api.sendArrayCount("api/ClientOperations/roles/$guildId") }.getOrNull()
+            runCatching {
+                api.send(
+                    Endpoint("api/ClientOperations/roles/$guildId"),
+                    ListSerializer(GuildRole.serializer()),
+                )
+            }.getOrNull()
         }
         val statesDeferred = async {
             runCatching {
@@ -141,13 +186,21 @@ class GuildOverviewViewModel @Inject constructor(
         }
 
         val states = statesDeferred.await()
+        val roles = rolesDeferred.await()
+        val greets = greetsDeferred.await()
         val stats = GuildRoleStats(
-            totalRoles = rolesDeferred.await() ?: 0,
+            totalRoles = roles?.size ?: 0,
             roleStates = states?.first ?: 0,
             savedRoles = states?.second ?: 0,
-            roleGreets = greetsDeferred.await().orEmpty().count { it.disabled != true },
+            roleGreets = greets.orEmpty().count { it.disabled != true },
         )
-        _state.update { it.copy(roleStats = stats) }
+        _state.update { current ->
+            current.copy(
+                roleStats = stats,
+                roleNames = roles?.associate { it.id to it.name } ?: current.roleNames,
+                roleGreets = greets ?: current.roleGreets,
+            )
+        }
     }
 
     private suspend fun loadJoinLeave() = coroutineScope {

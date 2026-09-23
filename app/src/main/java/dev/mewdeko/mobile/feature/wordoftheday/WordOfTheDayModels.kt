@@ -51,6 +51,22 @@ enum class ScheduleRuleType(val value: Int) {
     MONTH(1);
 }
 
+/** How long an idle discussion thread stays open before Discord archives it. */
+enum class ThreadAutoArchive(val minutes: Int, val label: String) {
+    HOUR(60, "1 hour"),
+    DAY(1440, "1 day"),
+    THREE_DAYS(4320, "3 days"),
+    WEEK(10080, "1 week");
+
+    companion object {
+        /** Resolves a stored value, defaulting to one day. */
+        fun from(minutes: Int): ThreadAutoArchive = entries.firstOrNull { it.minutes == minutes } ?: DAY
+    }
+}
+
+/** Thread name used when a guild has not set an override. */
+const val DefaultThreadName = "Word of the day: %wotd.word%"
+
 /** Word of the Day configuration returned by `GET /wordoftheday/{guildId}/config`. */
 @Serializable
 data class WordOfTheDayConfig(
@@ -66,6 +82,9 @@ data class WordOfTheDayConfig(
     val sourceMode: Int = 0,
     @Serializable(with = InstantSerializer::class) val lastPostedDate: Instant? = null,
     val customWordCount: Int = 0,
+    val createThread: Boolean = false,
+    val threadName: String? = null,
+    val threadAutoArchiveMinutes: Int = ThreadAutoArchive.DAY.minutes,
 )
 
 /** One word in the guild's custom pool. */

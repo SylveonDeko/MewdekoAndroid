@@ -40,6 +40,9 @@ data class WordOfTheDayState(
     val partOfSpeech: Int = 0,
     val difficulty: Int = 0,
     val sourceMode: Int = 0,
+    val createThread: Boolean = false,
+    val threadName: String = "",
+    val threadAutoArchiveMinutes: Int = ThreadAutoArchive.DAY.minutes,
     val lastPosted: String = "Never",
     val availableChannels: List<TextChannelLite> = emptyList(),
     val availableRoles: List<GuildRole> = emptyList(),
@@ -114,6 +117,9 @@ class WordOfTheDayViewModel @Inject constructor(
                     partOfSpeech = cfg?.partOfSpeech ?: 0,
                     difficulty = cfg?.difficulty ?: 0,
                     sourceMode = cfg?.sourceMode ?: 0,
+                    createThread = cfg?.createThread ?: false,
+                    threadName = cfg?.threadName.orEmpty(),
+                    threadAutoArchiveMinutes = cfg?.threadAutoArchiveMinutes ?: ThreadAutoArchive.DAY.minutes,
                     lastPosted = cfg?.lastPostedDate?.let { d -> d.toString().take(10) } ?: "Never",
                     availableChannels = channels.await().sortedBy { channel -> channel.name.lowercase() },
                     availableRoles = roles.await()
@@ -162,6 +168,15 @@ class WordOfTheDayViewModel @Inject constructor(
     /** Sets the word source. */
     fun setSourceMode(value: Int) = edit { it.copy(sourceMode = value) }
 
+    /** Turns the discussion thread created under each post on or off. */
+    fun setCreateThread(value: Boolean) = edit { it.copy(createThread = value) }
+
+    /** Sets the discussion thread name template. Empty falls back to the default on save. */
+    fun setThreadName(value: String) = edit { it.copy(threadName = value) }
+
+    /** Sets how long the discussion thread stays open before Discord archives it. */
+    fun setThreadAutoArchiveMinutes(value: Int) = edit { it.copy(threadAutoArchiveMinutes = value) }
+
     /** Updates the pending word in the add form. */
     fun setNewWord(value: String) = _state.update { it.copy(newWord = value) }
 
@@ -184,6 +199,9 @@ class WordOfTheDayViewModel @Inject constructor(
             put("partOfSpeech", JsonPrimitive(current.partOfSpeech))
             put("difficulty", JsonPrimitive(current.difficulty))
             put("sourceMode", JsonPrimitive(current.sourceMode))
+            put("createThread", JsonPrimitive(current.createThread))
+            put("threadName", JsonPrimitive(current.threadName.trim()))
+            put("threadAutoArchiveMinutes", JsonPrimitive(current.threadAutoArchiveMinutes))
         }
         val ok = runCatching {
             api.sendIgnoringBody(

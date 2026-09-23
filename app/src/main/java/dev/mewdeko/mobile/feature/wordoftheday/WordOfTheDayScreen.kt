@@ -10,6 +10,7 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.ChatBubble
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Forum
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.MenuBook
@@ -76,6 +77,7 @@ private val PosOptions = WordPartOfSpeech.entries.map { SelectorOption(it.value.
 private val DifficultyOptions = WordDifficulty.entries.map { SelectorOption(it.value.toString(), it.label) }
 private val RulePosOptions = listOf(SelectorOption("0", "Inherit")) + PosOptions.drop(1)
 private val RuleDifficultyOptions = listOf(SelectorOption("0", "Inherit")) + DifficultyOptions.drop(1)
+private val ArchiveOptions = ThreadAutoArchive.entries.map { SelectorOption(it.minutes.toString(), it.label) }
 
 /** Daily vocabulary word: posting schedule, dictionary filters, weekday and month rules, custom words, and history. */
 @Composable
@@ -284,6 +286,34 @@ private fun SettingsSection(state: WordOfTheDayState, viewModel: WordOfTheDayVie
     }
 
     SectionCard {
+        SectionCardHeader("Discussion thread", Icons.Default.Forum)
+        SwitchRow(
+            title = "Create a thread with each post",
+            subtitle = "Opens a public thread under the daily post so people can use the word in a sentence",
+            checked = state.createThread,
+            onCheckedChange = viewModel::setCreateThread,
+        )
+        MewdekoTextField(
+            value = state.threadName,
+            onValueChange = viewModel::setThreadName,
+            label = "Thread name",
+            placeholder = DefaultThreadName,
+            enabled = state.createThread,
+            supportingText = "Placeholders: %wotd.word%, %wotd.date%, %wotd.pos%, plus server placeholders. " +
+                "Leave empty for \"$DefaultThreadName\".",
+        )
+        DiscordSelectorSingle(
+            kind = SelectorKind.Custom(Icons.Default.Schedule),
+            options = ArchiveOptions,
+            placeholder = ThreadAutoArchive.DAY.label,
+            label = "Auto-archive after",
+            selectedId = state.threadAutoArchiveMinutes.toString(),
+            onSelect = { viewModel.setThreadAutoArchiveMinutes(it?.toIntOrNull() ?: ThreadAutoArchive.DAY.minutes) },
+            enabled = state.createThread,
+        )
+    }
+
+    SectionCard {
         SectionCardHeader("Current configuration", Icons.Default.Info)
         InfoRow(
             label = "Status",
@@ -301,6 +331,18 @@ private fun SettingsSection(state: WordOfTheDayState, viewModel: WordOfTheDayVie
             value = state.availableRoles.firstOrNull { it.id == state.pingRoleId }?.name ?: "None",
         )
         InfoRow("Source", WordSourceMode.from(state.sourceMode).label)
+        InfoRow(
+            label = "Discussion thread",
+            value = if (state.createThread) {
+                "On, archives after ${ThreadAutoArchive.from(state.threadAutoArchiveMinutes).label.lowercase()}"
+            } else {
+                "Off"
+            },
+        )
+        InfoRow(
+            label = "Thread name",
+            value = state.threadName.trim().ifEmpty { DefaultThreadName },
+        )
         InfoRow("Custom words", state.words.size.toString())
         InfoRow("Schedule rules", (state.dayDrafts + state.monthDrafts).count { it.exists }.toString())
         InfoRow("Last posted", state.lastPosted)
