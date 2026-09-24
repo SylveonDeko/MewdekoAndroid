@@ -153,7 +153,7 @@ dependencies {
     implementation(libs.androidx.browser)
 
     implementation(libs.hilt.android)
-    implementation(libs.hilt.navigation.compose)
+    implementation(libs.hilt.lifecycle.viewmodel.compose)
     ksp(libs.hilt.compiler)
 
     implementation(libs.ktor.client.core)

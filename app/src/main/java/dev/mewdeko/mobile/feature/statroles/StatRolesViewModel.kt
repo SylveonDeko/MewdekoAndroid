@@ -30,7 +30,10 @@ import javax.inject.Inject
 
 /** Stat Roles screen state. */
 data class StatRolesState(
-    val section: String = "roles",
+    /** True while the create or edit form is open over the list. */
+    val editorOpen: Boolean = false,
+    /** Why the last save attempt failed, shown inside the open editor. */
+    val saveError: String? = null,
     val roles: List<StatRole> = emptyList(),
     val guildRoles: List<GuildRole> = emptyList(),
     val textChannels: List<TextChannelLite> = emptyList(),
@@ -106,17 +109,16 @@ class StatRolesViewModel @Inject constructor(
         }
     }
 
-    /** Switches between the list and the editor. */
-    fun setSection(id: String) = _state.update { it.copy(section = id) }
-
     /** Opens the editor on a blank stat role with the dashboard's defaults. */
-    fun startNew() = _state.update { it.copy(draft = StatRoleDraft(), section = "editor") }
+    fun startNew() = _state.update { it.copy(draft = StatRoleDraft(), editorOpen = true, saveError = null) }
 
     /** Opens the editor on an existing stat role. */
-    fun edit(role: StatRole) = _state.update { it.copy(draft = StatRoleDraft.from(role), section = "editor") }
+    fun edit(role: StatRole) = _state.update {
+        it.copy(draft = StatRoleDraft.from(role), editorOpen = true, saveError = null)
+    }
 
-    /** Discards the draft and returns to the list. */
-    fun cancelEdit() = _state.update { it.copy(draft = StatRoleDraft(), section = "roles") }
+    /** Discards the draft and closes the editor. */
+    fun cancelEdit() = _state.update { it.copy(draft = StatRoleDraft(), editorOpen = false, saveError = null) }
 
     /** Applies an edit to the draft without saving it. */
     fun updateDraft(transform: (StatRoleDraft) -> StatRoleDraft) = _state.update { it.copy(draft = transform(it.draft)) }
@@ -175,14 +177,16 @@ class StatRolesViewModel @Inject constructor(
         val current = _state.value
         val draft = current.draft
         if (draft.roleId.isNullOrEmpty()) {
-            postError("Pick the role to manage.")
+            _state.update { it.copy(saveError = "Pick the role to manage.") }
             return@launch
         }
         if (draft.streakInvalid) {
-            postError("Daily streaks only work with messages, voice minutes or minutes in a game.")
+            _state.update {
+                it.copy(saveError = "Daily streaks only work with messages, voice minutes or minutes in a game.")
+            }
             return@launch
         }
-        _state.update { it.copy(isSaving = true) }
+        _state.update { it.copy(isSaving = true, saveError = null) }
         val body = encode(requestBody(draft))
         val endpoint = if (draft.id == null) {
             Endpoint(base, HttpMethod.POST, body)
@@ -196,13 +200,14 @@ class StatRolesViewModel @Inject constructor(
                 s.copy(
                     roles = refreshed ?: s.roles,
                     draft = StatRoleDraft(),
-                    section = "roles",
+                    editorOpen = false,
                     isSaving = false,
                 )
             }
         }.onFailure {
-            _state.update { s -> s.copy(isSaving = false) }
-            postError("Failed to save the stat role. ${it.userFacingMessage}")
+            _state.update { s ->
+                s.copy(isSaving = false, saveError = "Failed to save the stat role. ${it.userFacingMessage}")
+            }
         }
     }
 

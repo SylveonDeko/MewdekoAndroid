@@ -9,7 +9,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Send
+import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.IconButton
@@ -139,7 +139,7 @@ fun MinecraftConsoleTab(
                 },
                 enabled = command.isNotBlank() && !state.consoleSending,
             ) {
-                Icon(Icons.Default.Send, contentDescription = "Send command")
+                Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "Send command")
             }
         }
     }

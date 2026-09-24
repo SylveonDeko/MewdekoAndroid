@@ -43,7 +43,7 @@ data class WarningGroup(
     val activeCount: Int,
 )
 
-/** Result of issuing a warning, reporting whether the ladder fired a punishment. */
+/** Result of issuing a warning, reporting whether a warning action fired. */
 @Serializable
 data class WarnUserResult(
     val punishmentApplied: Boolean = false,
@@ -72,7 +72,7 @@ private data class SetWarnPunishmentRequestBody(
 private data class SetWarnLogChannelRequestBody(val channelId: Snowflake)
 
 /**
- * The punishment codes the ladder can be configured with, mirroring
+ * The punishment codes a warning action can be configured with, mirroring
  * `Mewdeko.Modules.Administration.Common.PunishmentAction`.
  */
 object PunishmentActions {
@@ -89,7 +89,7 @@ object PunishmentActions {
     const val TIMEOUT = 10
     const val NONE = 11
 
-    /** The nine actions the ladder's add form can choose from, in dashboard order. */
+    /** The nine actions the warning action add form can choose from, in dashboard order. */
     val Selectable: List<Pair<Int, String>> = listOf(
         MUTE to "Mute",
         CHAT_MUTE to "Chat mute",
@@ -113,9 +113,35 @@ object PunishmentActions {
             NONE -> "None"
             else -> "Action #$code"
         }
+
+    /**
+     * How a member is described once this action has fired, used in the warning
+     * action removal confirmation, such as "will no longer be muted".
+     */
+    fun pastTense(code: Int): String = when (code) {
+        MUTE -> "muted"
+        CHAT_MUTE -> "chat muted"
+        VOICE_MUTE -> "voice muted"
+        TIMEOUT -> "timed out"
+        KICK -> "kicked"
+        SOFTBAN -> "softbanned"
+        BAN -> "banned"
+        ADD_ROLE -> "given the role"
+        REMOVE_ROLES -> "stripped of every role"
+        WARN -> "warned again"
+        else -> "affected"
+    }
 }
 
-/** One rung of the automatic warning-punishment ladder. */
+/** Formats a duration in minutes as whole hours when it divides evenly, otherwise as minutes. */
+private fun formatWarningDuration(minutes: Int): String = if (minutes % 60 == 0) {
+    val hours = minutes / 60
+    "$hours hour${if (hours == 1) "" else "s"}"
+} else {
+    "$minutes minute${if (minutes == 1) "" else "s"}"
+}
+
+/** One action that fires automatically when a member reaches a warning count. */
 @Serializable
 data class WarningPunishment(
     val id: Int = 0,
@@ -126,6 +152,30 @@ data class WarningPunishment(
 ) {
     /** Human-readable name for the punishment code the bot stores. */
     val actionLabel: String get() = PunishmentActions.label(punishment)
+
+    /**
+     * The full sentence describing when this action fires, such as
+     * "When a member reaches 3 warnings: Ban, for 30 minutes".
+     */
+    fun sentence(roleName: String?): String {
+        val plural = if (count == 1) "warning" else "warnings"
+        val suffix = when {
+            time > 0 -> ", for ${formatWarningDuration(time)}"
+            punishment == PunishmentActions.ADD_ROLE && roleName != null -> ", role @$roleName"
+            else -> ""
+        }
+        return "When a member reaches $count $plural: $actionLabel$suffix"
+    }
+
+    /** The confirmation message shown before removing this warning action. */
+    fun removalMessage(roleName: String?): String {
+        val target = if (punishment == PunishmentActions.ADD_ROLE && roleName != null) {
+            "${PunishmentActions.pastTense(punishment)} @$roleName"
+        } else {
+            PunishmentActions.pastTense(punishment)
+        }
+        return "Members reaching $count warnings will no longer be $target."
+    }
 }
 
 /** Which part of a guild a ban purge setting applies to. */
@@ -198,27 +248,6 @@ data class ModerationState(
     val pruneOverrides: List<BanPruneSetting>
         get() = pruneSettings.filter { it.scopeType != BanPruneScope.GUILD }
 
-    /**
-     * The purge an action uses at the server level: its own setting, the catch-all
-     * setting covering every action, or the action's built in default.
-     */
-    fun guildPruneFor(action: BanPruneActionInfo): Int {
-        val defaults = guildPruneDefaults
-        return defaults[action.key]?.pruneDays
-            ?: defaults[""]?.pruneDays
-            ?: action.defaultDays
-    }
-
-    /** Where a purge value on an action comes from, for the caption under its row. */
-    fun guildPruneSource(action: BanPruneActionInfo): String {
-        val defaults = guildPruneDefaults
-        return when {
-            defaults.containsKey(action.key) -> "Set for this action"
-            defaults.containsKey("") -> "From the all-actions default"
-            else -> "Built in default"
-        }
-    }
-
     /** The name of the channel or category an override targets, falling back to its id. */
     fun pruneScopeName(setting: BanPruneSetting): String {
         val pool = if (setting.scopeType == BanPruneScope.CATEGORY) {
@@ -249,7 +278,7 @@ data class ModerationState(
             availableChannels.firstOrNull { it.id == id }?.name ?: id
         }
 
-    /** The role name for a ladder rung's role, falling back to its raw id. */
+    /** The role name for a warning action's role, falling back to its raw id. */
     fun roleName(roleId: Snowflake?): String? =
         roleId?.let { id -> availableRoles.firstOrNull { it.id == id }?.name ?: id }
 
@@ -281,7 +310,7 @@ data class ModerationState(
         }
 }
 
-/** Loads the guild's warnings, punishment ladder, and warn-log destination. */
+/** Loads the guild's warnings, warning actions, and warn-log destination. */
 @HiltViewModel
 class ModerationViewModel @Inject constructor(
     savedStateHandle: SavedStateHandle,
@@ -405,7 +434,7 @@ class ModerationViewModel @Inject constructor(
     fun setShowForgiven(value: Boolean) = _state.update { it.copy(showForgiven = value) }
 
     /**
-     * Warns a member. The bot may apply an automatic ladder punishment as a side
+     * Warns a member. The bot may apply an automatic warning action as a side
      * effect, reported back so the screen can surface it since it happens on Discord.
      */
     fun warnUser(targetUserId: Snowflake, reason: String) =
@@ -476,9 +505,9 @@ class ModerationViewModel @Inject constructor(
         }
     }
 
-    /** Adds or replaces the punishment fired at [count] warnings. */
+    /** Adds or replaces the warning action fired at [count] warnings. */
     fun addPunishment(count: Int, punishment: Int, timeMinutes: Int?, roleId: Snowflake?) =
-        launchAction("Failed to save punishment.") {
+        launchAction("Failed to save warning action.") {
             val payload = SetWarnPunishmentRequestBody(
                 count = count,
                 punishment = punishment,
@@ -493,16 +522,16 @@ class ModerationViewModel @Inject constructor(
                 ),
                 ListSerializer(WarningPunishment.serializer()),
             )
-            _state.update { it.copy(punishments = updated.sortedBy { rung -> rung.count }) }
+            _state.update { it.copy(punishments = updated.sortedBy { action -> action.count }) }
         }
 
-    /** Removes the punishment ladder rung at [count] warnings. */
-    fun removePunishment(count: Int) = launchAction("Failed to remove punishment.") {
+    /** Removes the warning action at [count] warnings. */
+    fun removePunishment(count: Int) = launchAction("Failed to remove warning action.") {
         val updated = api.send(
             Endpoint("api/Moderation/$guildId/punishments/$count", HttpMethod.DELETE),
             ListSerializer(WarningPunishment.serializer()),
         )
-        _state.update { it.copy(punishments = updated.sortedBy { rung -> rung.count }) }
+        _state.update { it.copy(punishments = updated.sortedBy { action -> action.count }) }
     }
 
     /** Sets the channel warnings are logged to. */
@@ -530,7 +559,7 @@ class ModerationViewModel @Inject constructor(
         scopeId: Snowflake,
         actionKey: String?,
         pruneDays: Int,
-    ) = launchAction("Failed to save purge setting.") {
+    ) = launchAction("Failed to save ban cleanup setting.") {
         val payload = BanPruneSettingRequest(
             scopeType = scopeType,
             scopeId = if (scopeType == BanPruneScope.GUILD) "0" else scopeId,
@@ -548,7 +577,7 @@ class ModerationViewModel @Inject constructor(
     }
 
     /** Removes one purge setting so its scope falls back to a broader one. */
-    fun clearPrune(setting: BanPruneSetting) = launchAction("Failed to remove purge setting.") {
+    fun clearPrune(setting: BanPruneSetting) = launchAction("Failed to remove ban cleanup setting.") {
         val actionQuery = setting.actionKey.takeIf { it.isNotEmpty() }
             ?.let { "&actionKey=$it" }
             .orEmpty()
@@ -562,11 +591,10 @@ class ModerationViewModel @Inject constructor(
         refreshPruneSettings()
     }
 
-    /** Drops every purge setting, returning each action to its built in default. */
-    fun resetPrune() = launchAction("Failed to reset purge settings.") {
+    /** Drops every ban cleanup setting, returning each action to its built in default. */
+    fun resetPrune() = launchAction("Failed to reset ban cleanup.") {
         api.sendIgnoringBody(Endpoint("api/BanPrune/$guildId/all", HttpMethod.DELETE))
         refreshPruneSettings()
-        postSuccess("Purge settings reset.")
     }
 
     private suspend fun refreshPruneSettings() {

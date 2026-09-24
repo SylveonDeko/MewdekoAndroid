@@ -32,6 +32,8 @@ import dev.mewdeko.mobile.core.ui.SectionCard
 import dev.mewdeko.mobile.core.ui.SectionCardHeader
 import dev.mewdeko.mobile.core.ui.SelectorKind
 import dev.mewdeko.mobile.core.ui.SelectorOption
+import dev.mewdeko.mobile.core.ui.ShellCallout
+import dev.mewdeko.mobile.core.ui.ShellTone
 import dev.mewdeko.mobile.core.ui.SwitchRow
 
 /** Self-assignable roles: grouped list with per-role level requirement, exclusive/auto-delete toggles, and add flow. */
@@ -70,16 +72,12 @@ fun SelfAssignableRolesSection(state: AdministrationState, viewModel: Administra
             checked = payload.exclusive,
             onCheckedChange = { viewModel.toggleSelfAssignableExclusive() },
         )
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-        ) {
-            Text(
-                "Auto-delete confirmation replies",
-                style = MaterialTheme.typography.bodyMedium,
-            )
-            OutlinedButton(onClick = { viewModel.toggleSelfAssignableAutoDelete() }) { Text("Toggle") }
-        }
+        SwitchRow(
+            title = "Auto-delete confirmation replies",
+            subtitle = "Removes the bot's iam/iamnot reply a few seconds after it posts",
+            checked = state.autoDeleteSelfAssign == true,
+            onCheckedChange = { viewModel.toggleSelfAssignableAutoDelete() },
+        )
 
         if (adding) {
             var newRole by remember { mutableStateOf<Snowflake?>(null) }
@@ -285,6 +283,11 @@ fun ReactionRolesSection(state: AdministrationState, viewModel: AdministrationVi
     var confirmRemove by remember { mutableStateOf<Int?>(null) }
 
     SectionCard {
+        ShellCallout(
+            text = "Role Menus does this with a dropdown or buttons. Open Role Menus and use Move older " +
+                "setups to bring these over.",
+            tone = ShellTone.Brand,
+        )
         SectionCardHeader(
             title = "Reaction roles",
             icon = Icons.Default.AlternateEmail,
@@ -378,7 +381,7 @@ private fun AddReactionRoleForm(
     Text("Emoji to role pairs", style = MaterialTheme.typography.titleSmall)
     pairs.forEachIndexed { index, (emote, roleId) ->
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            val emojiOptions = guildEmojis.map { SelectorOption(it.toEmoteName(), "${it.name}") }
+            val emojiOptions = guildEmojis.map { SelectorOption(it.toEmoteName(), it.name) }
             DiscordSelectorSingle(
                 kind = SelectorKind.Custom(Icons.Default.AlternateEmail),
                 options = emojiOptions,

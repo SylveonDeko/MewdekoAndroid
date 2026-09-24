@@ -11,8 +11,10 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Block
+import androidx.compose.material.icons.filled.Campaign
 import androidx.compose.material.icons.filled.ChatBubble
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Download
@@ -25,6 +27,7 @@ import androidx.compose.material.icons.filled.Leaderboard
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.PersonSearch
+import androidx.compose.material.icons.filled.RecordVoiceOver
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.SportsEsports
@@ -49,7 +52,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.mewdeko.mobile.core.model.Snowflake
 import dev.mewdeko.mobile.core.ui.ConfirmDialog
@@ -80,6 +83,14 @@ private sealed interface PendingRemoval {
 
     /** A game name on the activity filter list. */
     data class FilterName(val name: String) : PendingRemoval
+}
+
+/** The icon shown for a [dev.mewdeko.mobile.core.model.GuildChannelLite.type] in the channel picker. */
+private fun channelTypeIcon(type: String) = when (type) {
+    "voice" -> Icons.AutoMirrored.Filled.VolumeUp
+    "stage" -> Icons.Default.RecordVoiceOver
+    "announcement" -> Icons.Default.Campaign
+    else -> Icons.Default.Tag
 }
 
 /** Lookup tables for turning ids into names in the settings lists. */
@@ -122,7 +133,14 @@ fun ServerstatsScreen(
 
     val lookups = remember(state.channels, state.roles, state.members) {
         NameLookups(
-            channelOptions = state.channels.map { SelectorOption(it.id, it.name) },
+            channelOptions = state.channels.map {
+                SelectorOption(
+                    id = it.id,
+                    name = it.name,
+                    subtitle = it.categoryName,
+                    icon = channelTypeIcon(it.type),
+                )
+            },
             roleOptions = state.roles.map { SelectorOption(it.id, it.name) },
             memberOptions = state.members.map {
                 SelectorOption(it.id, it.displayName.ifEmpty { it.username }, subtitle = it.username)

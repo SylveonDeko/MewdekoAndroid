@@ -1,12 +1,14 @@
 package dev.mewdeko.mobile.navigation
 
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ManageSearch
+import androidx.compose.material.icons.automirrored.filled.MenuBook
+import androidx.compose.material.icons.automirrored.filled.PlaylistAddCheck
 import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.AdminPanelSettings
 import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.Cake
-import androidx.compose.material.icons.filled.MenuBook
 import androidx.compose.material.icons.filled.CardGiftcard
 import androidx.compose.material.icons.filled.Checklist
 import androidx.compose.material.icons.filled.ConfirmationNumber
@@ -23,7 +25,6 @@ import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.Lightbulb
 import androidx.compose.material.icons.filled.LiveTv
 import androidx.compose.material.icons.filled.Lock
-import androidx.compose.material.icons.filled.ManageSearch
 import androidx.compose.material.icons.filled.MarkEmailUnread
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.MilitaryTech
@@ -38,7 +39,6 @@ import androidx.compose.material.icons.filled.PushPin
 import androidx.compose.material.icons.filled.Repeat
 import androidx.compose.material.icons.filled.RssFeed
 import androidx.compose.material.icons.filled.Shield
-import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.Storage
 import androidx.compose.material.icons.filled.Sync
@@ -74,6 +74,12 @@ data class FeatureCatalogItem(
     val category: FeatureCategory,
     val summary: String,
     val ownerOnly: Boolean = false,
+    /**
+     * Extra search terms for features whose everyday name does not appear in
+     * [label] or [summary], such as "auto role" for Administration's
+     * self-assignable roles.
+     */
+    val keywords: List<String> = emptyList(),
 )
 
 /**
@@ -84,12 +90,11 @@ object NavigationCatalog {
 
     /** Every feature page, in catalog order. */
     val items: List<FeatureCatalogItem> = listOf(
-        // Community
         FeatureCatalogItem("xp", "XP System", Icons.Default.Star, FeatureCategory.COMMUNITY, "Leveling, leaderboard, and rewards"),
         FeatureCatalogItem("reputation", "Reputation", Icons.Default.EmojiEvents, FeatureCategory.COMMUNITY, "Member-to-member reputation"),
         FeatureCatalogItem("highlights", "Highlights", Icons.Default.NotificationsActive, FeatureCategory.COMMUNITY, "Word and phrase notifications"),
         FeatureCatalogItem("birthday", "Birthdays", Icons.Default.Cake, FeatureCategory.COMMUNITY, "Birthday announcements and roles"),
-        FeatureCatalogItem("wordoftheday", "Word of the Day", Icons.Default.MenuBook, FeatureCategory.COMMUNITY, "Daily vocabulary word with topics and filters"),
+        FeatureCatalogItem("wordoftheday", "Word of the Day", Icons.AutoMirrored.Filled.MenuBook, FeatureCategory.COMMUNITY, "Daily vocabulary word with topics and filters"),
         FeatureCatalogItem("liveboards", "Live Boards", Icons.Default.PushPin, FeatureCategory.COMMUNITY, "Self-refreshing leaderboards, charts, and server reports"),
         FeatureCatalogItem("starboard", "Starboard", Icons.Default.Star, FeatureCategory.COMMUNITY, "Star-pinned message board"),
         FeatureCatalogItem("confessions", "Confessions", Icons.Default.Lock, FeatureCategory.COMMUNITY, "Anonymous confession submissions"),
@@ -107,42 +112,61 @@ object NavigationCatalog {
         FeatureCatalogItem("polls", "Polls", Icons.Default.Poll, FeatureCategory.COMMUNITY, "Create, schedule, and review polls"),
         FeatureCatalogItem("votes", "Votes", Icons.Default.ThumbUp, FeatureCategory.COMMUNITY, "Vote tracking, reward roles, and leaderboard"),
 
-        // Entertainment
-        FeatureCatalogItem("music", "Music", Icons.Default.MusicNote, FeatureCategory.ENTERTAINMENT, "Lavalink-backed music player"),
+        FeatureCatalogItem("music", "Music", Icons.Default.MusicNote, FeatureCategory.ENTERTAINMENT, "Play music in voice channels"),
         FeatureCatalogItem("customvoice", "Custom Voice", Icons.Default.Mic, FeatureCategory.ENTERTAINMENT, "User-owned temporary voice channels"),
         FeatureCatalogItem("giveaways", "Giveaways", Icons.Default.CardGiftcard, FeatureCategory.ENTERTAINMENT, "Run prize draws"),
         FeatureCatalogItem("currency", "Currency", Icons.Default.Paid, FeatureCategory.ENTERTAINMENT, "Economy analytics, settings, shop, and balances"),
         FeatureCatalogItem("minecraft", "Minecraft", Icons.Default.Widgets, FeatureCategory.ENTERTAINMENT, "Minecraft server status"),
         FeatureCatalogItem("tickets", "Tickets", Icons.Default.ConfirmationNumber, FeatureCategory.ENTERTAINMENT, "Support ticket system"),
 
-        // Actions
         FeatureCatalogItem("afk", "AFK System", Icons.Default.DarkMode, FeatureCategory.ACTIONS, "Away-from-keyboard status"),
         FeatureCatalogItem("chat-triggers", "Chat Triggers", Icons.Default.Bolt, FeatureCategory.ACTIONS, "Custom keyword reactions"),
         FeatureCatalogItem("embedbuilder", "Embeds", Icons.Default.ViewAgenda, FeatureCategory.ACTIONS, "Compose and send rich embeds"),
         FeatureCatalogItem("feeds", "Feeds", Icons.Default.RssFeed, FeatureCategory.ACTIONS, "RSS and social feeds"),
-        FeatureCatalogItem("multigreets", "Greets", Icons.Default.WavingHand, FeatureCategory.ACTIONS, "Welcome and goodbye messages"),
+        FeatureCatalogItem(
+            "multigreets",
+            "Greets",
+            Icons.Default.WavingHand,
+            FeatureCategory.ACTIONS,
+            "Welcome and goodbye messages",
+            keywords = listOf("welcome"),
+        ),
         FeatureCatalogItem("repeaters", "Repeaters", Icons.Default.Repeat, FeatureCategory.ACTIONS, "Recurring scheduled messages"),
         FeatureCatalogItem("rolegreets", "Role Greets", Icons.Default.PersonAddAlt, FeatureCategory.ACTIONS, "Greet on role assignment"),
+        FeatureCatalogItem("role-menus", "Role Menus", Icons.AutoMirrored.Filled.PlaylistAddCheck, FeatureCategory.ACTIONS, "Dropdowns and buttons that let members pick their own roles"),
         FeatureCatalogItem("rolestates", "Role States", Icons.Default.Sync, FeatureCategory.ACTIONS, "Persist roles across rejoins"),
         FeatureCatalogItem("statusroles", "Status Roles", Icons.AutoMirrored.Filled.VolumeUp, FeatureCategory.ACTIONS, "Roles based on Discord status"),
         FeatureCatalogItem("utility", "Utilities", Icons.Default.Build, FeatureCategory.ACTIONS, "Aliases, quotes, auto publish, stream role, AI, NSFW filter, role monitor"),
 
-        // Security
-        FeatureCatalogItem("administration", "Administration", Icons.Default.AdminPanelSettings, FeatureCategory.SECURITY, "Server administration and protections"),
+        FeatureCatalogItem(
+            "administration",
+            "Administration",
+            Icons.Default.AdminPanelSettings,
+            FeatureCategory.SECURITY,
+            "Server administration and protections",
+            keywords = listOf(
+                "auto role", "join role", "self-assign", "self assign", "reaction roles",
+                "protection", "anti-raid", "anti raid", "anti-spam", "permissions",
+            ),
+        ),
         FeatureCatalogItem("auditlog", "Audit Log", Icons.Default.Policy, FeatureCategory.SECURITY, "Who accessed the dashboard, what they changed, and what they viewed"),
         FeatureCatalogItem("chatsaver", "Chat Saver", Icons.Default.Storage, FeatureCategory.SECURITY, "Archive and save chat messages"),
         FeatureCatalogItem("access", "Dashboard Access", Icons.Default.Key, FeatureCategory.SECURITY, "Restricted dashboard access for users and roles"),
         FeatureCatalogItem("filter", "Message Filters", Icons.Default.FilterAlt, FeatureCategory.SECURITY, "Block words, invites, and links"),
         FeatureCatalogItem("channel-access", "Channel Access", Icons.Default.Lock, FeatureCategory.SECURITY, "Applications and member votes for locked channels"),
-        FeatureCatalogItem("logging", "Logging", Icons.Default.ManageSearch, FeatureCategory.SECURITY, "Audit and event logs"),
-        FeatureCatalogItem("moderation", "Moderation", Icons.Default.Shield, FeatureCategory.SECURITY, "Warnings, bans, and mod tools"),
+        FeatureCatalogItem("logging", "Logging", Icons.AutoMirrored.Filled.ManageSearch, FeatureCategory.SECURITY, "Audit and event logs"),
+        FeatureCatalogItem(
+            "moderation",
+            "Moderation",
+            Icons.Default.Shield,
+            FeatureCategory.SECURITY,
+            "Warnings, bans, and mod tools",
+            keywords = listOf("mute", "ban", "kick", "timeout", "warn"),
+        ),
 
-        // Analytics
         FeatureCatalogItem("messagestats", "Message Stats", Icons.Default.MarkEmailUnread, FeatureCategory.ANALYTICS, "Per-channel and per-user activity"),
         FeatureCatalogItem("serverstats", "Activity Stats", Icons.Default.Insights, FeatureCategory.ANALYTICS, "Messages, voice time, games and member growth"),
-        FeatureCatalogItem("performance", "Performance", Icons.Default.Speed, FeatureCategory.ANALYTICS, "Bot CPU, memory, and shard health", ownerOnly = true),
 
-        // Settings
         FeatureCatalogItem("settings", "Settings", Icons.Default.Tune, FeatureCategory.SETTINGS, "Per-guild bot configuration"),
     )
 

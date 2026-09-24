@@ -30,6 +30,7 @@ data class AntiSpamSummary(
     val action: Int = 0,
     val muteTime: Int = 0,
     @Serializable(with = SnowflakeSerializer::class) val roleId: Snowflake? = null,
+    val ignoredChannels: List<@Serializable(with = SnowflakeSerializer::class) Snowflake> = emptyList(),
     val userCount: Int = 0,
 )
 
@@ -330,7 +331,7 @@ data class ServerRecoveryStatusPayload(
 @Serializable
 data class DeleteMessageChannelEntry(
     @Serializable(with = SnowflakeSerializer::class) val channelId: Snowflake = "",
-    val state: Int = 2,
+    val state: Boolean = false,
 )
 
 /** The full "delete message on command" configuration. */

@@ -63,6 +63,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -83,9 +84,11 @@ import dev.mewdeko.mobile.feature.guilddetail.GuildOverviewState
 import dev.mewdeko.mobile.feature.guilddetail.MemberSummary
 import dev.mewdeko.mobile.feature.guilddetail.formatted
 import dev.mewdeko.mobile.feature.messagestats.MessageStatsDetail
+import dev.mewdeko.mobile.navigation.FeatureCategory
 import dev.mewdeko.mobile.util.relativeToNow
 import kotlinx.coroutines.delay
 import kotlin.math.max
+import kotlin.time.Duration.Companion.milliseconds
 
 /** Spoken ordinals for the leaderboard summary. */
 private val Ordinals = listOf("First", "Second", "Third", "Fourth", "Fifth")
@@ -102,11 +105,13 @@ fun CommunityBand(
     roles: HomeRoles,
     reduced: Boolean,
     onOpenFeature: (String) -> Unit,
+    onOpenCategory: (FeatureCategory) -> Unit,
 ) {
     val role = roles.community
     val badge = ScallopShape(4, 0.18f)
+    val onSeeAll = { onOpenCategory(FeatureCategory.COMMUNITY) }
     if (!loaded) {
-        SkeletonBand("Community", Icons.Default.Groups, role, badge, "xp", onOpenFeature)
+        SkeletonBand("Community", Icons.Default.Groups, role, badge, onSeeAll, onOpenFeature)
         return
     }
 
@@ -124,7 +129,7 @@ fun CommunityBand(
         icon = Icons.Default.Groups,
         role = role,
         badgeShape = badge,
-        seeAllId = "xp",
+        onSeeAll = onSeeAll,
         headline = headline,
         descriptor = descriptor,
         headlineLoading = false,
@@ -142,7 +147,7 @@ fun CommunityBand(
                     modifier = Modifier.homeInset(),
                 )
             }
-            if (showChatter && messages != null) {
+            if (showChatter) {
                 ChatterCard(
                     messages = messages,
                     directory = overview.memberDirectory,
@@ -319,7 +324,7 @@ private fun PodiumColumn(
     val grow = remember { Animatable(if (grown || reduced) 1f else 0f) }
     LaunchedEffect(Unit) {
         if (grow.value < 1f) {
-            delay(order * 80L)
+            delay((order * 80).milliseconds)
             grow.animateTo(1f, HomeMotion.bouncy())
         }
         grown = true
@@ -782,7 +787,7 @@ fun StarboardCarousel(highlights: List<StarboardHighlight>, onOpen: () -> Unit) 
                     .fillMaxWidth()
                     .height(208.dp * clamp),
             ) { index ->
-                val info = carouselItemInfo
+                val info = carouselItemDrawInfo
                 StarItem(
                     highlight = highlights[index],
                     textAlpha = {
@@ -876,6 +881,14 @@ fun StarItem(
                     color = content,
                     maxLines = 5,
                     overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 48.dp),
+                )
+            } else if (image == null) {
+                Text(
+                    text = "No text content",
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontStyle = FontStyle.Italic,
+                    color = scheme.onSurfaceVariant,
                     modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 48.dp),
                 )
             }

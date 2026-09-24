@@ -1,208 +1,247 @@
 package dev.mewdeko.mobile.app.onboarding
 
-import androidx.compose.foundation.Image
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Dns
+import androidx.compose.material.icons.filled.Forum
+import androidx.compose.material.icons.filled.SyncAlt
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.res.painterResource
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.mewdeko.mobile.R
-import dev.mewdeko.mobile.core.ui.MewdekoTextField
+import dev.mewdeko.mobile.app.hostOrSelf
+import dev.mewdeko.mobile.core.store.ServerConfig
+import dev.mewdeko.mobile.core.ui.GlyphOrb
+import dev.mewdeko.mobile.core.ui.HaloLogo
+import dev.mewdeko.mobile.core.ui.LuminousButton
+import dev.mewdeko.mobile.core.ui.LuminousButtonVariant
+import dev.mewdeko.mobile.core.ui.ShellCallout
+import dev.mewdeko.mobile.core.ui.ShellDimens
+import dev.mewdeko.mobile.core.ui.ShellField
+import dev.mewdeko.mobile.core.ui.ShellOverline
+import dev.mewdeko.mobile.core.ui.ShellScreen
+import dev.mewdeko.mobile.core.ui.ShellTextAction
+import dev.mewdeko.mobile.core.ui.ShellTone
+import dev.mewdeko.mobile.core.ui.ShellType
+import dev.mewdeko.mobile.core.ui.SurfaceLevel
+import dev.mewdeko.mobile.core.ui.glassSurface
+import dev.mewdeko.mobile.core.ui.pressFeedback
+import dev.mewdeko.mobile.core.ui.rememberShellRoles
 
-/** Opens Discord so the user can authorize Mewdeko Mobile. */
+/**
+ * Sign in, lit by the house palette on a drifting hero canvas, matching the
+ * iOS sign in screen.
+ *
+ * A leading aligned column: the haloed logo, the pitch, and one glass card
+ * holding the dashboard chip (which opens the dashboard picker), any error,
+ * and the Discord button. A demo code field expands in place below it.
+ *
+ * @param server The active dashboard, shown in the chip.
+ */
 @Composable
 fun SignInScreen(
-    serverLabel: String?,
+    server: ServerConfig?,
     errorMessage: String?,
     isAuthorizing: Boolean,
     onSignIn: () -> Unit,
     onChooseServer: () -> Unit,
     onDemoCode: (String) -> Unit,
 ) {
-    var showDemoEntry by remember { mutableStateOf(false) }
-    var demoCode by remember { mutableStateOf("") }
-
+    var showDemoEntry by rememberSaveable { mutableStateOf(false) }
+    var demoCode by rememberSaveable { mutableStateOf("") }
     val scheme = MaterialTheme.colorScheme
+    val submitDemo = {
+        if (demoCode.isNotBlank() && !isAuthorizing) onDemoCode(demoCode.trim())
+    }
 
-    Surface(modifier = Modifier.fillMaxSize(), color = scheme.background) {
-        Box(
+    ShellScreen(drifts = true, topPadding = ShellDimens.hero) {
+        HaloLogo(
+            painter = painterResource(R.drawable.mewdeko_logo),
+            modifier = Modifier.padding(bottom = ShellDimens.xxs),
+        )
+        Column(verticalArrangement = Arrangement.spacedBy(ShellDimens.s)) {
+            ShellOverline("Mewdeko")
+            Text(
+                text = "Your server, wherever you are.",
+                style = ShellType.display,
+                color = scheme.onSurface,
+                modifier = Modifier.semantics { heading() },
+            )
+            Text(
+                text = "Manage the parts of your Discord community that need your attention.",
+                style = ShellType.meta,
+                color = scheme.onSurfaceVariant,
+            )
+        }
+
+        Column(
             modifier = Modifier
-                .fillMaxSize()
-                .background(
-                    Brush.radialGradient(
-                        colors = listOf(scheme.primary.copy(alpha = 0.23f), Color.Transparent),
-                        radius = 900f,
-                    ),
-                ),
+                .fillMaxWidth()
+                .glassSurface(SurfaceLevel.Card)
+                .padding(ShellDimens.l),
+            verticalArrangement = Arrangement.spacedBy(ShellDimens.m),
         ) {
-            Column(
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(20.dp),
-                modifier = Modifier
-                    .fillMaxSize()
-                    .verticalScroll(rememberScrollState())
-                    .padding(horizontal = 28.dp, vertical = 36.dp),
+            if (server != null) {
+                DashboardChip(server = server, onClick = onChooseServer)
+            }
+            AnimatedVisibility(
+                visible = errorMessage != null,
+                enter = fadeIn(),
+                exit = fadeOut(),
             ) {
-                Surface(
-                    shape = CircleShape,
-                    color = scheme.surfaceContainerHigh,
-                    shadowElevation = 10.dp,
-                    modifier = Modifier.size(116.dp),
-                ) {
-                    Image(
-                        painter = painterResource(R.drawable.mewdeko_logo),
-                        contentDescription = "Mewdeko",
-                        modifier = Modifier.padding(9.dp),
-                    )
-                }
+                ShellCallout(text = errorMessage.orEmpty(), tone = ShellTone.Negative)
+            }
+            LuminousButton(
+                text = if (isAuthorizing) "Opening Discord" else "Continue with Discord",
+                onClick = onSignIn,
+                enabled = !isAuthorizing && server != null,
+                loading = isAuthorizing,
+                icon = Icons.Default.Forum,
+                fullWidth = true,
+            )
+            Text(
+                text = "Discord opens securely so you can choose the account you want to use.",
+                style = ShellType.caption,
+                color = scheme.onSurfaceVariant,
+            )
+        }
 
+        if (server == null) {
+            ShellTextAction(text = "Choose a dashboard", onClick = onChooseServer)
+        }
+
+        AnimatedContent(
+            targetState = showDemoEntry,
+            transitionSpec = {
+                (fadeIn() + slideInVertically { -it / 4 }) togetherWith fadeOut()
+            },
+            label = "demoEntry",
+        ) { expanded ->
+            if (expanded) {
                 Column(
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .glassSurface(SurfaceLevel.Group, shape = RoundedCornerShape(ShellDimens.tileRadius))
+                        .padding(ShellDimens.m),
+                    verticalArrangement = Arrangement.spacedBy(ShellDimens.s),
                 ) {
-                    Text(
-                        text = "MEWDEKO MOBILE",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = scheme.primary,
-                        fontWeight = FontWeight.Bold,
+                    ShellOverline("Demo code")
+                    ShellField(
+                        value = demoCode,
+                        onValueChange = { demoCode = it },
+                        placeholder = "Enter your demo code",
+                        label = "Demo code",
+                        imeAction = ImeAction.Go,
+                        autoCorrect = false,
+                        onImeAction = submitDemo,
                     )
-                    Text(
-                        text = "Your server, wherever you are.",
-                        style = MaterialTheme.typography.headlineSmall,
-                        color = scheme.onBackground,
-                        textAlign = TextAlign.Center,
-                    )
-                    Text(
-                        text = "Manage the parts of your Discord community that need your attention.",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = scheme.onSurfaceVariant,
-                        textAlign = TextAlign.Center,
+                    LuminousButton(
+                        text = "Open the demo",
+                        onClick = submitDemo,
+                        variant = LuminousButtonVariant.Glass,
+                        enabled = demoCode.isNotBlank() && !isAuthorizing,
+                        fullWidth = true,
                     )
                 }
-
-                Surface(
-                    shape = RoundedCornerShape(24.dp),
-                    color = scheme.surfaceContainerLow,
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    Column(
-                        verticalArrangement = Arrangement.spacedBy(16.dp),
-                        modifier = Modifier.padding(20.dp),
-                    ) {
-                        if (serverLabel != null) {
-                            Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                                Text(
-                                    text = "DASHBOARD",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = scheme.primary,
-                                    fontWeight = FontWeight.Bold,
-                                )
-                                Text(
-                                    text = serverLabel,
-                                    style = MaterialTheme.typography.titleMedium,
-                                    color = scheme.onSurface,
-                                )
-                            }
-                        }
-
-                        Text(
-                            text = "Sign in to continue",
-                            style = MaterialTheme.typography.titleLarge,
-                            color = scheme.onSurface,
-                        )
-                        Text(
-                            text = "Discord opens securely so you can choose the account you want to use.",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = scheme.onSurfaceVariant,
-                        )
-
-                        if (errorMessage != null) {
-                            Text(
-                                text = errorMessage,
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = scheme.error,
-                            )
-                        }
-
-                        Button(
-                            onClick = onSignIn,
-                            enabled = !isAuthorizing,
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = Color(0xFF5865F2),
-                                contentColor = Color.White,
-                            ),
-                            modifier = Modifier.fillMaxWidth(),
-                        ) {
-                            if (isAuthorizing) {
-                                CircularProgressIndicator(
-                                    modifier = Modifier.size(20.dp),
-                                    strokeWidth = 2.dp,
-                                    color = Color.White,
-                                )
-                            } else {
-                                Text("Open Discord to sign in")
-                            }
-                        }
-                    }
-                }
-
-                TextButton(onClick = onChooseServer) { Text("Use a different dashboard") }
-
-                if (showDemoEntry) {
-                    Surface(
-                        shape = RoundedCornerShape(20.dp),
-                        color = scheme.surfaceContainerLow,
-                        modifier = Modifier.fillMaxWidth(),
-                    ) {
-                        Column(
-                            verticalArrangement = Arrangement.spacedBy(12.dp),
-                            modifier = Modifier.padding(16.dp),
-                        ) {
-                            MewdekoTextField(
-                                value = demoCode,
-                                onValueChange = { demoCode = it },
-                                label = "Demo code",
-                            )
-                            Button(
-                                onClick = { onDemoCode(demoCode) },
-                                enabled = demoCode.isNotBlank() && !isAuthorizing,
-                                modifier = Modifier.fillMaxWidth(),
-                            ) { Text("Open the demo") }
-                        }
-                    }
-                } else {
-                    TextButton(onClick = { showDemoEntry = true }) {
-                        Text("Have a demo code?")
-                    }
-                }
+            } else {
+                ShellTextAction(text = "Have a demo code?", onClick = { showDemoEntry = true })
             }
         }
+    }
+}
+
+/**
+ * The current dashboard as a tappable chip on the quiet fill: a small orb,
+ * the label, the host, and a swap glyph. Opens the dashboard picker.
+ */
+@Composable
+private fun DashboardChip(server: ServerConfig, onClick: () -> Unit) {
+    val scheme = MaterialTheme.colorScheme
+    val roles = rememberShellRoles()
+    val interaction = remember { MutableInteractionSource() }
+    val shape = RoundedCornerShape(ShellDimens.controlRadius)
+    val host = server.baseUrl.hostOrSelf()
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .pressFeedback(interaction)
+            .clip(shape)
+            .background(roles.fillQuiet, shape)
+            .border(1.dp, roles.hairline, shape)
+            .clickable(
+                interactionSource = interaction,
+                indication = LocalIndication.current,
+                role = Role.Button,
+                onClickLabel = "Change the dashboard",
+                onClick = onClick,
+            )
+            .semantics { contentDescription = "Dashboard, ${server.label}, $host" }
+            .padding(ShellDimens.s),
+        horizontalArrangement = Arrangement.spacedBy(ShellDimens.s),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        GlyphOrb(icon = Icons.Default.Dns, tint = scheme.primary)
+        Column(
+            modifier = Modifier
+                .weight(1f)
+                .clearAndSetSemantics { },
+            verticalArrangement = Arrangement.spacedBy(2.dp),
+        ) {
+            Text(
+                text = server.label,
+                style = ShellType.rowTitle,
+                color = scheme.onSurface,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                text = host,
+                style = ShellType.caption,
+                color = scheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        Icon(
+            Icons.Default.SyncAlt,
+            contentDescription = null,
+            tint = roles.textTertiary,
+            modifier = Modifier.size(18.dp),
+        )
     }
 }

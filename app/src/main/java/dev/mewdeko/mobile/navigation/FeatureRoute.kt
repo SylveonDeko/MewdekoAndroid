@@ -1,10 +1,10 @@
 package dev.mewdeko.mobile.navigation
 
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.HelpOutline
+import androidx.compose.material.icons.automirrored.filled.HelpOutline
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
-import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.mewdeko.mobile.core.theme.GuildPalette
 import dev.mewdeko.mobile.core.theme.MewdekoTheme
@@ -40,8 +40,8 @@ import dev.mewdeko.mobile.feature.serverstats.ServerstatsScreen
 import dev.mewdeko.mobile.feature.repeaters.RepeatersScreen
 import dev.mewdeko.mobile.feature.reputation.ReputationScreen
 import dev.mewdeko.mobile.feature.rolegreets.RoleGreetsScreen
+import dev.mewdeko.mobile.feature.rolemenus.RoleMenusScreen
 import dev.mewdeko.mobile.feature.patreon.PatreonScreen
-import dev.mewdeko.mobile.feature.performance.PerformanceScreen
 import dev.mewdeko.mobile.feature.minecraft.MinecraftScreen
 import dev.mewdeko.mobile.feature.moderation.ModerationScreen
 import dev.mewdeko.mobile.feature.music.MusicScreen
@@ -89,10 +89,10 @@ fun FeatureRoute(
             "logging" -> LoggingScreen(guild = guild, onBack = onBack)
             "auditlog" -> AuditlogScreen(guild = guild, onBack = onBack)
             "settings" -> SettingsScreen(guild = guild, onBack = onBack)
-            "performance" -> PerformanceScreen(guild = guild, onBack = onBack)
             "feeds" -> FeedsScreen(guild = guild, onBack = onBack)
             "chatsaver" -> ChatSaverScreen(guild = guild, onBack = onBack)
             "rolegreets" -> RoleGreetsScreen(guild = guild, onBack = onBack)
+            "role-menus" -> RoleMenusScreen(guild = guild, onBack = onBack)
             "messagestats" -> MessageStatsScreen(guild = guild, onBack = onBack)
             "serverstats" -> ServerstatsScreen(guild = guild, onBack = onBack)
             "invites" -> InvitesScreen(guild = guild, onBack = onBack)
@@ -142,7 +142,7 @@ fun FeatureRoute(
             ) {
                 EmptyState(
                     message = "\"$featureId\" is not a feature this build knows about.",
-                    icon = Icons.Default.HelpOutline,
+                    icon = Icons.AutoMirrored.Filled.HelpOutline,
                 )
             }
         }

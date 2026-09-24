@@ -5,34 +5,33 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Tag
+import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
-import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.InputChip
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.rememberModalBottomSheetState
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -40,10 +39,13 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import dev.mewdeko.mobile.core.theme.DashAlpha
 import dev.mewdeko.mobile.core.theme.Rgb
 
 /** Selector type; drives the prefix, default icon, and accent. */
@@ -63,22 +65,34 @@ sealed class SelectorKind(val icon: ImageVector, val prefix: String) {
 
 /**
  * Generic option used by [DiscordSelector]; covers channels, roles, users, and
- * custom enum-style picks.
+ * custom enum-style picks. An [imageUrl], such as a guild icon or avatar,
+ * leads the option's row in the sheet.
  */
 data class SelectorOption(
     val id: String,
     val name: String,
     val subtitle: String? = null,
     val colorHex: Int? = null,
+    val imageUrl: String? = null,
+    val icon: ImageVector? = null,
 )
 
+/** The option's role color as a Compose color, or null when it has none. */
+internal val SelectorOption.swatch: Color?
+    get() = colorHex?.takeIf { it != 0 }?.let { Rgb.fromArgb(it).color }
+
 /**
- * Searchable option picker for choosing a role, channel, user, or timezone.
+ * Searchable picker for a role, channel, or member.
  *
- * Presented as a Material 3 modal bottom sheet with a lazy list, so guilds
- * with thousands of members stay responsive. Supports single and multi-select.
+ * Use this for Discord entities, where the list can run to thousands and
+ * needs search. For a fixed list of a few named choices (a mode, a unit, a
+ * style) use [EnumPicker] instead, which shows every choice with its
+ * description in place.
+ *
+ * With [multiple] set this is [MultiSelectDropdown]: the selection shows as
+ * removable chips under the field. Otherwise it is a single field that opens
+ * [DiscordSelectorSheet] and closes on the first pick.
  */
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun DiscordSelector(
     kind: SelectorKind,
@@ -91,15 +105,69 @@ fun DiscordSelector(
     selection: List<String> = emptyList(),
     onSelectionChange: (List<String>) -> Unit,
 ) {
-    var expanded by remember { mutableStateOf(false) }
-    var query by remember { mutableStateOf("") }
-
-    val selected = remember(selection, options) {
-        options.filter { it.id in selection }
+    if (multiple) {
+        MultiSelectDropdown(
+            kind = kind,
+            options = options,
+            selection = selection,
+            onSelectionChange = onSelectionChange,
+            label = label.orEmpty(),
+            placeholder = placeholder,
+            modifier = modifier,
+            enabled = enabled,
+        )
+        return
     }
 
+    var expanded by remember { mutableStateOf(false) }
+    val selected = remember(selection, options) {
+        options.firstOrNull { it.id in selection }
+    }
+
+    SelectorField(
+        kind = kind,
+        label = label,
+        summary = selected?.let { kind.prefix + it.name } ?: placeholder,
+        showingPlaceholder = selected == null,
+        enabled = enabled,
+        onClick = { expanded = true },
+        modifier = modifier,
+        swatch = selected?.swatch,
+    )
+
+    if (expanded) {
+        DiscordSelectorSheet(
+            kind = kind,
+            options = options,
+            multiple = false,
+            selection = selection,
+            onSelectionChange = onSelectionChange,
+            onDismiss = { expanded = false },
+            title = label,
+        )
+    }
+}
+
+/**
+ * The tappable field shared by [DiscordSelector] and [MultiSelectDropdown]:
+ * an optional label above a row with the kind glyph, a one-line summary, and
+ * an expand chevron.
+ */
+@Composable
+internal fun SelectorField(
+    kind: SelectorKind,
+    label: String?,
+    summary: String,
+    showingPlaceholder: Boolean,
+    enabled: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    destructive: Boolean = false,
+    swatch: Color? = null,
+) {
+    val tone = if (destructive) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary
     Column(modifier = modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        if (label != null) {
+        if (!label.isNullOrBlank()) {
             Text(
                 text = label,
                 style = MaterialTheme.typography.labelLarge,
@@ -108,7 +176,7 @@ fun DiscordSelector(
         }
 
         Surface(
-            onClick = { if (enabled) expanded = true },
+            onClick = onClick,
             enabled = enabled,
             shape = MaterialTheme.shapes.medium,
             color = MaterialTheme.colorScheme.surfaceContainerHigh,
@@ -117,39 +185,38 @@ fun DiscordSelector(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
+                    .heightIn(min = 48.dp)
                     .padding(horizontal = 14.dp, vertical = 12.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(10.dp),
             ) {
-                Icon(
-                    kind.icon,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.size(18.dp),
-                )
-                Box(modifier = Modifier.weight(1f)) {
-                    when {
-                        selected.isEmpty() -> Text(
-                            text = placeholder,
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-
-                        selected.size == 1 -> Text(
-                            text = kind.prefix + selected.first().name,
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurface,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-
-                        else -> Text(
-                            text = "${selected.size} selected",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurface,
-                        )
+                if (swatch != null) {
+                    Box(
+                        modifier = Modifier.size(18.dp),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Surface(shape = CircleShape, color = swatch, modifier = Modifier.size(10.dp)) {}
                     }
+                } else {
+                    Icon(
+                        kind.icon,
+                        contentDescription = null,
+                        tint = tone,
+                        modifier = Modifier.size(18.dp),
+                    )
                 }
+                Text(
+                    text = summary,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = if (showingPlaceholder) {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    } else {
+                        MaterialTheme.colorScheme.onSurface
+                    },
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f),
+                )
                 Icon(
                     Icons.Default.ExpandMore,
                     contentDescription = null,
@@ -157,47 +224,75 @@ fun DiscordSelector(
                 )
             }
         }
+    }
+}
 
-        if (multiple && selected.size > 1) {
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
-                modifier = Modifier.fillMaxWidth(),
-            ) {
-                selected.take(4).forEach { option ->
-                    InputChip(
-                        selected = true,
-                        onClick = { onSelectionChange(selection - option.id) },
-                        label = {
-                            Text(
-                                text = kind.prefix + option.name,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                            )
-                        },
-                        trailingIcon = {
-                            Icon(Icons.Default.Close, null, modifier = Modifier.size(16.dp))
-                        },
-                    )
-                }
-            }
+/**
+ * The searchable bottom sheet behind [DiscordSelector] and
+ * [MultiSelectDropdown], for callers that open it from their own trigger
+ * rather than a selector field.
+ *
+ * A single-select pick closes the sheet. Multi-select keeps it open with a
+ * header showing the count, a Clear action, and a Done button. Options that
+ * were already selected when the sheet opened are pinned to the top so the
+ * current choice is visible without scrolling; they stay in place while the
+ * user toggles, so rows never jump under a finger. Search appears once the
+ * list is long enough to need it. [title] defaults to a prompt for the kind.
+ */
+@Composable
+fun DiscordSelectorSheet(
+    kind: SelectorKind,
+    options: List<SelectorOption>,
+    selection: List<String>,
+    onSelectionChange: (List<String>) -> Unit,
+    onDismiss: () -> Unit,
+    multiple: Boolean = false,
+    title: String? = null,
+) {
+    var query by remember { mutableStateOf("") }
+    val pinned = remember { selection.toSet() }
+    val ordered = remember(options) { options.sortedBy { it.id !in pinned } }
+    val filtered = remember(query, ordered) {
+        if (query.isBlank()) ordered
+        else ordered.filter {
+            it.name.contains(query, ignoreCase = true) ||
+                it.subtitle?.contains(query, ignoreCase = true) == true
         }
     }
 
-    if (expanded) {
-        val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-        val filtered = remember(query, options) {
-            if (query.isBlank()) options
-            else options.filter {
-                it.name.contains(query, ignoreCase = true) ||
-                    it.subtitle?.contains(query, ignoreCase = true) == true
-            }
-        }
-
-        ModalBottomSheet(
-            onDismissRequest = { expanded = false; query = "" },
-            sheetState = sheetState,
+    MewdekoBottomSheet(
+        onDismissRequest = onDismiss,
+        title = title?.takeIf { it.isNotBlank() } ?: defaultSheetTitle(kind, multiple),
+        showClose = !multiple,
+    ) {
+        val dismiss = LocalSheetDismiss.current
+        Column(
+            modifier = Modifier
+                .imePadding()
+                .padding(horizontal = 16.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            Column(modifier = Modifier.imePadding().padding(horizontal = 16.dp)) {
+            if (multiple) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    Text(
+                        text = "${selection.size} selected",
+                        style = MaterialTheme.typography.titleSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.weight(1f),
+                    )
+                    TextButton(
+                        onClick = { onSelectionChange(emptyList()) },
+                        enabled = selection.isNotEmpty(),
+                    ) { Text("Clear") }
+                    Button(onClick = dismiss) { Text("Done") }
+                }
+            }
+
+            if (options.size > SearchThreshold || query.isNotEmpty()) {
                 OutlinedTextField(
                     value = query,
                     onValueChange = { query = it },
@@ -206,87 +301,124 @@ fun DiscordSelector(
                     trailingIcon = {
                         if (query.isNotEmpty()) {
                             IconButton(onClick = { query = "" }) {
-                                Icon(Icons.Default.Close, contentDescription = "Clear")
+                                Icon(Icons.Default.Close, contentDescription = "Clear search")
                             }
                         }
                     },
                     singleLine = true,
+                    shape = MaterialTheme.shapes.medium,
                     modifier = Modifier.fillMaxWidth(),
                 )
+            }
 
-                LazyColumn(modifier = Modifier.heightIn(max = 480.dp)) {
-                    items(filtered, key = { it.id }) { option ->
-                        val isSelected = option.id in selection
-                        ListItem(
-                            headlineContent = {
-                                Text(
-                                    text = kind.prefix + option.name,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
+            LazyColumn(modifier = Modifier.weight(1f, fill = false)) {
+                items(filtered, key = { it.id }) { option ->
+                    val isSelected = option.id in selection
+                    SelectorOptionRow(
+                        kind = kind,
+                        option = option,
+                        selected = isSelected,
+                        multiple = multiple,
+                        onClick = {
+                            if (multiple) {
+                                onSelectionChange(
+                                    if (isSelected) selection - option.id
+                                    else selection + option.id
                                 )
-                            },
-                            supportingContent = option.subtitle?.let {
-                                { Text(it, maxLines = 1, overflow = TextOverflow.Ellipsis) }
-                            },
-                            leadingContent = {
-                                val swatch = option.colorHex
-                                    ?.takeIf { it != 0 }
-                                    ?.let { Rgb.fromArgb(it).color }
-                                if (swatch != null) {
-                                    Surface(
-                                        shape = CircleShape,
-                                        color = swatch,
-                                        modifier = Modifier.size(14.dp),
-                                    ) {}
-                                } else {
-                                    Icon(kind.icon, contentDescription = null)
-                                }
-                            },
-                            trailingContent = {
-                                if (multiple) {
-                                    Checkbox(checked = isSelected, onCheckedChange = null)
-                                } else {
-                                    RadioButton(selected = isSelected, onClick = null)
-                                }
-                            },
-                            colors = ListItemDefaults.colors(containerColor = Color.Transparent),
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickableRow {
-                                    if (multiple) {
-                                        onSelectionChange(
-                                            if (isSelected) selection - option.id
-                                            else selection + option.id
-                                        )
-                                    } else {
-                                        onSelectionChange(listOf(option.id))
-                                        expanded = false
-                                        query = ""
-                                    }
-                                },
-                        )
-                    }
-
-                    if (filtered.isEmpty()) {
-                        item { EmptyState("No matches.", icon = Icons.Default.Search) }
-                    }
+                            } else {
+                                onSelectionChange(listOf(option.id))
+                                dismiss()
+                            }
+                        },
+                    )
                 }
 
-                if (multiple) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(vertical = 12.dp),
-                        horizontalArrangement = Arrangement.End,
-                    ) {
-                        IconButton(onClick = { expanded = false; query = "" }) {
-                            Icon(Icons.Default.Check, contentDescription = "Done")
-                        }
+                if (filtered.isEmpty()) {
+                    item(key = "empty") {
+                        EmptyState(
+                            if (options.isEmpty()) "Nothing to choose from yet." else "No matches.",
+                            icon = Icons.Default.Search,
+                        )
                     }
                 }
             }
         }
     }
+}
+
+/** Lists shorter than this skip the search field; every row already fits on screen. */
+private const val SearchThreshold = 8
+
+/** The sheet title used when the caller supplies none. */
+private fun defaultSheetTitle(kind: SelectorKind, multiple: Boolean): String = when (kind) {
+    SelectorKind.Channel -> if (multiple) "Choose channels" else "Choose a channel"
+    SelectorKind.Role -> if (multiple) "Choose roles" else "Choose a role"
+    SelectorKind.User -> if (multiple) "Choose members" else "Choose a member"
+    is SelectorKind.Custom -> if (multiple) "Choose options" else "Choose an option"
+}
+
+/** One option in [DiscordSelectorSheet], with a checkbox or radio trailing. */
+@Composable
+private fun SelectorOptionRow(
+    kind: SelectorKind,
+    option: SelectorOption,
+    selected: Boolean,
+    multiple: Boolean,
+    onClick: () -> Unit,
+) {
+    val primary = MaterialTheme.colorScheme.primary
+    val interaction = if (multiple) {
+        Modifier.toggleable(value = selected, role = Role.Checkbox, onValueChange = { onClick() })
+    } else {
+        Modifier.selectable(selected = selected, role = Role.RadioButton, onClick = onClick)
+    }
+    ListItem(
+        headlineContent = {
+            Text(
+                text = kind.prefix + option.name,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        },
+        supportingContent = option.subtitle?.let {
+            { Text(it, maxLines = 1, overflow = TextOverflow.Ellipsis) }
+        },
+        leadingContent = {
+            val swatch = option.swatch
+            when {
+                option.imageUrl != null -> Avatar(
+                    url = option.imageUrl,
+                    contentDescription = null,
+                    size = 32,
+                    fallbackText = option.name,
+                )
+
+                swatch != null -> Box(
+                    modifier = Modifier.size(24.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Surface(shape = CircleShape, color = swatch, modifier = Modifier.size(14.dp)) {}
+                }
+
+                else -> Icon(option.icon ?: kind.icon, contentDescription = null, tint = primary)
+            }
+        },
+        trailingContent = {
+            if (multiple) {
+                Checkbox(checked = selected, onCheckedChange = null)
+            } else {
+                RadioButton(selected = selected, onClick = null)
+            }
+        },
+        colors = ListItemDefaults.colors(
+            containerColor = if (selected) primary.copy(alpha = DashAlpha.Hex08) else Color.Transparent,
+        ),
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(MaterialTheme.shapes.medium)
+            .heightIn(min = 48.dp)
+            .then(interaction),
+    )
 }
 
 /** Convenience wrapper for the common single-select case. */

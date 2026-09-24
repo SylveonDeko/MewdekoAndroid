@@ -6,19 +6,18 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.automirrored.filled.MenuBook
+import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.ChatBubble
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Forum
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Info
-import androidx.compose.material.icons.filled.MenuBook
 import androidx.compose.material.icons.filled.Public
 import androidx.compose.material.icons.filled.Restore
 import androidx.compose.material.icons.filled.Save
 import androidx.compose.material.icons.filled.Schedule
-import androidx.compose.material.icons.filled.Send
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Tag
 import androidx.compose.material.icons.filled.Tune
@@ -34,6 +33,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -44,12 +44,14 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.mewdeko.mobile.core.ui.ConfirmDialog
 import dev.mewdeko.mobile.core.ui.DiscordSelectorSingle
 import dev.mewdeko.mobile.core.ui.EmptyState
 import dev.mewdeko.mobile.core.ui.FeatureScaffold
+import dev.mewdeko.mobile.core.ui.FormSheet
+import dev.mewdeko.mobile.core.ui.NewItemFab
 import dev.mewdeko.mobile.core.ui.InfoRow
 import dev.mewdeko.mobile.core.ui.MewdekoTextField
 import dev.mewdeko.mobile.core.ui.SectionCard
@@ -67,7 +69,7 @@ import dev.mewdeko.mobile.util.shortDate
 private val Tabs = listOf(
     SectionTab("settings", "Settings", Icons.Default.Settings),
     SectionTab("schedule", "Schedule", Icons.Default.CalendarMonth),
-    SectionTab("words", "Words", Icons.Default.MenuBook),
+    SectionTab("words", "Words", Icons.AutoMirrored.Filled.MenuBook),
     SectionTab("history", "History", Icons.Default.History),
 )
 
@@ -92,6 +94,9 @@ fun WordOfTheDayScreen(
 
     var pendingReset by remember { mutableStateOf(false) }
     var pendingRemove by remember { mutableStateOf<WordOfTheDayWord?>(null) }
+    var showAddWord by remember { mutableStateOf(false) }
+
+    LaunchedEffect(state.words.size) { showAddWord = false }
 
     FeatureScaffold(
         title = "Word of the Day",
@@ -104,14 +109,16 @@ fun WordOfTheDayScreen(
         onRetry = { viewModel.load() },
         actions = {
             IconButton(onClick = viewModel::postNow, enabled = !state.isPosting) {
-                Icon(Icons.Default.Send, contentDescription = "Post a word now")
+                Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "Post a word now")
             }
             IconButton(onClick = { pendingReset = true }) {
                 Icon(Icons.Default.Restore, contentDescription = "Reset everything")
             }
         },
         floatingActionButton = {
-            if (state.hasUnsavedChanges && state.section == "settings") {
+            if (state.section == "words") {
+                NewItemFab(label = "Add word", onClick = { showAddWord = true })
+            } else if (state.hasUnsavedChanges && state.section == "settings") {
                 ExtendedFloatingActionButton(
                     onClick = viewModel::save,
                     icon = { Icon(Icons.Default.Save, contentDescription = null) },
@@ -125,7 +132,11 @@ fun WordOfTheDayScreen(
         when (state.section) {
             "settings" -> SettingsSection(state, viewModel)
             "schedule" -> ScheduleSection(state, viewModel)
-            "words" -> WordsSection(state, viewModel, onRemove = { pendingRemove = it })
+            "words" -> WordsSection(
+                state = state,
+                onRemove = { pendingRemove = it },
+                onAdd = { showAddWord = true },
+            )
             "history" -> HistorySection(state)
         }
     }
@@ -142,6 +153,30 @@ fun WordOfTheDayScreen(
             },
             onDismiss = { pendingReset = false },
         )
+    }
+
+    if (showAddWord) {
+        FormSheet(
+            title = "Add a word",
+            confirmLabel = if (state.isAddingWord) "Adding…" else "Add to list",
+            confirmEnabled = !state.isAddingWord && state.newWord.isNotBlank(),
+            onConfirm = viewModel::addWord,
+            onDismiss = { showAddWord = false },
+        ) {
+            MewdekoTextField(
+                value = state.newWord,
+                onValueChange = viewModel::setNewWord,
+                label = "Word",
+            )
+            MewdekoTextField(
+                value = state.newDefinition,
+                onValueChange = viewModel::setNewDefinition,
+                label = "Definition",
+                placeholder = "Optional, looked up if empty",
+                singleLine = false,
+                minLines = 2,
+            )
+        }
     }
 
     pendingRemove?.let { word ->
@@ -187,7 +222,7 @@ private fun SettingsSection(state: WordOfTheDayState, viewModel: WordOfTheDayVie
     }
 
     SectionCard {
-        SectionCardHeader("Posting", Icons.Default.Send)
+        SectionCardHeader("Posting", Icons.AutoMirrored.Filled.Send)
         DiscordSelectorSingle(
             kind = SelectorKind.Channel,
             options = state.availableChannels.map { SelectorOption(it.id, it.name) },
@@ -233,7 +268,7 @@ private fun SettingsSection(state: WordOfTheDayState, viewModel: WordOfTheDayVie
     SectionCard {
         SectionCardHeader("Word source", Icons.Default.Tune)
         DiscordSelectorSingle(
-            kind = SelectorKind.Custom(Icons.Default.MenuBook),
+            kind = SelectorKind.Custom(Icons.AutoMirrored.Filled.MenuBook),
             options = ModeOptions,
             placeholder = "Dictionary",
             label = "Source",
@@ -434,42 +469,21 @@ private fun RuleEditor(draft: RuleDraft, viewModel: WordOfTheDayViewModel) {
     }
 }
 
+/** The custom word list; the Words section's New action opens the add sheet. */
 @Composable
 private fun WordsSection(
     state: WordOfTheDayState,
-    viewModel: WordOfTheDayViewModel,
     onRemove: (WordOfTheDayWord) -> Unit,
+    onAdd: () -> Unit,
 ) {
     SectionCard {
-        SectionCardHeader("Add a word", Icons.Default.Add)
-        MewdekoTextField(
-            value = state.newWord,
-            onValueChange = viewModel::setNewWord,
-            label = "Word",
-        )
-        MewdekoTextField(
-            value = state.newDefinition,
-            onValueChange = viewModel::setNewDefinition,
-            label = "Definition",
-            placeholder = "Optional, looked up if empty",
-            singleLine = false,
-            minLines = 2,
-        )
-        Button(
-            onClick = viewModel::addWord,
-            enabled = !state.isAddingWord && state.newWord.isNotBlank(),
-            modifier = Modifier.fillMaxWidth(),
-        ) {
-            Text(if (state.isAddingWord) "Adding…" else "Add to list")
-        }
-    }
-
-    SectionCard {
-        SectionCardHeader("Custom words (${state.words.size})", Icons.Default.MenuBook)
+        SectionCardHeader("Custom words (${state.words.size})", Icons.AutoMirrored.Filled.MenuBook)
         if (state.words.isEmpty()) {
             EmptyState(
-                "No custom words yet. Add some above, then set the source to Custom or Mixed.",
-                icon = Icons.Default.MenuBook,
+                message = "No custom words yet. Add some, then set the source to Custom or Mixed.",
+                icon = Icons.AutoMirrored.Filled.MenuBook,
+                actionLabel = "Add word",
+                onAction = onAdd,
             )
         } else {
             state.words.forEach { word ->

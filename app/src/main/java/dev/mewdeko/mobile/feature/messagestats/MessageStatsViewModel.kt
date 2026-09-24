@@ -251,7 +251,7 @@ class MessageStatsViewModel @Inject constructor(
             postSuccess("Saved $fileName.")
         } catch (c: CancellationException) {
             throw c
-        } catch (t: Throwable) {
+        } catch (_: Throwable) {
             postError("Failed to export stats.")
         } finally {
             _state.update { it.copy(isExporting = false) }

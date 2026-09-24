@@ -207,7 +207,7 @@ class CustomVoiceViewModel @Inject constructor(
     /** Writes the staged configuration. */
     fun save() = launchAction("Failed to save configuration.") {
         val current = _state.value.config
-        val updated = api.send(
+        api.sendIgnoringBody(
             Endpoint(
                 "api/CustomVoice/$guildId/configuration",
                 HttpMethod.PUT,
@@ -232,10 +232,10 @@ class CustomVoiceViewModel @Inject constructor(
                     "customVoiceAdminRoleId" to current.customVoiceAdminRoleId?.toLongOrNull(),
                 ),
             ),
-            CustomVoiceConfig.serializer(),
         )
-        _state.update { it.copy(config = updated, loadedConfig = updated) }
+        _state.update { it.copy(config = current, loadedConfig = current) }
         postSuccess("Configuration saved.")
+        load(refreshing = true)
     }
 
     /** Turns the whole custom voice system off. */

@@ -10,7 +10,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
@@ -21,13 +20,11 @@ import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.Visibility
-import androidx.compose.material3.Button
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -40,7 +37,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.mewdeko.mobile.core.ui.Avatar
 import dev.mewdeko.mobile.core.ui.ConfirmDialog
@@ -48,11 +45,11 @@ import dev.mewdeko.mobile.core.ui.DiscordSelector
 import dev.mewdeko.mobile.core.ui.DiscordSelectorSingle
 import dev.mewdeko.mobile.core.ui.EmptyState
 import dev.mewdeko.mobile.core.ui.FeatureScaffold
+import dev.mewdeko.mobile.core.ui.FullScreenEditor
 import dev.mewdeko.mobile.core.ui.MewdekoTextField
+import dev.mewdeko.mobile.core.ui.NewItemFab
 import dev.mewdeko.mobile.core.ui.SectionCard
 import dev.mewdeko.mobile.core.ui.SectionCardHeader
-import dev.mewdeko.mobile.core.ui.SectionTab
-import dev.mewdeko.mobile.core.ui.SectionTabs
 import dev.mewdeko.mobile.core.ui.SelectorKind
 import dev.mewdeko.mobile.core.ui.SelectorOption
 import dev.mewdeko.mobile.core.ui.SliderRow
@@ -63,11 +60,6 @@ import dev.mewdeko.mobile.navigation.GuildRouteArgs
 import dev.mewdeko.mobile.util.relativeToNow
 import java.text.NumberFormat
 import kotlin.math.roundToInt
-
-private val Tabs = listOf(
-    SectionTab("roles", "Stat Roles", Icons.Default.EmojiEvents),
-    SectionTab("editor", "Create / Edit", Icons.Default.Edit),
-)
 
 private val StatOptions = StatRoleStat.entries.map { SelectorOption(it.value.toString(), it.label, it.blurb) }
 private val LimitOptions = StatRoleLimit.entries.map { SelectorOption(it.value.toString(), it.label, it.blurb) }
@@ -103,23 +95,34 @@ fun StatrolesScreen(
         onStatusShown = viewModel::clearStatus,
         onRefresh = { viewModel.load(refreshing = true) },
         onRetry = { viewModel.load() },
-        actions = {
-            IconButton(onClick = viewModel::startNew) {
-                Icon(Icons.Default.Add, contentDescription = "New stat role")
-            }
+        floatingActionButton = {
+            NewItemFab(label = "New stat role", onClick = viewModel::startNew)
         },
     ) {
-        SectionTabs(tabs = Tabs, selectedId = state.section, onSelect = viewModel::setSection)
+        RolesSection(
+            state = state,
+            viewModel = viewModel,
+            onRun = { pendingRun = it },
+            onDelete = { pendingDelete = it },
+        )
+    }
 
-        when (state.section) {
-            "roles" -> RolesSection(
-                state = state,
-                viewModel = viewModel,
-                onRun = { pendingRun = it },
-                onDelete = { pendingDelete = it },
-            )
-
-            "editor" -> EditorSection(state, viewModel)
+    if (state.editorOpen) {
+        val draft = state.draft
+        val original = state.roles.firstOrNull { it.id == draft.id }?.let { StatRoleDraft.from(it) } ?: StatRoleDraft()
+        FullScreenEditor(
+            title = if (draft.isNew) "New stat role" else "Edit stat role",
+            onClose = viewModel::cancelEdit,
+            confirmLabel = when {
+                state.isSaving -> "Saving..."
+                draft.isNew -> "Create"
+                else -> "Save"
+            },
+            confirmEnabled = !state.isSaving,
+            onConfirm = viewModel::save,
+            hasUnsavedChanges = draft != original,
+        ) {
+            EditorSection(state, viewModel)
         }
     }
 
@@ -170,6 +173,8 @@ private fun RolesSection(
             EmptyState(
                 "No stat roles yet. Create one to reward active members automatically.",
                 icon = Icons.Default.EmojiEvents,
+                actionLabel = "New stat role",
+                onAction = viewModel::startNew,
             )
         }
         return
@@ -383,39 +388,24 @@ private fun EditorSection(state: StatRolesState, viewModel: StatRolesViewModel) 
     val roleOptions = state.guildRoles.map { SelectorOption(it.id, it.name) }
 
     Text(
-        text = if (draft.isNew) "New stat role" else "Edit stat role #${draft.id}",
-        style = MaterialTheme.typography.titleMedium,
-        modifier = Modifier.padding(horizontal = 4.dp),
-    )
-    Text(
         text = "Pick what to measure, how members qualify, and what happens when they do.",
         style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
         modifier = Modifier.padding(horizontal = 4.dp),
     )
 
+    state.saveError?.let { error ->
+        Text(
+            text = error,
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.error,
+            modifier = Modifier.padding(horizontal = 4.dp),
+        )
+    }
+
     ConditionCard(draft, roleOptions, viewModel)
     FiltersCard(state, draft, roleOptions, viewModel)
     ScheduleCard(state, draft, viewModel)
-
-    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-        Button(
-            onClick = viewModel::save,
-            enabled = !state.isSaving,
-            modifier = Modifier.weight(1f),
-        ) {
-            Text(
-                when {
-                    state.isSaving -> "Saving…"
-                    draft.isNew -> "Create stat role"
-                    else -> "Save changes"
-                },
-            )
-        }
-        OutlinedButton(onClick = viewModel::cancelEdit, enabled = !state.isSaving) {
-            Text("Cancel")
-        }
-    }
 }
 
 @Composable

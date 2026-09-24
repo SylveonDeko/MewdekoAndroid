@@ -22,6 +22,8 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.builtins.ListSerializer
@@ -81,6 +83,13 @@ class ConfessionsViewModel @Inject constructor(
 ) : FeatureViewModel(savedStateHandle, api, session) {
 
     private val _state = MutableStateFlow(ConfessionsState())
+
+    /**
+     * Runs blacklist toggles one after another. The bot keeps the blacklist
+     * as one stored value, so overlapping toggles (a multi-select Clear, for
+     * one) could otherwise drop an edit.
+     */
+    private val blacklistLock = Mutex()
 
     /** Observable screen state. */
     val state: StateFlow<ConfessionsState> = _state.asStateFlow()
@@ -202,14 +211,16 @@ class ConfessionsViewModel @Inject constructor(
 
     /** Adds or removes a role from the confession blacklist. */
     fun toggleBlacklist(roleId: Snowflake) = launchAction("Failed to toggle blacklist.") {
-        api.sendIgnoringBody(
-            Endpoint("api/Confessions/$guildId/blacklist/$roleId", HttpMethod.POST)
-        )
-        _state.update {
-            it.copy(
-                blacklist = if (roleId in it.blacklist) it.blacklist - roleId
-                else it.blacklist + roleId,
+        blacklistLock.withLock {
+            api.sendIgnoringBody(
+                Endpoint("api/Confessions/$guildId/blacklist/$roleId", HttpMethod.POST)
             )
+            _state.update {
+                it.copy(
+                    blacklist = if (roleId in it.blacklist) it.blacklist - roleId
+                    else it.blacklist + roleId,
+                )
+            }
         }
     }
 

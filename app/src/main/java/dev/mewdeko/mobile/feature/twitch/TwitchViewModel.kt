@@ -75,6 +75,9 @@ data class TwitchTimerDraft(
     val editing: Boolean = false,
 )
 
+/** Which create or edit form is open over the Twitch screen. */
+enum class TwitchEditor { COMMAND, TIMER, QUOTE, REDEMPTION }
+
 /** The channel point action create/edit form. */
 data class TwitchRedemptionDraft(
     val rewardTitle: String = "",
@@ -121,6 +124,7 @@ data class TwitchState(
     val disconnecting: Boolean = false,
     val pendingAuthUrl: String? = null,
     val awaitingOAuth: Boolean = false,
+    val openEditor: TwitchEditor? = null,
     val commandDraft: TwitchCommandDraft = TwitchCommandDraft(),
     val commandPreview: String = "",
     val commandSaving: Boolean = false,
@@ -387,6 +391,31 @@ class TwitchViewModel @Inject constructor(
         refreshHealth()
     }
 
+    /** Opens [editor] with an empty draft, for the New action and empty states. */
+    fun startNew(editor: TwitchEditor) = _state.update {
+        when (editor) {
+            TwitchEditor.COMMAND -> it.copy(
+                openEditor = editor,
+                commandDraft = TwitchCommandDraft(testArgs = it.commandDraft.testArgs),
+                commandPreview = "",
+            )
+            TwitchEditor.TIMER -> it.copy(openEditor = editor, timerDraft = TwitchTimerDraft())
+            TwitchEditor.QUOTE -> it.copy(openEditor = editor, quoteText = "", quoteAuthor = "")
+            TwitchEditor.REDEMPTION -> it.copy(openEditor = editor, redemptionDraft = TwitchRedemptionDraft())
+        }
+    }
+
+    /** Closes the open editor and drops its unsaved draft. */
+    fun closeEditor() = _state.update {
+        when (it.openEditor) {
+            TwitchEditor.COMMAND -> it.copy(openEditor = null, commandDraft = TwitchCommandDraft(), commandPreview = "")
+            TwitchEditor.TIMER -> it.copy(openEditor = null, timerDraft = TwitchTimerDraft())
+            TwitchEditor.QUOTE -> it.copy(openEditor = null, quoteText = "", quoteAuthor = "")
+            TwitchEditor.REDEMPTION -> it.copy(openEditor = null, redemptionDraft = TwitchRedemptionDraft())
+            null -> it
+        }
+    }
+
     /** Updates the custom command form. */
     fun updateCommandDraft(transform: (TwitchCommandDraft) -> TwitchCommandDraft) =
         _state.update { it.copy(commandDraft = transform(it.commandDraft)) }
@@ -394,6 +423,7 @@ class TwitchViewModel @Inject constructor(
     /** Loads [command] into the form for editing. */
     fun editCommand(command: TwitchCustomCommand) = _state.update {
         it.copy(
+            openEditor = TwitchEditor.COMMAND,
             commandDraft = TwitchCommandDraft(
                 name = command.name,
                 response = command.response,
@@ -426,8 +456,16 @@ class TwitchViewModel @Inject constructor(
             api.sendIgnoringBody(Endpoint(twitch("custom-commands"), HttpMethod.POST, body.encode()))
         }
         _state.update {
-            if (ok) it.copy(commandSaving = false, commandDraft = TwitchCommandDraft(), commandPreview = "")
-            else it.copy(commandSaving = false)
+            if (ok) {
+                it.copy(
+                    openEditor = null,
+                    commandSaving = false,
+                    commandDraft = TwitchCommandDraft(),
+                    commandPreview = "",
+                )
+            } else {
+                it.copy(commandSaving = false)
+            }
         }
         if (ok) reloadCustomCommands()
     }
@@ -482,6 +520,7 @@ class TwitchViewModel @Inject constructor(
     /** Loads [timer] into the form for editing. */
     fun editTimer(timer: TwitchTimer) = _state.update {
         it.copy(
+            openEditor = TwitchEditor.TIMER,
             timerDraft = TwitchTimerDraft(
                 name = timer.name,
                 messages = timer.messages,
@@ -517,7 +556,11 @@ class TwitchViewModel @Inject constructor(
             api.sendIgnoringBody(Endpoint(twitch("timers"), HttpMethod.POST, body.encode()))
         }
         _state.update {
-            if (ok) it.copy(timerSaving = false, timerDraft = TwitchTimerDraft()) else it.copy(timerSaving = false)
+            if (ok) {
+                it.copy(openEditor = null, timerSaving = false, timerDraft = TwitchTimerDraft())
+            } else {
+                it.copy(timerSaving = false)
+            }
         }
         if (ok) reloadTimers()
     }
@@ -605,7 +648,11 @@ class TwitchViewModel @Inject constructor(
             api.sendIgnoringBody(Endpoint(twitch("quotes"), HttpMethod.POST, body.encode()))
         }
         _state.update {
-            if (ok) it.copy(quoteSaving = false, quoteText = "", quoteAuthor = "") else it.copy(quoteSaving = false)
+            if (ok) {
+                it.copy(openEditor = null, quoteSaving = false, quoteText = "", quoteAuthor = "")
+            } else {
+                it.copy(quoteSaving = false)
+            }
         }
         if (ok) {
             refreshQuotes()
@@ -635,6 +682,7 @@ class TwitchViewModel @Inject constructor(
     /** Loads [action] into the form for editing. */
     fun editRedemption(action: TwitchRedemptionAction) = _state.update {
         it.copy(
+            openEditor = TwitchEditor.REDEMPTION,
             redemptionDraft = TwitchRedemptionDraft(
                 rewardTitle = action.rewardTitle,
                 twitchResponse = action.twitchResponse.orEmpty(),
@@ -663,8 +711,11 @@ class TwitchViewModel @Inject constructor(
             api.sendIgnoringBody(Endpoint(twitch("redemptions"), HttpMethod.POST, body.encode()))
         }
         _state.update {
-            if (ok) it.copy(redemptionSaving = false, redemptionDraft = TwitchRedemptionDraft())
-            else it.copy(redemptionSaving = false)
+            if (ok) {
+                it.copy(openEditor = null, redemptionSaving = false, redemptionDraft = TwitchRedemptionDraft())
+            } else {
+                it.copy(redemptionSaving = false)
+            }
         }
         if (ok) reloadRedemptions()
     }

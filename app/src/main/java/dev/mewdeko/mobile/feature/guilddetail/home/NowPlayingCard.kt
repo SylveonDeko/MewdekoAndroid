@@ -58,6 +58,7 @@ import dev.mewdeko.mobile.core.ui.readableInk
 import kotlinx.coroutines.delay
 import java.time.Duration
 import java.time.Instant
+import kotlin.time.Duration.Companion.seconds
 
 /**
  * The currently playing track, with artwork, a live progress bar, an
@@ -312,7 +313,7 @@ fun rememberElapsedSeconds(position: Long, syncedAt: Instant?, playing: Boolean,
     LaunchedEffect(playing, position, syncedAt) {
         now = Instant.now()
         while (playing) {
-            delay(1_000)
+            delay(1.seconds)
             now = Instant.now()
         }
     }

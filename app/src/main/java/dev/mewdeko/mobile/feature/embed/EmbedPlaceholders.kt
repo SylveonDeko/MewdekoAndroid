@@ -15,10 +15,8 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -26,6 +24,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import dev.mewdeko.mobile.core.ui.MewdekoBottomSheet
 import dev.mewdeko.mobile.core.ui.MewdekoTextField
 import dev.mewdeko.mobile.core.ui.SearchField
 import dev.mewdeko.mobile.core.theme.MonospaceStyle
@@ -137,7 +136,6 @@ private fun PlaceholderPickerSheet(
     onPick: (String) -> Unit,
     additionalPlaceholders: List<Placeholder> = emptyList(),
 ) {
-    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     var query by remember { mutableStateOf("") }
     val allPlaceholders = remember(additionalPlaceholders) {
         (additionalPlaceholders + Placeholders).distinctBy { it.name }
@@ -154,9 +152,8 @@ private fun PlaceholderPickerSheet(
         }
     }
 
-    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheetState) {
+    MewdekoBottomSheet(onDismissRequest = onDismiss, title = "Insert a placeholder") {
         Column(modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp)) {
-            Text("Insert a placeholder", style = MaterialTheme.typography.titleMedium)
             SearchField(
                 value = query,
                 onValueChange = { query = it },

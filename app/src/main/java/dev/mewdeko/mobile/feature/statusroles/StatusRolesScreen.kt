@@ -3,17 +3,12 @@ package dev.mewdeko.mobile.feature.statusroles
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Row
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.SentimentSatisfied
-import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
-import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
@@ -22,7 +17,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
-import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.mewdeko.mobile.core.model.EmbedMessage
 import dev.mewdeko.mobile.core.ui.ConfirmDialog
@@ -30,6 +25,8 @@ import dev.mewdeko.mobile.core.ui.DiscordSelector
 import dev.mewdeko.mobile.core.ui.DiscordSelectorSingle
 import dev.mewdeko.mobile.core.ui.EmptyState
 import dev.mewdeko.mobile.core.ui.FeatureScaffold
+import dev.mewdeko.mobile.core.ui.FormSheet
+import dev.mewdeko.mobile.core.ui.NewItemFab
 import dev.mewdeko.mobile.core.ui.MewdekoTextField
 import dev.mewdeko.mobile.core.ui.SectionCard
 import dev.mewdeko.mobile.core.ui.SectionCardHeader
@@ -67,11 +64,7 @@ fun StatusRolesScreen(
         onRefresh = { viewModel.load(refreshing = true) },
         onRetry = { viewModel.load() },
         floatingActionButton = {
-            ExtendedFloatingActionButton(
-                onClick = { showAdd = true },
-                icon = { Icon(Icons.Default.Add, contentDescription = null) },
-                text = { Text("Add rule") },
-            )
+            NewItemFab(label = "Add rule", onClick = { showAdd = true })
         },
     ) {
         SectionCard {
@@ -114,6 +107,8 @@ fun StatusRolesScreen(
                 EmptyState(
                     message = "No status rules configured yet.",
                     icon = Icons.Default.SentimentSatisfied,
+                    actionLabel = "Add rule",
+                    onAction = { showAdd = true },
                 )
             }
         } else {
@@ -188,26 +183,21 @@ fun StatusRolesScreen(
 
     if (showAdd) {
         var text by remember { mutableStateOf("") }
-        AlertDialog(
-            onDismissRequest = { showAdd = false },
-            title = { Text("Add status rule") },
-            text = {
-                MewdekoTextField(
-                    value = text,
-                    onValueChange = { text = it },
-                    label = "Trigger text",
-                    placeholder = "gg/myserver",
-                    supportingText = "Matched against each member's custom status.",
-                )
-            },
-            confirmButton = {
-                Button(
-                    onClick = { viewModel.add(text.trim()); showAdd = false },
-                    enabled = text.isNotBlank(),
-                ) { Text("Add") }
-            },
-            dismissButton = { TextButton(onClick = { showAdd = false }) { Text("Cancel") } },
-        )
+        FormSheet(
+            title = "Add status rule",
+            confirmLabel = "Add",
+            confirmEnabled = text.isNotBlank(),
+            onConfirm = { viewModel.add(text.trim()); showAdd = false },
+            onDismiss = { showAdd = false },
+        ) {
+            MewdekoTextField(
+                value = text,
+                onValueChange = { text = it },
+                label = "Trigger text",
+                placeholder = "gg/myserver",
+                supportingText = "Matched against each member's custom status.",
+            )
+        }
     }
 
     pendingDelete?.let { config ->

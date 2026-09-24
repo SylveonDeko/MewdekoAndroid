@@ -44,17 +44,18 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalClipboardManager
-import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.unit.dp
-import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.mewdeko.mobile.core.theme.MonospaceStyle
 import dev.mewdeko.mobile.core.ui.ConfirmDialog
 import dev.mewdeko.mobile.core.ui.DiscordSelectorSingle
 import dev.mewdeko.mobile.core.ui.EmptyState
+import dev.mewdeko.mobile.core.ui.EnumOption
+import dev.mewdeko.mobile.core.ui.EnumPicker
 import dev.mewdeko.mobile.core.ui.FeatureScaffold
 import dev.mewdeko.mobile.core.ui.MewdekoTextField
+import dev.mewdeko.mobile.core.ui.NewItemFab
 import dev.mewdeko.mobile.core.ui.SectionCard
 import dev.mewdeko.mobile.core.ui.SectionCardHeader
 import dev.mewdeko.mobile.core.ui.SectionTab
@@ -65,6 +66,7 @@ import dev.mewdeko.mobile.core.ui.SliderRow
 import dev.mewdeko.mobile.core.ui.StatTile
 import dev.mewdeko.mobile.core.ui.SwitchRow
 import dev.mewdeko.mobile.core.ui.TagChip
+import dev.mewdeko.mobile.core.ui.rememberTextClipboard
 import dev.mewdeko.mobile.navigation.GuildRouteArgs
 
 /** The synthetic channel option id used to clear a channel selection. */
@@ -74,7 +76,6 @@ private val Tabs = listOf(
     SectionTab("servers", "Servers", Icons.Default.Widgets),
     SectionTab("history", "History", Icons.Default.History),
     SectionTab("console", "Console", Icons.Default.Terminal),
-    SectionTab("add", "Add", Icons.Default.Add),
 )
 
 /** Minecraft server status tracking, event relays, and RCON. */
@@ -90,6 +91,7 @@ fun MinecraftScreen(
     val status by viewModel.status.collectAsStateWithLifecycle()
 
     var activeTab by remember { mutableStateOf("servers") }
+    var adding by remember { mutableStateOf(false) }
     var showRconSettings by remember { mutableStateOf<MinecraftServer?>(null) }
     var pendingRemove by remember { mutableStateOf<MinecraftServer?>(null) }
     var pendingRevokeKey by remember { mutableStateOf<MinecraftServer?>(null) }
@@ -122,12 +124,8 @@ fun MinecraftScreen(
             }
         },
         floatingActionButton = {
-            if (activeTab == "servers" && state.servers.isNotEmpty()) {
-                ExtendedFloatingActionButton(
-                    onClick = { activeTab = "add" },
-                    icon = { Icon(Icons.Default.Add, contentDescription = null) },
-                    text = { Text("Add server") },
-                )
+            if (activeTab == "servers") {
+                NewItemFab(label = "Add server", onClick = { adding = true })
             }
         },
     ) {
@@ -152,17 +150,6 @@ fun MinecraftScreen(
                 },
             )
 
-            "add" -> MinecraftAddTab(
-                channelOptions = channelOptions,
-                onAdd = { name, address, port, type, queryPort, watchChannelId, watchInterval, watchMode, embed ->
-                    viewModel.addServer(
-                        name, address, port, type, queryPort,
-                        watchChannelId, watchInterval, watchMode, embed,
-                    )
-                    activeTab = "servers"
-                },
-            )
-
             else -> MinecraftServersTab(
                 state = state,
                 selected = selected,
@@ -172,9 +159,24 @@ fun MinecraftScreen(
                 onRemove = { pendingRemove = it },
                 onRevokeKey = { pendingRevokeKey = it },
                 onRegenerateKey = { pendingRegenerateKey = it },
-                onAddServer = { activeTab = "add" },
+                onAddServer = { adding = true },
             )
         }
+    }
+
+    if (adding) {
+        MinecraftAddServerEditor(
+            channelOptions = channelOptions,
+            onClose = { adding = false },
+            onAdd = { name, address, port, type, queryPort, watchChannelId, watchInterval, watchMode, embed ->
+                viewModel.addServer(
+                    name, address, port, type, queryPort,
+                    watchChannelId, watchInterval, watchMode, embed,
+                )
+                adding = false
+                activeTab = "servers"
+            },
+        )
     }
 
     showRconSettings?.let { server ->
@@ -255,7 +257,7 @@ fun MinecraftScreen(
     }
 
     state.pluginKey?.let { key ->
-        val clipboard = LocalClipboardManager.current
+        val clipboard = rememberTextClipboard()
         val wsUrl = state.pluginWsUrl ?: "ws://<your-dashboard-host>/api/mc-bridge/ws"
         AlertDialog(
             onDismissRequest = viewModel::clearPluginKey,
@@ -283,7 +285,7 @@ fun MinecraftScreen(
                                 modifier = Modifier.padding(8.dp),
                             )
                         }
-                        IconButton(onClick = { clipboard.setText(AnnotatedString(key)) }) {
+                        IconButton(onClick = { clipboard.copy(key) }) {
                             Icon(Icons.Default.ContentCopy, contentDescription = "Copy key")
                         }
                     }
@@ -304,7 +306,7 @@ fun MinecraftScreen(
                                 modifier = Modifier.padding(8.dp),
                             )
                         }
-                        IconButton(onClick = { clipboard.setText(AnnotatedString(wsUrl)) }) {
+                        IconButton(onClick = { clipboard.copy(wsUrl) }) {
                             Icon(Icons.Default.ContentCopy, contentDescription = "Copy URL")
                         }
                     }
@@ -346,10 +348,9 @@ private fun MinecraftServersTab(
             EmptyState(
                 message = "No Minecraft servers tracked yet.",
                 icon = Icons.Default.Widgets,
+                actionLabel = "Add server",
+                onAction = onAddServer,
             )
-            TextButton(onClick = onAddServer, modifier = Modifier.fillMaxWidth()) {
-                Text("Add a server")
-            }
         }
         return
     }
@@ -484,16 +485,12 @@ private fun MinecraftServersTab(
         var queryPort by remember(server.name) { mutableStateOf(server.queryPort.toString()) }
 
         MewdekoTextField(value = address, onValueChange = { address = it }, label = "Address")
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            McServerType.entries.forEach { entry ->
-                FilterChip(
-                    selected = type == entry,
-                    onClick = { type = entry },
-                    label = { Text(entry.label) },
-                    modifier = Modifier.weight(1f),
-                )
-            }
-        }
+        EnumPicker(
+            label = "Server type",
+            options = McServerType.entries.map { EnumOption(it, title = it.label, description = it.blurb) },
+            selected = type,
+            onSelect = { type = it },
+        )
         MewdekoTextField(
             value = port,
             onValueChange = { port = it.filter(Char::isDigit) },
@@ -537,20 +534,12 @@ private fun MinecraftServersTab(
                 )
             },
         )
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .horizontalScroll(rememberScrollState()),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            McWatchMode.entries.forEach { mode ->
-                FilterChip(
-                    selected = server.watch == mode,
-                    onClick = { viewModel.setWatch(server.name, server.watchChannelId, null, mode.raw) },
-                    label = { Text(mode.label) },
-                )
-            }
-        }
+        EnumPicker(
+            label = "Watch mode",
+            options = McWatchMode.entries.map { EnumOption(it, title = it.label, description = it.blurb) },
+            selected = server.watch,
+            onSelect = { mode -> viewModel.setWatch(server.name, server.watchChannelId, null, mode.raw) },
+        )
         var pendingInterval by remember(server.name, server.watchInterval) {
             mutableIntStateOf(server.watchInterval)
         }

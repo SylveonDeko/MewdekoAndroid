@@ -8,14 +8,14 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.EmojiEmotions
 import androidx.compose.material.icons.filled.KeyboardArrowDown
-import androidx.compose.material.icons.filled.KeyboardArrowLeft
-import androidx.compose.material.icons.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.SmartButton
 import androidx.compose.material.icons.filled.UnfoldMore
@@ -31,7 +31,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
-import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.mewdeko.mobile.core.model.ComponentOption
 import dev.mewdeko.mobile.core.model.EmbedMessage
@@ -324,10 +324,10 @@ private fun ComponentCard(
             Row(horizontalArrangement = Arrangement.spacedBy(0.dp)) {
                 if (!component.isSelect) {
                     IconButton(onClick = onMoveLeft, enabled = canMoveLeft) {
-                        Icon(Icons.Default.KeyboardArrowLeft, contentDescription = "Move left in row")
+                        Icon(Icons.AutoMirrored.Filled.KeyboardArrowLeft, contentDescription = "Move left in row")
                     }
                     IconButton(onClick = onMoveRight, enabled = canMoveRight) {
-                        Icon(Icons.Default.KeyboardArrowRight, contentDescription = "Move right in row")
+                        Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = "Move right in row")
                     }
                 }
                 IconButton(onClick = onMoveToPreviousRow, enabled = canMoveToPreviousRow) {

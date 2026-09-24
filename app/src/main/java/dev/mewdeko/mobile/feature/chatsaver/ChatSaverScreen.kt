@@ -3,29 +3,35 @@ package dev.mewdeko.mobile.feature.chatsaver
 import android.content.Intent
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.InsertDriveFile
+import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Download
-import androidx.compose.material.icons.filled.DriveFileRenameOutline
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Forum
-import androidx.compose.material.icons.filled.InsertDriveFile
-import androidx.compose.material.icons.filled.OpenInNew
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Save
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Storage
 import androidx.compose.material.icons.filled.Tag
+import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.ListItem
@@ -46,7 +52,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil.compose.AsyncImage
 import dev.mewdeko.mobile.core.model.GuildMember
@@ -203,6 +209,7 @@ private fun FetchSection(state: ChatSaverState, viewModel: ChatSaverViewModel) {
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun SavedSection(
     state: ChatSaverState,
@@ -233,31 +240,54 @@ private fun SavedSection(
                         Text(log.displayName, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     },
                     supportingContent = {
-                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        FlowRow(
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            verticalArrangement = Arrangement.spacedBy(4.dp),
+                        ) {
                             TagChip("${log.messageCount} messages")
                             log.channelName?.let { TagChip("#$it", icon = Icons.Default.Tag) }
                             log.timestamp?.let { TagChip(it) }
                         }
                     },
-                    trailingContent = {
-                        Row {
-                            IconButton(onClick = { onRename(log) }) {
-                                Icon(Icons.Default.DriveFileRenameOutline, contentDescription = "Rename")
-                            }
-                            IconButton(onClick = { onDelete(log) }) {
-                                Icon(
-                                    Icons.Default.Delete,
-                                    contentDescription = "Delete",
-                                    tint = MaterialTheme.colorScheme.error,
-                                )
-                            }
-                        }
-                    },
+                    trailingContent = { SavedLogActions(log, onRename, onDelete) },
                     modifier = Modifier
                         .fillMaxWidth()
                         .clickableRow { onOpen(log.id) },
                 )
             }
+        }
+    }
+}
+
+/** Overflow menu for a saved log row, so a long timestamp chip never squeezes the trailing icons. */
+@Composable
+private fun SavedLogActions(
+    log: ChatLogSummary,
+    onRename: (ChatLogSummary) -> Unit,
+    onDelete: (ChatLogSummary) -> Unit,
+) {
+    var open by remember { mutableStateOf(false) }
+    Box {
+        IconButton(onClick = { open = true }) {
+            Icon(Icons.Default.MoreVert, contentDescription = "Actions for ${log.displayName}")
+        }
+        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+            DropdownMenuItem(
+                text = { Text("Rename") },
+                leadingIcon = { Icon(Icons.Outlined.Edit, contentDescription = null) },
+                onClick = { open = false; onRename(log) },
+            )
+            DropdownMenuItem(
+                text = { Text("Delete") },
+                leadingIcon = {
+                    Icon(
+                        Icons.Default.Delete,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.error,
+                    )
+                },
+                onClick = { open = false; onDelete(log) },
+            )
         }
     }
 }
@@ -410,7 +440,7 @@ private fun AttachmentRow(attachment: ChatLogAttachment) {
                 .clickable { uriHandler.openUri(attachment.url) }
                 .padding(8.dp),
         ) {
-            Icon(Icons.Default.InsertDriveFile, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+            Icon(Icons.AutoMirrored.Filled.InsertDriveFile, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
             Text(
                 text = "${attachment.filename} (${formatFileSize(attachment.fileSize)})",
                 style = MaterialTheme.typography.bodySmall,
@@ -457,7 +487,7 @@ private fun EmbedCard(
                         Text(title, style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary)
                         if (embedUrl != null) {
                             Icon(
-                                Icons.Default.OpenInNew,
+                                Icons.AutoMirrored.Filled.OpenInNew,
                                 contentDescription = "Open link",
                                 tint = MaterialTheme.colorScheme.primary,
                                 modifier = Modifier.size(14.dp),

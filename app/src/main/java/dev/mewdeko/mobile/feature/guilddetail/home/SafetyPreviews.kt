@@ -48,6 +48,7 @@ import dev.mewdeko.mobile.core.ui.GuildCard
 import dev.mewdeko.mobile.core.ui.ScallopShape
 import dev.mewdeko.mobile.core.ui.guildBorder
 import dev.mewdeko.mobile.feature.guilddetail.formatted
+import dev.mewdeko.mobile.navigation.FeatureCategory
 import dev.mewdeko.mobile.util.relativeToNow
 import java.time.Instant
 
@@ -65,11 +66,13 @@ fun SafetyBand(
     roles: HomeRoles,
     reduced: Boolean,
     onOpenFeature: (String) -> Unit,
+    onOpenCategory: (FeatureCategory) -> Unit,
 ) {
     val role = roles.safety
     val badge = ScallopShape(12, 0.06f)
+    val onSeeAll = { onOpenCategory(FeatureCategory.SECURITY) }
     if (!loaded) {
-        SkeletonBand("Safety", Icons.Default.Shield, role, badge, "moderation", onOpenFeature)
+        SkeletonBand("Safety", Icons.Default.Shield, role, badge, onSeeAll, onOpenFeature)
         return
     }
 
@@ -94,7 +97,7 @@ fun SafetyBand(
         icon = Icons.Default.Shield,
         role = role,
         badgeShape = badge,
-        seeAllId = "moderation",
+        onSeeAll = onSeeAll,
         headline = if (protection != null) active.toLong() else warnings.size.toLong(),
         headlineText = if (protection != null) "$active/$ProtectionCount" else null,
         descriptor = if (protection != null) "protections active" else "warnings on record",

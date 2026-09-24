@@ -14,6 +14,50 @@ import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import java.util.UUID
 
+/**
+ * Reads an embed color the way the bot does, returning the packed RGB value
+ * or null when [raw] is not a color.
+ *
+ * Accepted: `#RGB` and `#RRGGBB`, `0x` followed by up to six hex digits,
+ * bare six-digit hex that contains a letter (`5865F2`), and a plain decimal
+ * integer (`5793266`). Digits-only input is always decimal, matching the
+ * bot's parser, so `123456` is never misread as hex. Partial or malformed
+ * input returns null rather than falling back to black.
+ */
+fun embedColorValue(raw: String): Int? {
+    val trimmed = raw.trim()
+    if (trimmed.isEmpty()) return null
+    fun isHex(c: Char) = c.isDigit() || c.lowercaseChar() in 'a'..'f'
+    val value: Long? = when {
+        trimmed.startsWith("#") -> {
+            val digits = trimmed.substring(1)
+            when {
+                !digits.all(::isHex) -> null
+                digits.length == 3 -> digits.map { "$it$it" }.joinToString("").toLongOrNull(16)
+                digits.length == 6 -> digits.toLongOrNull(16)
+                else -> null
+            }
+        }
+
+        trimmed.startsWith("0x", ignoreCase = true) -> {
+            val digits = trimmed.substring(2)
+            if (digits.length in 1..6 && digits.all(::isHex)) digits.toLongOrNull(16) else null
+        }
+
+        trimmed.all { it.isDigit() } -> trimmed.toLongOrNull()
+        trimmed.length == 6 && trimmed.all(::isHex) -> trimmed.toLongOrNull(16)
+        else -> null
+    }
+    return value?.takeIf { it in 0L..0xFFFFFFL }?.toInt()
+}
+
+/**
+ * Normalises any color [embedColorValue] accepts to uppercase `#RRGGBB`, the
+ * form the bot parses without ambiguity, or null when [raw] is not a color.
+ */
+fun normalizedEmbedHex(raw: String): String? =
+    embedColorValue(raw)?.let { "#%06X".format(it) }
+
 /** The `{ url: "..." }` wrapper Discord uses for thumbnail and image slots. */
 @Serializable
 data class UrlBox(val url: String = "")
@@ -98,7 +142,7 @@ data class EmbedSpec(
         if (title.isNotEmpty()) put("title", JsonPrimitive(title))
         if (description.isNotEmpty()) put("description", JsonPrimitive(description))
         if (url.isNotEmpty()) put("url", JsonPrimitive(url))
-        if (color.isNotEmpty()) put("color", JsonPrimitive(color))
+        normalizedEmbedHex(color)?.let { put("color", JsonPrimitive(it)) }
         if (!author.isEmpty) put("author", MewdekoJson.encodeToJsonElement(EmbedAuthor.serializer(), author))
         if (!footer.isEmpty) put("footer", MewdekoJson.encodeToJsonElement(EmbedFooter.serializer(), footer))
         if (thumbnailUrl.isNotEmpty()) put("thumbnail", buildJsonObject { put("url", JsonPrimitive(thumbnailUrl)) })
@@ -123,7 +167,7 @@ data class EmbedSpec(
                 val primitive = element as? JsonPrimitive
                 when {
                     primitive == null -> ""
-                    primitive.isString -> primitive.content
+                    primitive.isString -> normalizedEmbedHex(primitive.content) ?: primitive.content
                     else -> primitive.intOrNull
                         ?.let { "#%06X".format(it and 0xFFFFFF) }
                         .orEmpty()

@@ -26,7 +26,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
-import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.mewdeko.mobile.core.theme.MewdekoTheme
 import dev.mewdeko.mobile.core.ui.ErrorState
@@ -55,6 +55,7 @@ import dev.mewdeko.mobile.feature.guilddetail.home.rememberHomeRoles
 import dev.mewdeko.mobile.feature.guilddetail.home.rememberReducedMotion
 import dev.mewdeko.mobile.feature.guilddetail.home.riseOnce
 import dev.mewdeko.mobile.feature.guilddetail.home.setupEntries
+import dev.mewdeko.mobile.navigation.FeatureCategory
 import dev.mewdeko.mobile.navigation.GuildRouteArgs
 
 /**
@@ -71,7 +72,7 @@ fun GuildDetailScreen(
     userId: String,
     onBack: () -> Unit,
     onOpenFeature: (String) -> Unit,
-    onOpenFeatureBrowser: () -> Unit,
+    onOpenFeatureBrowser: (FeatureCategory?) -> Unit,
     viewModel: GuildOverviewViewModel = hiltViewModel(),
     homeViewModel: GuildHomeViewModel = hiltViewModel(),
 ) {
@@ -134,7 +135,7 @@ fun GuildDetailScreen(
             onRetry = { viewModel.load() },
             actions = {
                 ImmersiveIconButton(
-                    onClick = onOpenFeatureBrowser,
+                    onClick = { onOpenFeatureBrowser(null) },
                     icon = Icons.Default.Apps,
                     contentDescription = "All features",
                     fraction = immersive.containerFraction,
@@ -226,6 +227,7 @@ fun GuildDetailScreen(
                         roles = roles,
                         reduced = reduced,
                         onOpenFeature = onOpenFeature,
+                        onOpenCategory = onOpenFeatureBrowser,
                     )
                 }
 
@@ -237,6 +239,7 @@ fun GuildDetailScreen(
                             loaded = entertainmentLoaded,
                             roles = roles,
                             onOpenFeature = onOpenFeature,
+                            onOpenCategory = onOpenFeatureBrowser,
                         )
                     }
                 }
@@ -251,6 +254,7 @@ fun GuildDetailScreen(
                         roles = roles,
                         onEnsureLoaded = homeViewModel::ensureLoaded,
                         onOpenFeature = onOpenFeature,
+                        onOpenCategory = onOpenFeatureBrowser,
                     )
                 }
 
@@ -261,6 +265,7 @@ fun GuildDetailScreen(
                         roles = roles,
                         reduced = reduced,
                         onOpenFeature = onOpenFeature,
+                        onOpenCategory = onOpenFeatureBrowser,
                     )
                 }
 

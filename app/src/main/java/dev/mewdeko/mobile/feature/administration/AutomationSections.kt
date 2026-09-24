@@ -81,7 +81,7 @@ fun GameVoiceChannelSection(state: AdministrationState, viewModel: Administratio
                 enabled = pick != null,
             ) { Text("Set channel") }
             if (state.gameVoiceChannelId != null) {
-                OutlinedButton(onClick = { viewModel.toggleGameVoiceChannel(state.gameVoiceChannelId!!) }) {
+                OutlinedButton(onClick = { viewModel.toggleGameVoiceChannel(state.gameVoiceChannelId) }) {
                     Text("Disable")
                 }
             }
@@ -128,7 +128,7 @@ fun DeleteMessageOnCommandSection(state: AdministrationState, viewModel: Adminis
         if (state.deleteMessageOnCommand.channels.isNotEmpty()) {
             state.deleteMessageOnCommand.channels.forEach { entry ->
                 val name = state.availableChannels.firstOrNull { it.id == entry.channelId }?.name ?: entry.channelId
-                InfoRow(name, DeleteMsgState.from(entry.state).label)
+                InfoRow(name, if (entry.state) DeleteMsgState.ENABLE.label else DeleteMsgState.DISABLE.label)
             }
         }
     }
@@ -520,17 +520,12 @@ fun StatsPrivacySection(state: AdministrationState, viewModel: AdministrationVie
 
     SectionCard {
         SectionCardHeader("Statistics & privacy", Icons.Default.InsertChart)
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-        ) {
-            Text(
-                state.statsOptOut?.let { if (it) "Opted out of stats" else "Collecting stats" }
-                    ?: "Statistics collection",
-                style = MaterialTheme.typography.bodyMedium,
-            )
-            OutlinedButton(onClick = { viewModel.toggleStatsOptOut() }) { Text("Toggle opt-out") }
-        }
+        SwitchRow(
+            title = "Opt out of statistics collection",
+            subtitle = "When on, the bot stops collecting usage statistics for this server",
+            checked = state.statsOptOut == true,
+            onCheckedChange = { viewModel.toggleStatsOptOut() },
+        )
         OutlinedButton(
             onClick = { confirmDelete = true },
             modifier = Modifier.fillMaxWidth(),

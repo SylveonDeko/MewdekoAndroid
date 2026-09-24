@@ -51,6 +51,7 @@ import kotlinx.coroutines.delay
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.roundToLong
+import kotlin.time.Duration.Companion.milliseconds
 
 /** Spacing and sizing shared by every block of the guild home. */
 object HomeDimens {
@@ -84,14 +85,8 @@ object HomeDimens {
 
 /** Motion tokens for the guild home, following the Material 3 spring scheme. */
 object HomeMotion {
-    /** Fast spatial spring for small movements. */
-    fun <T> spatialFast(): SpringSpec<T> = spring(dampingRatio = 0.9f, stiffness = 1400f)
-
     /** Default spatial spring. */
     fun <T> spatialDefault(): SpringSpec<T> = spring(dampingRatio = 0.9f, stiffness = 700f)
-
-    /** Slow spatial spring for large movements. */
-    fun <T> spatialSlow(): SpringSpec<T> = spring(dampingRatio = 0.9f, stiffness = 300f)
 
     /** A playful spring with visible overshoot. */
     fun <T> bouncy(): SpringSpec<T> = spring(dampingRatio = 0.55f, stiffness = 300f)
@@ -314,7 +309,7 @@ fun Modifier.riseOnce(key: String, entered: EnteredKeys, delayMillis: Int = 0): 
     LaunchedEffect(key) {
         entered.add(key)
         if (progress.value < 1f) {
-            if (delayMillis > 0) delay(delayMillis.toLong())
+            if (delayMillis > 0) delay(delayMillis.milliseconds)
             progress.animateTo(1f, spring(dampingRatio = 0.8f, stiffness = 380f))
         }
     }

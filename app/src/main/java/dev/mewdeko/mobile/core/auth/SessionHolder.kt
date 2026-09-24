@@ -1,5 +1,6 @@
 package dev.mewdeko.mobile.core.auth
 
+import dev.mewdeko.mobile.core.model.MobileInstance
 import dev.mewdeko.mobile.core.model.MobileUser
 import dev.mewdeko.mobile.core.model.Snowflake
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -29,5 +30,18 @@ class SessionHolder @Inject constructor() {
     /** Records the signed-in user. */
     fun set(user: MobileUser?) {
         _user.value = user
+    }
+
+    private val _instance = MutableStateFlow<MobileInstance?>(null)
+
+    /**
+     * The bot instance requests are currently routed to, or `null` before one
+     * is picked. Fleet level answers such as bot ownership depend on it.
+     */
+    val instance: StateFlow<MobileInstance?> = _instance.asStateFlow()
+
+    /** Records the bot instance requests are routed to. */
+    fun setInstance(instance: MobileInstance?) {
+        _instance.value = instance
     }
 }

@@ -274,6 +274,10 @@ fun FeatureLinkCard(
  *
  * Carries the standard card wash (or a single hue wash of [tint]) with a
  * `30` hairline; the value and icon read in the solid accent color.
+ * [valueModifier] decorates the value text, for example with a loading
+ * skeleton. [valueMaxLines] defaults to one line for numbers; callers whose
+ * value is text, such as a name or a state, pass 2 so it wraps instead of
+ * being cut off.
  */
 @Composable
 fun StatTile(
@@ -282,6 +286,8 @@ fun StatTile(
     modifier: Modifier = Modifier,
     tint: Color? = null,
     icon: ImageVector? = null,
+    valueModifier: Modifier = Modifier,
+    valueMaxLines: Int = 1,
 ) {
     val accent = tint ?: MaterialTheme.colorScheme.primary
     val shape = MaterialTheme.shapes.medium
@@ -314,8 +320,9 @@ fun StatTile(
                 text = value,
                 style = MaterialTheme.typography.titleLarge,
                 color = readableInk(accent, MaterialTheme.colorScheme.surfaceContainerLow),
-                maxLines = 1,
+                maxLines = valueMaxLines,
                 overflow = TextOverflow.Ellipsis,
+                modifier = valueModifier,
             )
             Text(
                 text = label,
@@ -330,24 +337,3 @@ fun StatTile(
 
 /** Keeps tiles in a row the same height when one label wraps and another does not. */
 private val StatTileMinHeight = 72.dp
-
-/** Grouping container for a labelled set of [FeatureLinkCard]s. */
-@Composable
-fun SectionGroup(
-    title: String,
-    modifier: Modifier = Modifier,
-    content: @Composable ColumnScope.() -> Unit,
-) {
-    Column(
-        modifier = modifier.fillMaxWidth(),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-        Text(
-            text = title.uppercase(),
-            style = MaterialTheme.typography.labelMedium,
-            color = MaterialTheme.colorScheme.primary,
-            modifier = Modifier.padding(horizontal = 4.dp),
-        )
-        Column(verticalArrangement = Arrangement.spacedBy(8.dp), content = content)
-    }
-}

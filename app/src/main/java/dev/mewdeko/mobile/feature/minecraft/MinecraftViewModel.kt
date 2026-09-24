@@ -31,10 +31,10 @@ import java.time.Instant
 import javax.inject.Inject
 
 /** Which Minecraft edition a tracked server runs. */
-enum class McServerType(val raw: Int, val label: String, val defaultPort: Int) {
-    JAVA(0, "Java", 25565),
-    BEDROCK(1, "Bedrock", 19132),
-    GEYSER(2, "Geyser", 25565);
+enum class McServerType(val raw: Int, val label: String, val defaultPort: Int, val blurb: String) {
+    JAVA(0, "Java", 25565, "Java Edition server. Default port 25565."),
+    BEDROCK(1, "Bedrock", 19132, "Bedrock Edition server. Default port 19132."),
+    GEYSER(2, "Geyser", 25565, "Java server that also accepts Bedrock players through Geyser.");
 
     companion object {
         /** Maps a wire value onto a type, defaulting to [JAVA]. */
@@ -43,10 +43,10 @@ enum class McServerType(val raw: Int, val label: String, val defaultPort: Int) {
 }
 
 /** How the bot surfaces a watched server's status. */
-enum class McWatchMode(val raw: Int, val label: String) {
-    EMBED(0, "Embed"),
-    CHANNEL_TOPIC(1, "Topic"),
-    BOTH(2, "Both");
+enum class McWatchMode(val raw: Int, val label: String, val blurb: String) {
+    EMBED(0, "Embed", "Posts a status embed in the channel and keeps it updated."),
+    CHANNEL_TOPIC(1, "Topic", "Keeps the channel topic updated with the server status."),
+    BOTH(2, "Both", "Updates a status embed and the channel topic.");
 
     companion object {
         /** Maps a wire value onto a mode, defaulting to [EMBED]. */
@@ -494,7 +494,7 @@ class MinecraftViewModel @Inject constructor(
                     jsonBody(
                         "enabled" to enabled,
                         "port" to port,
-                        "password" to password.orEmpty(),
+                        "password" to password,
                     ),
                 ),
                 MinecraftServer.serializer(),
@@ -528,7 +528,7 @@ class MinecraftViewModel @Inject constructor(
                 )
             }
             if (!response.success) postError("Command failed.")
-        } catch (t: Throwable) {
+        } catch (_: Throwable) {
             _state.update {
                 it.copy(
                     consoleHistory = (

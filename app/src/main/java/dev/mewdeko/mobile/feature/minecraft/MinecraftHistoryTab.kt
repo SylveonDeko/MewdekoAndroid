@@ -6,8 +6,8 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ShowChart
 import androidx.compose.material.icons.filled.QueryStats
-import androidx.compose.material.icons.filled.ShowChart
 import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
@@ -105,7 +105,7 @@ fun MinecraftHistoryTab(
     val uptime = (onlineSnapshots.size * 100 / snapshots.size)
 
     SectionCard {
-        SectionCardHeader("Players online ($server)", Icons.Default.ShowChart)
+        SectionCardHeader("Players online ($server)", Icons.AutoMirrored.Filled.ShowChart)
         MinecraftHistoryChart(
             values = snapshots.map { it.playersOnline.toFloat() },
             color = MaterialTheme.colorScheme.primary,

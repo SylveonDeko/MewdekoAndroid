@@ -552,7 +552,7 @@ class FormsViewModel @Inject constructor(
         val reasons = parsed?.errors?.filter { it.isNotBlank() }
         return when {
             !reasons.isNullOrEmpty() -> reasons.joinToString(". ")
-            !parsed?.message.isNullOrBlank() -> parsed?.message!!
+            !parsed?.message.isNullOrBlank() -> parsed.message
             else -> fallback
         }
     }

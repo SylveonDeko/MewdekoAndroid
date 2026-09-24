@@ -1,5 +1,6 @@
 package dev.mewdeko.mobile.feature.xp
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -43,7 +44,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.mewdeko.mobile.core.model.EmbedMessage
 import dev.mewdeko.mobile.core.ui.Avatar
@@ -52,6 +53,7 @@ import dev.mewdeko.mobile.core.ui.DiscordSelectorSingle
 import dev.mewdeko.mobile.core.ui.EmptyState
 import dev.mewdeko.mobile.core.ui.FeatureScaffold
 import dev.mewdeko.mobile.core.ui.MewdekoTextField
+import dev.mewdeko.mobile.core.ui.MultiSelectDropdown
 import dev.mewdeko.mobile.core.ui.SectionCard
 import dev.mewdeko.mobile.core.ui.SectionCardHeader
 import dev.mewdeko.mobile.core.ui.SectionTab
@@ -62,6 +64,7 @@ import dev.mewdeko.mobile.core.ui.SliderRow
 import dev.mewdeko.mobile.core.ui.StatTile
 import dev.mewdeko.mobile.core.ui.SwitchRow
 import dev.mewdeko.mobile.core.ui.clickableRow
+import dev.mewdeko.mobile.core.ui.diffSelection
 import dev.mewdeko.mobile.feature.embed.EmbedMessageEditor
 import dev.mewdeko.mobile.navigation.GuildRouteArgs
 import dev.mewdeko.mobile.util.compact
@@ -93,23 +96,82 @@ fun XpScreen(
     var pendingRemoveCurrency by remember { mutableStateOf<XpCurrencyRewardModel?>(null) }
     var pendingResetMember by remember { mutableStateOf<Pair<String, Boolean>?>(null) }
 
+    if (viewModel.designer.open) {
+        BackHandler { viewModel.designer.open = false }
+        XpCardDesigner(
+            state = state,
+            viewModel = viewModel,
+            status = status,
+            onStatusShown = viewModel::clearStatus,
+            onClose = { viewModel.designer.open = false },
+        )
+        return
+    }
+
+    val hasAnyUnsaved = state.hasUnsavedSettings || state.hasUnsavedTemplate
+    var showUnsavedDialog by remember { mutableStateOf(false) }
+    val guardedBack: () -> Unit = {
+        if (hasAnyUnsaved) showUnsavedDialog = true else onBack()
+    }
+
+    BackHandler(enabled = hasAnyUnsaved) { showUnsavedDialog = true }
+
+    if (showUnsavedDialog) {
+        AlertDialog(
+            onDismissRequest = { showUnsavedDialog = false },
+            title = { Text("Unsaved changes") },
+            text = {
+                Text(
+                    "You have XP settings or rank card edits that have not been saved. " +
+                        "Save them before leaving this screen?",
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    showUnsavedDialog = false
+                    if (state.hasUnsavedSettings) viewModel.saveSettings()
+                    if (state.hasUnsavedTemplate) viewModel.saveTemplate()
+                }) {
+                    Text("Save")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = {
+                    showUnsavedDialog = false
+                    onBack()
+                }) {
+                    Text("Discard")
+                }
+            },
+        )
+    }
+
     FeatureScaffold(
         title = "XP System",
         subtitle = guild.name.takeIf { it.isNotEmpty() },
-        onBack = onBack,
+        onBack = guardedBack,
         loadState = loadState,
         status = status,
         onStatusShown = viewModel::clearStatus,
         onRefresh = { viewModel.load(refreshing = true) },
         onRetry = { viewModel.load() },
         floatingActionButton = {
-            if (state.hasUnsavedSettings && state.section == "settings") {
+            if (state.hasUnsavedSettings && state.hasUnsavedTemplate) {
+                ExtendedFloatingActionButton(
+                    onClick = {
+                        viewModel.saveSettings()
+                        viewModel.saveTemplate()
+                    },
+                    icon = { Icon(Icons.Default.Save, contentDescription = null) },
+                    text = { Text("Save changes") },
+                )
+            } else if (state.hasUnsavedSettings) {
                 ExtendedFloatingActionButton(
                     onClick = viewModel::saveSettings,
                     icon = { Icon(Icons.Default.Save, contentDescription = null) },
                     text = { Text("Save settings") },
                 )
-            } else if (state.hasUnsavedTemplate && state.section == "template") {
+            } else if (state.hasUnsavedTemplate) {
                 ExtendedFloatingActionButton(
                     onClick = viewModel::saveTemplate,
                     icon = { Icon(Icons.Default.Save, contentDescription = null) },
@@ -391,21 +453,17 @@ fun XpScreen(
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
-                    state.availableChannels.forEach { channel ->
-                        ListItem(
-                            headlineContent = { Text("#${channel.name}") },
-                            trailingContent = {
-                                Checkbox(
-                                    checked = channel.id in state.excludedChannels,
-                                    onCheckedChange = null,
-                                )
-                            },
-                            colors = ListItemDefaults.colors(containerColor = Color.Transparent),
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickableRow { viewModel.toggleExcludedChannel(channel.id) },
-                        )
-                    }
+                    MultiSelectDropdown(
+                        kind = SelectorKind.Channel,
+                        options = state.availableChannels.map { SelectorOption(it.id, it.name) },
+                        selection = state.excludedChannels,
+                        onSelectionChange = { next ->
+                            val (added, removed) = diffSelection(state.excludedChannels, next)
+                            (removed + added).forEach(viewModel::toggleExcludedChannel)
+                        },
+                        label = "Channels",
+                        placeholder = "No excluded channels",
+                    )
                 }
                 SectionCard {
                     SectionCardHeader("Excluded roles", Icons.Default.Block)
@@ -414,21 +472,17 @@ fun XpScreen(
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
-                    state.availableRoles.forEach { role ->
-                        ListItem(
-                            headlineContent = { Text("@${role.name}") },
-                            trailingContent = {
-                                Checkbox(
-                                    checked = role.id in state.excludedRoles,
-                                    onCheckedChange = null,
-                                )
-                            },
-                            colors = ListItemDefaults.colors(containerColor = Color.Transparent),
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickableRow { viewModel.toggleExcludedRole(role.id) },
-                        )
-                    }
+                    MultiSelectDropdown(
+                        kind = SelectorKind.Role,
+                        options = state.availableRoles.map { SelectorOption(it.id, it.name) },
+                        selection = state.excludedRoles,
+                        onSelectionChange = { next ->
+                            val (added, removed) = diffSelection(state.excludedRoles, next)
+                            (removed + added).forEach(viewModel::toggleExcludedRole)
+                        },
+                        label = "Roles",
+                        placeholder = "No excluded roles",
+                    )
                 }
             }
 

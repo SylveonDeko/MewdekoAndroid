@@ -1,6 +1,5 @@
 package dev.mewdeko.mobile.feature.twitch
 
-import android.net.Uri
 import androidx.browser.customtabs.CustomTabsIntent
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -47,11 +46,13 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.core.net.toUri
+import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -59,6 +60,8 @@ import dev.mewdeko.mobile.core.ui.ConfirmDialog
 import dev.mewdeko.mobile.core.ui.DiscordSelectorSingle
 import dev.mewdeko.mobile.core.ui.EmptyState
 import dev.mewdeko.mobile.core.ui.FeatureScaffold
+import dev.mewdeko.mobile.core.ui.GlyphOrb
+import dev.mewdeko.mobile.core.ui.NewItemFab
 import dev.mewdeko.mobile.core.ui.InfoRow
 import dev.mewdeko.mobile.core.ui.MewdekoTextField
 import dev.mewdeko.mobile.core.ui.SectionCard
@@ -67,8 +70,9 @@ import dev.mewdeko.mobile.core.ui.SectionTab
 import dev.mewdeko.mobile.core.ui.SectionTabs
 import dev.mewdeko.mobile.core.ui.SelectorKind
 import dev.mewdeko.mobile.core.ui.SelectorOption
-import dev.mewdeko.mobile.core.ui.StatTile
+import dev.mewdeko.mobile.core.ui.StatePill
 import dev.mewdeko.mobile.core.ui.SwitchRow
+import dev.mewdeko.mobile.core.ui.TabLevel
 import dev.mewdeko.mobile.core.ui.TagChip
 import dev.mewdeko.mobile.navigation.GuildRouteArgs
 
@@ -120,7 +124,7 @@ fun TwitchScreen(
             CustomTabsIntent.Builder()
                 .setShowTitle(true)
                 .build()
-                .launchUrl(context, Uri.parse(url))
+                .launchUrl(context, url.toUri())
         }.onFailure {
             runCatching { uriHandler.openUri(url) }
         }
@@ -149,7 +153,15 @@ fun TwitchScreen(
             }
         },
         floatingActionButton = {
-            if (showSaveFab) {
+            val newAction = when {
+                state.section != TwitchSections.COMMANDS -> null
+                state.subSection == TwitchSections.TIMERS -> "New timer" to TwitchEditor.TIMER
+                state.subSection == TwitchSections.QUOTES -> "Add quote" to TwitchEditor.QUOTE
+                else -> "New command" to TwitchEditor.COMMAND
+            }
+            if (newAction != null) {
+                NewItemFab(label = newAction.first, onClick = { viewModel.startNew(newAction.second) })
+            } else if (showSaveFab) {
                 ExtendedFloatingActionButton(
                     onClick = { if (!state.isSaving) viewModel.saveSettings() },
                     icon = { Icon(Icons.Default.Save, contentDescription = null) },
@@ -158,11 +170,16 @@ fun TwitchScreen(
             }
         },
     ) {
-        StatusHeader(state)
+        StatusHeader(state, onConnect = viewModel::connect)
 
         SectionTabs(tabs = MainTabs, selectedId = state.section, onSelect = viewModel::setSection)
         SubTabs[state.section]?.let { tabs ->
-            SectionTabs(tabs = tabs, selectedId = state.subSection, onSelect = viewModel::setSubSection)
+            SectionTabs(
+                tabs = tabs,
+                selectedId = state.subSection,
+                onSelect = viewModel::setSubSection,
+                level = TabLevel.Secondary,
+            )
         }
 
         val confirm: (TwitchConfirmation) -> Unit = { pendingConfirm = it }
@@ -187,6 +204,14 @@ fun TwitchScreen(
         }
     }
 
+    when (state.openEditor) {
+        TwitchEditor.COMMAND -> TwitchCommandEditor(state, viewModel)
+        TwitchEditor.TIMER -> TwitchTimerEditor(state, viewModel)
+        TwitchEditor.QUOTE -> TwitchQuoteSheet(state, viewModel)
+        TwitchEditor.REDEMPTION -> TwitchRedemptionEditor(state, viewModel)
+        null -> Unit
+    }
+
     pendingConfirm?.let { pending ->
         ConfirmDialog(
             title = pending.title,
@@ -201,37 +226,103 @@ fun TwitchScreen(
     }
 }
 
+/**
+ * The connection summary at the top of every Twitch tab: one card with the
+ * overall state as a pill in the header, then one full-width row each for
+ * the bot account and the broadcaster channel. Names wrap instead of being
+ * cut off, and a missing identity offers its Connect action inline.
+ */
 @Composable
-private fun StatusHeader(state: TwitchState) {
+private fun StatusHeader(state: TwitchState, onConnect: (TwitchOAuthMode) -> Unit) {
     val status = state.status
-    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-        StatTile(
-            label = "Connection",
-            value = status?.connectionLabel ?: "Checking",
-            modifier = Modifier.weight(1f),
-            icon = Icons.Default.SignalCellularAlt,
-        )
-        StatTile(
-            label = "Bot account",
-            value = status?.botLabel ?: "Missing",
-            modifier = Modifier.weight(1f),
-            icon = Icons.Default.SmartToy,
-        )
-        StatTile(
-            label = "Channel",
-            value = status?.channelLabel ?: "Missing",
-            modifier = Modifier.weight(1f),
-            icon = Icons.Default.Videocam,
-        )
+    val scheme = MaterialTheme.colorScheme
+    val (pillText, pillTone) = when {
+        status == null -> "Checking" to scheme.onSurfaceVariant
+        status.isConfigured -> status.connectionLabel to scheme.primary
+        status.hasBotAccount || status.hasChannelAuthorization -> status.connectionLabel to scheme.tertiary
+        else -> status.connectionLabel to scheme.error
     }
-    HelpText(
-        text = if (status?.isConfigured == true) {
-            "EventSub chat is ready for @${status.channelLabel.orEmpty()}."
-        } else {
-            "Connect both the bot account and the broadcaster channel to enable modern Twitch chat."
-        },
-        modifier = Modifier.padding(horizontal = 4.dp),
-    )
+    SectionCard {
+        SectionCardHeader(
+            title = "Connection",
+            icon = Icons.Default.SignalCellularAlt,
+            trailing = { StatePill(text = pillText, tone = pillTone) },
+        )
+        ConnectionStatusRow(
+            icon = Icons.Default.SmartToy,
+            label = "Bot account",
+            name = status?.botLabel,
+            loading = status == null,
+            actionLabel = when {
+                !state.isBotOwner -> null
+                state.connecting == TwitchOAuthMode.BOT -> "Opening..."
+                else -> "Connect"
+            },
+            actionEnabled = state.connecting == null,
+            onAction = { onConnect(TwitchOAuthMode.BOT) },
+        )
+        ConnectionStatusRow(
+            icon = Icons.Default.Videocam,
+            label = "Channel",
+            name = status?.channelLabel,
+            loading = status == null,
+            actionLabel = if (state.connecting == TwitchOAuthMode.CHANNEL) "Opening..." else "Connect",
+            actionEnabled = state.connecting == null,
+            onAction = { onConnect(TwitchOAuthMode.CHANNEL) },
+        )
+        if (status != null && !status.isConfigured) {
+            HelpText(
+                if (!status.hasBotAccount && !state.isBotOwner) {
+                    "The shared bot account is not connected yet. Only a bot owner can connect it; you can still " +
+                        "connect your channel."
+                } else {
+                    "Connect both the bot account and the broadcaster channel to enable modern Twitch chat."
+                }
+            )
+        }
+    }
+}
+
+/**
+ * One identity row in [StatusHeader]: a glyph, the label, and the connected
+ * name on its own wrapping line. When [name] is missing the row reads "Not
+ * connected" and shows [actionLabel] as a button, if one is given.
+ */
+@Composable
+private fun ConnectionStatusRow(
+    icon: ImageVector,
+    label: String,
+    name: String?,
+    loading: Boolean,
+    actionLabel: String?,
+    actionEnabled: Boolean,
+    onAction: () -> Unit,
+) {
+    val scheme = MaterialTheme.colorScheme
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        GlyphOrb(icon = icon, tint = if (name != null) scheme.primary else scheme.onSurfaceVariant)
+        Column(modifier = Modifier.weight(1f)) {
+            Text(label, style = MaterialTheme.typography.labelMedium, color = scheme.onSurfaceVariant)
+            Text(
+                text = when {
+                    name != null -> "@$name"
+                    loading -> "Checking..."
+                    else -> "Not connected"
+                },
+                style = MaterialTheme.typography.bodyLarge,
+                color = if (name != null) scheme.onSurface else scheme.onSurfaceVariant,
+            )
+        }
+        if (name == null && !loading && actionLabel != null) {
+            OutlinedButton(onClick = onAction, enabled = actionEnabled) {
+                Text(actionLabel, maxLines = 1)
+            }
+        }
+    }
 }
 
 @Composable
@@ -499,27 +590,6 @@ private fun LinksSection(
                     modifier = Modifier.padding(vertical = 2.dp),
                 )
             }
-        }
-    }
-}
-
-/** Save and cancel buttons shared by the create/edit forms. */
-@Composable
-internal fun FormButtons(
-    saveLabel: String,
-    saving: Boolean,
-    canSave: Boolean,
-    showCancel: Boolean,
-    onSave: () -> Unit,
-    onCancel: () -> Unit,
-) {
-    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-        Button(onClick = onSave, enabled = canSave && !saving) {
-            Icon(Icons.Default.Save, contentDescription = null)
-            Text(if (saving) "  Saving..." else "  $saveLabel")
-        }
-        if (showCancel) {
-            OutlinedButton(onClick = onCancel, enabled = !saving) { Text("Cancel") }
         }
     }
 }

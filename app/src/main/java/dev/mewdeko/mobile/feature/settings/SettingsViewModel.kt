@@ -56,8 +56,9 @@ data class SettingsState(
  *
  * The bot's `GuildConfig` record has far more fields than this screen edits, so
  * the raw JSON object is kept verbatim and only the edited keys are merged back
- * on save. That fetch deliberately bypasses key normalisation, since the bot
- * round-trips these keys in PascalCase.
+ * on save. The bot serializes these keys in camelCase (the ASP.NET Web JSON
+ * default), so the raw fetch and the merge back on save both use the same
+ * camelCase key names.
  */
 @HiltViewModel
 class SettingsViewModel @Inject constructor(
@@ -81,9 +82,8 @@ class SettingsViewModel @Inject constructor(
     fun load(refreshing: Boolean = false) = launchLoad(refreshing) {
         coroutineScope {
             val config = async {
-                runCatching {
-                    api.sendRaw(Endpoint("api/GuildConfig/$guildId")) as? JsonObject
-                }.getOrNull() ?: JsonObject(emptyMap())
+                api.sendRaw(Endpoint("api/GuildConfig/$guildId")) as? JsonObject
+                    ?: JsonObject(emptyMap())
             }
             val channels = async {
                 runCatching {
@@ -105,20 +105,20 @@ class SettingsViewModel @Inject constructor(
             loadedConfig = config.await()
             _state.update {
                 it.copy(
-                    prefix = loadedConfig.stringAt("Prefix") ?: ".",
-                    commandLogChannelId = loadedConfig.snowflakeAt("CommandLogChannel"),
-                    staffRoleId = loadedConfig.snowflakeAt("StaffRole"),
-                    deleteOnCommand = loadedConfig.boolAt("DeleteMessageOnCommand"),
-                    currencyEmoji = loadedConfig.stringAt("CurrencyEmoji").orEmpty(),
-                    afkMessage = EmbedMessage.parse(loadedConfig.stringAt("AfkMessage")),
-                    streamMessage = EmbedMessage.parse(loadedConfig.stringAt("StreamMessage")),
-                    warningLogChannelId = loadedConfig.snowflakeAt("WarnlogChannelId"),
-                    warnExpireHours = loadedConfig.intAt("WarnExpireHours") ?: 0,
-                    locale = loadedConfig.stringAt("Locale").orEmpty(),
-                    muteRoleName = loadedConfig.stringAt("MuteRoleName").orEmpty(),
-                    removeRolesOnMute = (loadedConfig.intAt("Removeroles") ?: 0) != 0,
-                    snipeset = loadedConfig.boolAt("Snipeset"),
-                    previewLinks = (loadedConfig.intAt("PreviewLinks") ?: 0) != 0,
+                    prefix = loadedConfig.stringAt("prefix") ?: ".",
+                    commandLogChannelId = loadedConfig.snowflakeAt("commandLogChannel"),
+                    staffRoleId = loadedConfig.snowflakeAt("staffRole"),
+                    deleteOnCommand = loadedConfig.boolAt("deleteMessageOnCommand"),
+                    currencyEmoji = loadedConfig.stringAt("currencyEmoji").orEmpty(),
+                    afkMessage = EmbedMessage.parse(loadedConfig.stringAt("afkMessage")),
+                    streamMessage = EmbedMessage.parse(loadedConfig.stringAt("streamMessage")),
+                    warningLogChannelId = loadedConfig.snowflakeAt("warnlogChannelId"),
+                    warnExpireHours = loadedConfig.intAt("warnExpireHours") ?: 0,
+                    locale = loadedConfig.stringAt("locale").orEmpty(),
+                    muteRoleName = loadedConfig.stringAt("muteRoleName").orEmpty(),
+                    removeRolesOnMute = (loadedConfig.intAt("removeroles") ?: 0) != 0,
+                    snipeset = loadedConfig.boolAt("snipeset"),
+                    previewLinks = (loadedConfig.intAt("previewLinks") ?: 0) != 0,
                     availableChannels = channels.await()
                         .sortedBy { channel -> channel.name.lowercase() },
                     availableRoles = roles.await()
@@ -174,28 +174,33 @@ class SettingsViewModel @Inject constructor(
 
     /** Merges the edited keys into the stored config and posts it back. */
     fun save() = viewModelScope.launch {
+        if (loadedConfig.snowflakeAt("guildId") == null) {
+            postError("Could not load the current settings, so nothing was saved. Pull to refresh and try again.")
+            return@launch
+        }
+
         val current = _state.value
         _state.update { it.copy(isSaving = true) }
 
         val merged = buildJsonObject {
             loadedConfig.forEach { (key, value) -> put(key, value) }
-            put("Prefix", JsonPrimitive(current.prefix))
-            put("CommandLogChannel", JsonPrimitive(current.commandLogChannelId.asId()))
-            put("StaffRole", JsonPrimitive(current.staffRoleId.asId()))
-            put("DeleteMessageOnCommand", JsonPrimitive(current.deleteOnCommand))
-            put("CurrencyEmoji", JsonPrimitive(current.currencyEmoji))
-            put("AfkMessage", JsonPrimitive(current.afkMessage.serialize()))
-            put("StreamMessage", JsonPrimitive(current.streamMessage.serialize()))
-            put("WarnlogChannelId", JsonPrimitive(current.warningLogChannelId.asId()))
-            put("WarnExpireHours", JsonPrimitive(current.warnExpireHours))
-            put("Locale", current.locale.takeIf { it.isNotBlank() }?.let { JsonPrimitive(it) } ?: JsonNull)
+            put("prefix", JsonPrimitive(current.prefix))
+            put("commandLogChannel", JsonPrimitive(current.commandLogChannelId.asId()))
+            put("staffRole", JsonPrimitive(current.staffRoleId.asId()))
+            put("deleteMessageOnCommand", JsonPrimitive(current.deleteOnCommand))
+            put("currencyEmoji", JsonPrimitive(current.currencyEmoji))
+            put("afkMessage", JsonPrimitive(current.afkMessage.serialize()))
+            put("streamMessage", JsonPrimitive(current.streamMessage.serialize()))
+            put("warnlogChannelId", JsonPrimitive(current.warningLogChannelId.asId()))
+            put("warnExpireHours", JsonPrimitive(current.warnExpireHours))
+            put("locale", current.locale.takeIf { it.isNotBlank() }?.let { JsonPrimitive(it) } ?: JsonNull)
             put(
-                "MuteRoleName",
+                "muteRoleName",
                 current.muteRoleName.trim().takeIf { it.isNotEmpty() }?.let { JsonPrimitive(it) } ?: JsonNull,
             )
-            put("Removeroles", JsonPrimitive(if (current.removeRolesOnMute) 1 else 0))
-            put("Snipeset", JsonPrimitive(current.snipeset))
-            put("PreviewLinks", JsonPrimitive(if (current.previewLinks) 1 else 0))
+            put("removeroles", JsonPrimitive(if (current.removeRolesOnMute) 1 else 0))
+            put("snipeset", JsonPrimitive(current.snipeset))
+            put("previewLinks", JsonPrimitive(if (current.previewLinks) 1 else 0))
         }
 
         val ok = runCatching {

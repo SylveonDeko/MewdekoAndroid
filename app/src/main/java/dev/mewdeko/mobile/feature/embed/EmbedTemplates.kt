@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.NoteAdd
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.Campaign
@@ -18,7 +19,6 @@ import androidx.compose.material.icons.filled.Event
 import androidx.compose.material.icons.filled.Gavel
 import androidx.compose.material.icons.filled.Groups
 import androidx.compose.material.icons.filled.Info
-import androidx.compose.material.icons.filled.NoteAdd
 import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material.icons.filled.WorkspacePremium
 import androidx.compose.material3.FilterChip
@@ -250,7 +250,7 @@ fun TemplatesPanel(onApply: (EmbedSpec) -> Unit, onStartFromScratch: () -> Unit)
             }
         }
         OutlinedButton(onClick = onStartFromScratch, modifier = Modifier.fillMaxWidth()) {
-            Icon(Icons.Default.NoteAdd, contentDescription = null, modifier = Modifier.size(18.dp))
+            Icon(Icons.AutoMirrored.Filled.NoteAdd, contentDescription = null, modifier = Modifier.size(18.dp))
             Text("Start from scratch", modifier = Modifier.padding(start = 8.dp))
         }
     }

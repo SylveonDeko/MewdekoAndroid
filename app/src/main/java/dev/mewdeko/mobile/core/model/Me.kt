@@ -12,10 +12,15 @@ data class UserHighlight(
     @Serializable(with = InstantSerializer::class) val dateAdded: Instant? = null,
 )
 
-/** Highlight engagement settings for a user in a guild. */
+/**
+ * Highlight engagement settings for a user in a guild.
+ *
+ * The bot reports `highlightsEnabled = true` when the user has no settings
+ * row yet, so the default here matches it.
+ */
 @Serializable
 data class HighlightSettings(
-    val highlightsEnabled: Boolean = false,
+    val highlightsEnabled: Boolean = true,
     val ignoredChannels: List<String> = emptyList(),
     val ignoredUsers: List<String> = emptyList(),
 )
@@ -52,7 +57,12 @@ data class UserPreferences(
     val hasCompletedAnyWizard: Boolean = false,
 )
 
-/** User-supplied profile fields and birthday settings. */
+/**
+ * User-supplied profile fields and birthday settings.
+ *
+ * [birthday] is an offsetless midnight value, parsed as UTC; format it in
+ * UTC too or users west of Greenwich see the previous day.
+ */
 @Serializable
 data class UserProfile(
     val bio: String = "",
@@ -74,7 +84,7 @@ data class UserProfile(
 @Serializable
 data class MySuggestion(
     val id: Int = 0,
-    val suggestionId: Int? = null,
+    val suggestionId: Long? = null,
     val suggestion1: String? = null,
     val currentState: Int = 0,
     val stateName: String = "",
@@ -90,6 +100,8 @@ data class MySuggestion(
 @Serializable
 data class CurrencyData(
     val balance: Long = 0L,
+    val bank: Long = 0L,
+    val netWorth: Long = 0L,
     val recentTransactions: List<CurrencyTransaction> = emptyList(),
 )
 
@@ -99,6 +111,8 @@ data class CurrencyTransaction(
     val id: Int = 0,
     val amount: Long = 0L,
     val description: String? = null,
+    val category: String = "",
+    val source: String? = null,
     @Serializable(with = InstantSerializer::class) val dateAdded: Instant? = null,
 )
 
@@ -112,6 +126,7 @@ data class MyGiveawayEntry(
     @Serializable(with = InstantSerializer::class) val dateAdded: Instant? = null,
     val isEnded: Boolean = false,
     @Serializable(with = InstantSerializer::class) val entryDate: Instant? = null,
+    @Serializable(with = SnowflakeSerializer::class) val userId: Snowflake? = null,
 )
 
 /** A scheduled reminder. */
@@ -173,27 +188,55 @@ data class InvitedUser(
 /** Aggregate message stats and per-channel breakdown for a user. */
 @Serializable
 data class MessageStats(
-    val totalMessages: Int = 0,
+    val totalMessages: Long = 0L,
     val enabled: Boolean = false,
     val channelBreakdown: List<ChannelMessageStat> = emptyList(),
 )
 
-/** Per-channel message activity for a user. */
+/**
+ * Per-channel message activity for a user.
+ *
+ * [lastActivity] is the bot's culture-formatted `DateTime.ToString()` or
+ * `Unknown`, not ISO 8601, so it is display text only.
+ */
 @Serializable
 data class ChannelMessageStat(
     @Serializable(with = SnowflakeSerializer::class) val channelId: Snowflake = "",
     val channelName: String = "Unknown",
-    val count: Int = 0,
+    val count: Long = 0L,
     val lastActivity: String = "",
 )
 
-/** Starboard contribution statistics for a user. */
+/**
+ * Starboard contribution statistics for a user in one guild, the bot's
+ * `UserStarboardStatsDto`.
+ *
+ * The bot sends no body at all when the guild has no starboard configured,
+ * which the dashboard proxy relays as JSON `null`.
+ */
 @Serializable
 data class StarboardStats(
-    val starsGiven: Int? = null,
-    val starsReceived: Int? = null,
-    val postsOnStarboard: Int? = null,
-    val topPostStars: Int? = null,
+    val messagesStarred: Int = 0,
+    val starsReceived: Int = 0,
+    val starsGiven: Int = 0,
+    val topStarredPosts: List<TopStarredPost> = emptyList(),
+    val mostStarredUsers: List<UserStarCount> = emptyList(),
+    val topFans: List<UserStarCount> = emptyList(),
+)
+
+/** One of the user's most starred messages. */
+@Serializable
+data class TopStarredPost(
+    @Serializable(with = SnowflakeSerializer::class) val messageId: Snowflake = "",
+    val starCount: Int = 0,
+    val emote: String = "",
+)
+
+/** A user paired with a star count, for favourite and fan lists. */
+@Serializable
+data class UserStarCount(
+    @Serializable(with = SnowflakeSerializer::class) val userId: Snowflake = "",
+    val count: Int = 0,
 )
 
 /** Wire shape for adding a new highlight. */

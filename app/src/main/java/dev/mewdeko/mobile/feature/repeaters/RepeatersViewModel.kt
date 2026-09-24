@@ -236,16 +236,16 @@ class RepeatersViewModel @Inject constructor(
         val body = buildJsonObject {
             if (newMessage != original.message) put("message", JsonPrimitive(newMessage))
             if (draft.channelId != original.channelId) {
-                draft.channelId.toLongOrNull()?.let { put("channelId", JsonPrimitive(it)) }
+                draft.channelId.takeIf { it.toLongOrNull() != null }?.let { put("channelId", JsonPrimitive(it)) }
             }
             if (draft.triggerMode.raw != original.triggerMode) put("triggerMode", JsonPrimitive(draft.triggerMode.raw))
             if (draft.interval != original.interval) put("interval", JsonPrimitive(draft.interval))
             val newStartTime = draft.startTimeOfDay.takeIf { it.isNotBlank() }
             if (newStartTime != original.startTimeOfDay) putStartTimeOfDayPatch(Patch.Value(newStartTime))
-            if (draft.activityThreshold != original.activityThreshold) {
+            if (draft.activityThreshold != original.activityThreshold ||
+                draft.activityTimeWindow != original.activityTimeWindow
+            ) {
                 put("activityThreshold", JsonPrimitive(draft.activityThreshold))
-            }
-            if (draft.activityTimeWindow != original.activityTimeWindow) {
                 put("activityTimeWindow", JsonPrimitive(draft.activityTimeWindow))
             }
             if (draft.conversationDetection != original.conversationDetection) {

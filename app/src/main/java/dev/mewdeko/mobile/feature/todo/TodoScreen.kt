@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.Sort
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Checklist
 import androidx.compose.material.icons.filled.Close
@@ -17,16 +18,12 @@ import androidx.compose.material.icons.filled.FilterList
 import androidx.compose.material.icons.filled.Groups
 import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.Shield
-import androidx.compose.material.icons.filled.Sort
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.AssistChipDefaults
-import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.DatePicker
 import androidx.compose.material3.DatePickerDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.InputChip
@@ -47,12 +44,15 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.mewdeko.mobile.core.ui.ConfirmDialog
 import dev.mewdeko.mobile.core.ui.DiscordSelectorSingle
 import dev.mewdeko.mobile.core.ui.EmptyState
 import dev.mewdeko.mobile.core.ui.FeatureScaffold
+import dev.mewdeko.mobile.core.ui.FormSheet
+import dev.mewdeko.mobile.core.ui.FullScreenEditor
+import dev.mewdeko.mobile.core.ui.NewItemFab
 import dev.mewdeko.mobile.core.ui.MewdekoTextField
 import dev.mewdeko.mobile.core.ui.SearchField
 import dev.mewdeko.mobile.core.ui.SectionCard
@@ -103,11 +103,7 @@ fun TodoScreen(
             }
         },
         floatingActionButton = {
-            ExtendedFloatingActionButton(
-                onClick = { showCreateList = true },
-                icon = { Icon(Icons.Default.Add, contentDescription = null) },
-                text = { Text("New list") },
-            )
+            NewItemFab(label = "New list", onClick = { showCreateList = true })
         },
     ) {
         SectionCard {
@@ -127,14 +123,14 @@ fun TodoScreen(
 
         if (showFilters) {
             SectionCard {
-                SectionCardHeader("Filters", Icons.Default.Sort)
+                SectionCardHeader("Filters", Icons.AutoMirrored.Filled.Sort)
                 SwitchRow(
                     title = "Show completed items",
                     checked = state.includeCompleted,
                     onCheckedChange = viewModel::setIncludeCompleted,
                 )
                 DiscordSelectorSingle(
-                    kind = SelectorKind.Custom(Icons.Default.Sort),
+                    kind = SelectorKind.Custom(Icons.AutoMirrored.Filled.Sort),
                     options = TodoSortBy.entries.map { SelectorOption(it.id, it.label) },
                     placeholder = "Sort by",
                     label = "Sort by",
@@ -142,7 +138,7 @@ fun TodoScreen(
                     onSelect = { viewModel.setSortBy(TodoSortBy.from(it)) },
                 )
                 DiscordSelectorSingle(
-                    kind = SelectorKind.Custom(Icons.Default.Sort),
+                    kind = SelectorKind.Custom(Icons.AutoMirrored.Filled.Sort),
                     options = TodoSortOrder.entries.map { SelectorOption(it.id, it.label) },
                     placeholder = "Order",
                     label = "Order",
@@ -162,6 +158,8 @@ fun TodoScreen(
                         "No lists match \"${state.searchQuery}\"."
                     },
                     icon = Icons.Default.Checklist,
+                    actionLabel = if (state.searchQuery.isBlank()) "New list" else null,
+                    onAction = if (state.searchQuery.isBlank()) ({ showCreateList = true }) else null,
                 )
             }
         } else {
@@ -213,9 +211,12 @@ fun TodoScreen(
                     ListStatsRow(stats)
 
                     if (items.isEmpty()) {
+                        val listIsEmpty = state.items(list.id).isEmpty()
                         EmptyState(
-                            if (state.items(list.id).isEmpty()) "Nothing on this list yet."
+                            message = if (listIsEmpty) "Nothing on this list yet."
                             else "No items match the current filters.",
+                            actionLabel = if (listIsEmpty && perms.canAdd) "Add task" else null,
+                            onAction = if (listIsEmpty && perms.canAdd) ({ addingItemTo = list }) else null,
                         )
                     } else {
                         items.forEach { item ->
@@ -301,37 +302,28 @@ fun TodoScreen(
     if (showCreateList) {
         var name by remember { mutableStateOf("") }
         var description by remember { mutableStateOf("") }
-        AlertDialog(
-            onDismissRequest = { showCreateList = false },
-            title = { Text("New list") },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    MewdekoTextField(value = name, onValueChange = { name = it }, label = "Name")
-                    MewdekoTextField(
-                        value = description,
-                        onValueChange = { description = it },
-                        label = "Description (optional)",
-                    )
-                    Text(
-                        text = "Server lists are visible to everyone in this server.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
+        FormSheet(
+            title = "New list",
+            confirmLabel = "Create",
+            confirmEnabled = name.isNotBlank(),
+            onConfirm = {
+                viewModel.createList(name.trim(), description.takeIf { it.isNotBlank() })
+                showCreateList = false
             },
-            confirmButton = {
-                Button(
-                    onClick = {
-                        viewModel.createList(name.trim(), description.takeIf { it.isNotBlank() })
-                        showCreateList = false
-                    },
-                    enabled = name.isNotBlank(),
-                ) { Text("Create") }
-            },
-            dismissButton = {
-                TextButton(onClick = { showCreateList = false }) { Text("Cancel") }
-            },
-        )
+            onDismiss = { showCreateList = false },
+        ) {
+            MewdekoTextField(value = name, onValueChange = { name = it }, label = "Name")
+            MewdekoTextField(
+                value = description,
+                onValueChange = { description = it },
+                label = "Description (optional)",
+            )
+            Text(
+                text = "Server lists are visible to everyone in this server.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
     }
 
     addingItemTo?.let { list ->
@@ -339,53 +331,46 @@ fun TodoScreen(
         var description by remember(list.id) { mutableStateOf("") }
         var priority by remember(list.id) { mutableStateOf(TodoPriority.MEDIUM) }
         var dueInDays by remember(list.id) { mutableStateOf("") }
-        AlertDialog(
-            onDismissRequest = { addingItemTo = null },
-            title = { Text("Add task to ${list.name}") },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    MewdekoTextField(value = title, onValueChange = { title = it }, label = "Title")
-                    MewdekoTextField(
-                        value = description,
-                        onValueChange = { description = it },
-                        label = "Description (optional)",
-                        singleLine = false,
-                        minLines = 2,
-                    )
-                    DiscordSelectorSingle(
-                        kind = SelectorKind.Custom(Icons.Default.Checklist),
-                        options = TodoPriority.entries.map { SelectorOption(it.raw.toString(), it.label) },
-                        placeholder = "Medium",
-                        label = "Priority",
-                        selectedId = priority.raw.toString(),
-                        onSelect = { priority = TodoPriority.from(it?.toIntOrNull() ?: 2) },
-                    )
-                    MewdekoTextField(
-                        value = dueInDays,
-                        onValueChange = { dueInDays = it.filter(Char::isDigit) },
-                        label = "Due in days (optional)",
-                        numeric = true,
-                    )
-                }
+        FormSheet(
+            title = "Add task to ${list.name}",
+            confirmLabel = "Add",
+            confirmEnabled = title.isNotBlank(),
+            onConfirm = {
+                viewModel.addItem(
+                    listId = list.id,
+                    title = title.trim(),
+                    description = description.takeIf { it.isNotBlank() },
+                    priority = priority,
+                    dueDate = dueInDays.toLongOrNull()
+                        ?.let { Instant.now().plus(it, ChronoUnit.DAYS) },
+                )
+                addingItemTo = null
             },
-            confirmButton = {
-                Button(
-                    onClick = {
-                        viewModel.addItem(
-                            listId = list.id,
-                            title = title.trim(),
-                            description = description.takeIf { it.isNotBlank() },
-                            priority = priority,
-                            dueDate = dueInDays.toLongOrNull()
-                                ?.let { Instant.now().plus(it, ChronoUnit.DAYS) },
-                        )
-                        addingItemTo = null
-                    },
-                    enabled = title.isNotBlank(),
-                ) { Text("Add") }
-            },
-            dismissButton = { TextButton(onClick = { addingItemTo = null }) { Text("Cancel") } },
-        )
+            onDismiss = { addingItemTo = null },
+        ) {
+            MewdekoTextField(value = title, onValueChange = { title = it }, label = "Title")
+            MewdekoTextField(
+                value = description,
+                onValueChange = { description = it },
+                label = "Description (optional)",
+                singleLine = false,
+                minLines = 2,
+            )
+            DiscordSelectorSingle(
+                kind = SelectorKind.Custom(Icons.Default.Checklist),
+                options = TodoPriority.entries.map { SelectorOption(it.raw.toString(), it.label) },
+                placeholder = "Medium",
+                label = "Priority",
+                selectedId = priority.raw.toString(),
+                onSelect = { priority = TodoPriority.from(it?.toIntOrNull() ?: 2) },
+            )
+            MewdekoTextField(
+                value = dueInDays,
+                onValueChange = { dueInDays = it.filter(Char::isDigit) },
+                label = "Due in days (optional)",
+                numeric = true,
+            )
+        }
     }
 
     editingItem?.let { item ->
@@ -395,95 +380,87 @@ fun TodoScreen(
         var dueDate by remember(item.id) { mutableStateOf(item.dueDate) }
         var showDatePicker by remember(item.id) { mutableStateOf(false) }
 
-        AlertDialog(
-            onDismissRequest = { editingItem = null },
-            title = { Text("Edit task") },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    MewdekoTextField(value = title, onValueChange = { title = it }, label = "Title")
-                    MewdekoTextField(
-                        value = description,
-                        onValueChange = { description = it },
-                        label = "Description",
-                        singleLine = false,
-                        minLines = 2,
-                    )
-                    DiscordSelectorSingle(
-                        kind = SelectorKind.Custom(Icons.Default.Checklist),
-                        options = TodoPriority.entries.map { SelectorOption(it.raw.toString(), it.label) },
-                        placeholder = "Priority",
-                        label = "Priority",
-                        selectedId = priority.raw.toString(),
-                        onSelect = { priority = TodoPriority.from(it?.toIntOrNull() ?: priority.raw) },
-                    )
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        TextButton(onClick = { showDatePicker = true }) {
-                            Icon(Icons.Default.Schedule, contentDescription = null)
-                            Text("  " + (dueDate?.shortDate() ?: "Set due date"))
-                        }
-                        if (dueDate != null) {
-                            TextButton(onClick = { dueDate = null }) { Text("Clear") }
-                        }
+        FullScreenEditor(
+            title = "Edit task",
+            onClose = { editingItem = null },
+            confirmLabel = "Save",
+            confirmEnabled = title.isNotBlank(),
+            onConfirm = {
+                viewModel.updateItem(
+                    item,
+                    title.trim(),
+                    description.takeIf { it.isNotBlank() },
+                    priority,
+                    dueDate,
+                )
+                editingItem = null
+            },
+            hasUnsavedChanges = title != item.title || description != item.description.orEmpty() ||
+                priority != item.priorityType || dueDate != item.dueDate,
+        ) {
+            SectionCard {
+                MewdekoTextField(value = title, onValueChange = { title = it }, label = "Title")
+                MewdekoTextField(
+                    value = description,
+                    onValueChange = { description = it },
+                    label = "Description",
+                    singleLine = false,
+                    minLines = 2,
+                )
+                DiscordSelectorSingle(
+                    kind = SelectorKind.Custom(Icons.Default.Checklist),
+                    options = TodoPriority.entries.map { SelectorOption(it.raw.toString(), it.label) },
+                    placeholder = "Priority",
+                    label = "Priority",
+                    selectedId = priority.raw.toString(),
+                    onSelect = { priority = TodoPriority.from(it?.toIntOrNull() ?: priority.raw) },
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    TextButton(onClick = { showDatePicker = true }) {
+                        Icon(Icons.Default.Schedule, contentDescription = null)
+                        Text("  " + (dueDate?.shortDate() ?: "Set due date"))
                     }
-                    if (item.tags.isNotEmpty()) {
-                        FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            item.tags.forEach { tag ->
-                                InputChip(
-                                    selected = true,
-                                    onClick = { viewModel.removeTag(item, tag) },
-                                    label = { Text(tag) },
-                                    trailingIcon = {
-                                        Icon(Icons.Default.Close, contentDescription = null)
-                                    },
-                                )
-                            }
+                    if (dueDate != null) {
+                        TextButton(onClick = { dueDate = null }) { Text("Clear") }
+                    }
+                }
+                if (item.tags.isNotEmpty()) {
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        item.tags.forEach { tag ->
+                            InputChip(
+                                selected = true,
+                                onClick = { viewModel.removeTag(item, tag) },
+                                label = { Text(tag) },
+                                trailingIcon = {
+                                    Icon(Icons.Default.Close, contentDescription = "Remove tag $tag")
+                                },
+                            )
                         }
                     }
                 }
-            },
-            confirmButton = {
-                Button(
-                    onClick = {
-                        viewModel.updateItem(
-                            item,
-                            title.trim(),
-                            description.takeIf { it.isNotBlank() },
-                            priority,
-                            dueDate,
-                        )
-                        editingItem = null
-                    },
-                    enabled = title.isNotBlank(),
-                ) { Text("Save") }
-            },
-            dismissButton = { TextButton(onClick = { editingItem = null }) { Text("Cancel") } },
-        )
+            }
 
-        if (showDatePicker) {
-            DueDatePickerDialog(
-                initial = dueDate,
-                onConfirm = { dueDate = it; showDatePicker = false },
-                onDismiss = { showDatePicker = false },
-            )
+            if (showDatePicker) {
+                DueDatePickerDialog(
+                    initial = dueDate,
+                    onConfirm = { dueDate = it; showDatePicker = false },
+                    onDismiss = { showDatePicker = false },
+                )
+            }
         }
     }
 
     taggingItem?.let { item ->
         var tag by remember(item.id) { mutableStateOf("") }
-        AlertDialog(
-            onDismissRequest = { taggingItem = null },
-            title = { Text("Add tag") },
-            text = {
-                MewdekoTextField(value = tag, onValueChange = { tag = it }, label = "Tag")
-            },
-            confirmButton = {
-                Button(
-                    onClick = { viewModel.addTag(item, tag.trim()); taggingItem = null },
-                    enabled = tag.isNotBlank(),
-                ) { Text("Add") }
-            },
-            dismissButton = { TextButton(onClick = { taggingItem = null }) { Text("Cancel") } },
-        )
+        FormSheet(
+            title = "Add tag",
+            confirmLabel = "Add",
+            confirmEnabled = tag.isNotBlank(),
+            onConfirm = { viewModel.addTag(item, tag.trim()); taggingItem = null },
+            onDismiss = { taggingItem = null },
+        ) {
+            MewdekoTextField(value = tag, onValueChange = { tag = it }, label = "Tag")
+        }
     }
 
     permissionsForList?.let { list ->

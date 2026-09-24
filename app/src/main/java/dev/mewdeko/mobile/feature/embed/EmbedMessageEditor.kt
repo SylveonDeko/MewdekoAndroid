@@ -15,7 +15,6 @@ import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
@@ -30,30 +29,27 @@ import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Info
-import androidx.compose.material.icons.filled.OpenInNew
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.RestartAlt
-import androidx.compose.material.icons.filled.Rule
-import androidx.compose.material.icons.filled.Send
 import androidx.compose.material.icons.filled.SmartButton
 import androidx.compose.material.icons.filled.Upload
 import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material.icons.automirrored.filled.Redo
+import androidx.compose.material.icons.automirrored.filled.Rule
+import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.automirrored.filled.Undo
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -65,23 +61,24 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalUriHandler
-import androidx.compose.ui.text.AnnotatedString
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.mewdeko.mobile.core.model.EmbedField
 import dev.mewdeko.mobile.core.model.EmbedMessage
 import dev.mewdeko.mobile.core.model.EmbedSpec
+import dev.mewdeko.mobile.core.model.normalizedEmbedHex
 import dev.mewdeko.mobile.core.net.MewdekoJson
 import dev.mewdeko.mobile.core.theme.LocalGuildPalette
 import dev.mewdeko.mobile.core.theme.MonospaceStyle
+import dev.mewdeko.mobile.core.ui.ColorPickerField
 import dev.mewdeko.mobile.core.ui.ConfirmDialog
 import dev.mewdeko.mobile.core.ui.DiscordSelectorSingle
 import dev.mewdeko.mobile.core.ui.EmptyState
 import dev.mewdeko.mobile.core.ui.InfoRow
+import dev.mewdeko.mobile.core.ui.LocalSheetDismiss
+import dev.mewdeko.mobile.core.ui.MewdekoBottomSheet
 import dev.mewdeko.mobile.core.ui.MewdekoTextField
 import dev.mewdeko.mobile.core.ui.SectionCard
 import dev.mewdeko.mobile.core.ui.SectionCardHeader
@@ -90,6 +87,9 @@ import dev.mewdeko.mobile.core.ui.SectionTabs
 import dev.mewdeko.mobile.core.ui.SelectorKind
 import dev.mewdeko.mobile.core.ui.SelectorOption
 import dev.mewdeko.mobile.core.ui.SwitchRow
+import dev.mewdeko.mobile.core.ui.TabLevel
+import dev.mewdeko.mobile.core.ui.rememberTextClipboard
+import kotlin.time.Duration.Companion.milliseconds
 import kotlinx.coroutines.delay
 import kotlinx.serialization.json.JsonObject
 
@@ -107,6 +107,10 @@ private const val HISTORY_DEBOUNCE_MS = 350L
  *
  * Feature screens embed this inline; the editing surface itself lives in a
  * full-height modal sheet so it does not compete with the settings around it.
+ *
+ * Pass [allowComponents] as false for messages whose buttons and dropdowns
+ * the feature builds itself: the editor hides its buttons tab and saves the
+ * message without any. Pass [allowSend] as false to hide the send tab.
  */
 @Composable
 fun EmbedMessageEditor(
@@ -114,9 +118,12 @@ fun EmbedMessageEditor(
     onMessageChange: (EmbedMessage) -> Unit,
     modifier: Modifier = Modifier,
     additionalPlaceholders: List<Placeholder> = emptyList(),
+    allowComponents: Boolean = true,
+    allowSend: Boolean = true,
 ) {
     var editing by remember { mutableStateOf(false) }
     val primary = MaterialTheme.colorScheme.primary
+    val blurb = if (allowComponents) "Rich embeds, buttons, and select menus." else "Text and rich embeds."
 
     Column(modifier = modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
         Surface(
@@ -140,7 +147,7 @@ fun EmbedMessageEditor(
                 Column(modifier = Modifier.weight(1f)) {
                     Text("Message", style = MaterialTheme.typography.titleSmall)
                     Text(
-                        text = "Rich embeds, buttons, and select menus.",
+                        text = blurb,
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -198,10 +205,17 @@ fun EmbedMessageEditor(
                 editing = false
             },
             additionalPlaceholders = additionalPlaceholders,
+            allowComponents = allowComponents,
+            allowSend = allowSend,
         )
     }
 }
 
+/**
+ * The full composer. With [allowComponents] false the buttons tab is hidden
+ * and any buttons or dropdowns are dropped from the draft; with [allowSend]
+ * false the send tab is hidden.
+ */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun EmbedEditorSheet(
@@ -209,22 +223,27 @@ private fun EmbedEditorSheet(
     onDismiss: () -> Unit,
     onSave: (EmbedMessage) -> Unit,
     additionalPlaceholders: List<Placeholder> = emptyList(),
+    allowComponents: Boolean = true,
+    allowSend: Boolean = true,
 ) {
-    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val tabs = remember(allowComponents, allowSend) {
+        ComposerTabs.filter { (allowComponents || it.id != "components") && (allowSend || it.id != "send") }
+    }
+    val strip: (EmbedMessage) -> EmbedMessage = { if (allowComponents) it else it.copy(components = emptyList()) }
     var tab by remember { mutableIntStateOf(0) }
     var selectedEmbed by remember { mutableIntStateOf(0) }
     var confirmingClear by remember { mutableStateOf(false) }
     val gradient = LocalGuildPalette.current.gradient
 
-    var history by remember { mutableStateOf(listOf(initial)) }
+    var history by remember { mutableStateOf(listOf(strip(initial))) }
     var historyIndex by remember { mutableIntStateOf(0) }
-    var pendingDraft by remember { mutableStateOf(initial) }
+    var pendingDraft by remember { mutableStateOf(strip(initial)) }
     var restoringHistory by remember { mutableStateOf(false) }
     val draft = pendingDraft
 
     fun setDraft(new: EmbedMessage) {
         restoringHistory = false
-        pendingDraft = new
+        pendingDraft = strip(new)
     }
 
     fun jumpTo(index: Int) {
@@ -235,14 +254,15 @@ private fun EmbedEditorSheet(
 
     LaunchedEffect(pendingDraft) {
         if (restoringHistory) return@LaunchedEffect
-        delay(HISTORY_DEBOUNCE_MS)
+        delay(HISTORY_DEBOUNCE_MS.milliseconds)
         if (pendingDraft.serialize() == history[historyIndex].serialize()) return@LaunchedEffect
         val next = (history.take(historyIndex + 1) + pendingDraft).takeLast(MAX_HISTORY)
         history = next
         historyIndex = next.lastIndex
     }
 
-    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheetState) {
+    MewdekoBottomSheet(onDismissRequest = onDismiss, showClose = false) {
+        val dismissSheet = LocalSheetDismiss.current
         Column(modifier = Modifier.fillMaxSize().imePadding()) {
             Column(
                 modifier = Modifier
@@ -254,7 +274,7 @@ private fun EmbedEditorSheet(
                     Column(modifier = Modifier.weight(1f)) {
                         Text("Message", style = MaterialTheme.typography.titleLarge)
                         Text(
-                            text = "Rich embeds, buttons, and select menus.",
+                            text = if (allowComponents) "Rich embeds, buttons, and select menus." else "Text and rich embeds.",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
@@ -283,8 +303,8 @@ private fun EmbedEditorSheet(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     modifier = Modifier.padding(top = 8.dp),
                 ) {
-                    TextButton(onClick = onDismiss) { Text("Cancel") }
-                    Button(onClick = { onSave(draft) }, modifier = Modifier.weight(1f)) {
+                    TextButton(onClick = dismissSheet) { Text("Cancel") }
+                    Button(onClick = { onSave(strip(draft)) }, modifier = Modifier.weight(1f)) {
                         Text("Save")
                     }
                 }
@@ -293,7 +313,11 @@ private fun EmbedEditorSheet(
             if (confirmingClear) {
                 ConfirmDialog(
                     title = "Clear everything?",
-                    message = "This removes the content, every embed, and every component.",
+                    message = if (allowComponents) {
+                        "This removes the content, every embed, and every component."
+                    } else {
+                        "This removes the content and every embed."
+                    },
                     confirmLabel = "Clear all",
                     onConfirm = {
                         setDraft(EmbedMessage())
@@ -305,9 +329,9 @@ private fun EmbedEditorSheet(
             }
 
             SectionTabs(
-                tabs = ComposerTabs,
-                selectedId = ComposerTabs[tab].id,
-                onSelect = { id -> tab = ComposerTabs.indexOfFirst { it.id == id } },
+                tabs = tabs,
+                selectedId = tabs[tab].id,
+                onSelect = { id -> tab = tabs.indexOfFirst { it.id == id } },
                 modifier = Modifier.padding(horizontal = 16.dp),
             )
 
@@ -318,7 +342,7 @@ private fun EmbedEditorSheet(
                     .padding(16.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
-                when (ComposerTabs[tab].id) {
+                when (tabs[tab].id) {
                     "templates" -> {
                         TemplatesPanel(
                             onApply = { spec ->
@@ -329,12 +353,12 @@ private fun EmbedEditorSheet(
                                 }
                                 setDraft(draft.copy(embeds = embeds))
                                 selectedEmbed = 0
-                                tab = ComposerTabs.indexOfFirst { it.id == "editor" }
+                                tab = tabs.indexOfFirst { it.id == "editor" }
                             },
                             onStartFromScratch = {
                                 setDraft(EmbedMessage())
                                 selectedEmbed = 0
-                                tab = ComposerTabs.indexOfFirst { it.id == "editor" }
+                                tab = tabs.indexOfFirst { it.id == "editor" }
                             },
                         )
                         return@Column
@@ -396,16 +420,17 @@ private fun EmbedEditorSheet(
                         trailing = { Text("${draft.embeds.size} / $MAX_EMBEDS") },
                     )
                     Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .horizontalScroll(rememberScrollState()),
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
-                        draft.embeds.forEachIndexed { index, _ ->
-                            FilterChip(
-                                selected = selectedEmbed == index,
-                                onClick = { selectedEmbed = index },
-                                label = { Text("Embed ${index + 1}") },
+                        if (draft.embeds.isNotEmpty()) {
+                            SectionTabs(
+                                tabs = draft.embeds.indices.map { SectionTab("embed-$it", "Embed ${it + 1}") },
+                                selectedId = "embed-${selectedEmbed.coerceIn(0, draft.embeds.lastIndex)}",
+                                onSelect = { id -> selectedEmbed = id.removePrefix("embed-").toIntOrNull() ?: 0 },
+                                level = TabLevel.Secondary,
+                                modifier = Modifier.weight(1f),
                             )
                         }
                         if (draft.embeds.size < MAX_EMBEDS) {
@@ -415,7 +440,7 @@ private fun EmbedEditorSheet(
                                     setDraft(draft.copy(embeds = updated))
                                     selectedEmbed = updated.lastIndex
                                 },
-                                label = { Text("Add") },
+                                label = { Text(if (draft.embeds.isEmpty()) "Add embed" else "Add") },
                                 leadingIcon = { Icon(Icons.Default.Add, contentDescription = null) },
                             )
                         }
@@ -508,7 +533,17 @@ private fun EmbedSpecEditor(
             onValueChange = { onChange(embed.copy(url = it)) },
             label = "Title URL",
         )
-        ColorField(value = embed.color, onChange = { onChange(embed.copy(color = it)) })
+        ColorPickerField(
+            label = "Color",
+            hex = normalizedEmbedHex(embed.color).orEmpty(),
+            onHexChange = { onChange(embed.copy(color = it)) },
+        )
+        Text(
+            text = "Preview",
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        EmbedSpecPreview(embed)
     }
 
     SectionCard {
@@ -643,43 +678,6 @@ private fun EmbedSpecEditor(
     }
 }
 
-@Composable
-private fun ColorField(value: String, onChange: (String) -> Unit) {
-    val swatches = listOf(
-        "#5865F2", "#57F287", "#FEE75C", "#EB459E", "#ED4245", "#9B59B6", "#1ABC9C", "#E67E22",
-    )
-
-    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        MewdekoTextField(
-            value = value,
-            onValueChange = onChange,
-            label = "Color",
-            placeholder = "#5865F2",
-        )
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .horizontalScroll(rememberScrollState()),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            swatches.forEach { hex ->
-                val color = parseEmbedColor(hex) ?: return@forEach
-                Surface(
-                    shape = CircleShape,
-                    color = color,
-                    onClick = { onChange(hex) },
-                    modifier = Modifier.size(28.dp),
-                ) { Box(modifier = Modifier.fillMaxSize()) }
-            }
-            if (value.isNotEmpty()) {
-                TextButton(onClick = { onChange("") }) {
-                    Text("Clear", maxLines = 1, overflow = TextOverflow.Ellipsis)
-                }
-            }
-        }
-    }
-}
-
 private fun EmbedSpec.replaceField(index: Int, field: EmbedField): EmbedSpec =
     copy(fields = fields.toMutableList().apply { set(index, field) })
 
@@ -691,7 +689,7 @@ private val ComposerTabs = listOf(
     SectionTab("preview", "Preview", Icons.Default.Visibility),
     SectionTab("json", "JSON", Icons.Default.DataObject),
     SectionTab("saved", "Saved", Icons.Default.Bookmarks),
-    SectionTab("send", "Send", Icons.Default.Send),
+    SectionTab("send", "Send", Icons.AutoMirrored.Filled.Send),
 )
 
 /** Reports how the composed message measures against Discord's limits. */
@@ -699,7 +697,7 @@ private val ComposerTabs = listOf(
 private fun ValidationPanel(draft: EmbedMessage) {
     val issues = remember(draft) { draft.validate() }
     SectionCard {
-        SectionCardHeader("Validation", Icons.Default.Rule)
+        SectionCardHeader("Validation", Icons.AutoMirrored.Filled.Rule)
         if (issues.isEmpty()) {
             Text(
                 "Ready to send.",
@@ -734,7 +732,7 @@ private fun ValidationPanel(draft: EmbedMessage) {
 /** Shows the serialised payload and accepts a pasted one. */
 @Composable
 private fun JsonPanel(draft: EmbedMessage, onDraftChange: (EmbedMessage) -> Unit) {
-    val clipboard = LocalClipboardManager.current
+    val clipboard = rememberTextClipboard()
     val serialized = remember(draft) { draft.serialize() }
     var pasted by remember { mutableStateOf("") }
     var parseError by remember { mutableStateOf<String?>(null) }
@@ -755,7 +753,7 @@ private fun JsonPanel(draft: EmbedMessage, onDraftChange: (EmbedMessage) -> Unit
             }
         }
         OutlinedButton(
-            onClick = { clipboard.setText(AnnotatedString(serialized)) },
+            onClick = { clipboard.copy(serialized) },
             modifier = Modifier.fillMaxWidth(),
         ) {
             Icon(Icons.Default.ContentCopy, contentDescription = null, modifier = Modifier.size(18.dp))
@@ -911,7 +909,7 @@ private fun SendPanel(
     }
 
     SectionCard {
-        SectionCardHeader("Destination", Icons.Default.Send)
+        SectionCardHeader("Destination", Icons.AutoMirrored.Filled.Send)
         DiscordSelectorSingle(
             kind = SelectorKind.Channel,
             options = library.usableChannels.map {
@@ -1018,7 +1016,7 @@ private fun SendPanel(
             enabled = channelId != null && blocking == 0 && embedPermissionBlock == null && !library.isSending,
             modifier = Modifier.fillMaxWidth(),
         ) {
-            Icon(Icons.Default.Send, contentDescription = null, modifier = Modifier.size(18.dp))
+            Icon(Icons.AutoMirrored.Filled.Send, contentDescription = null, modifier = Modifier.size(18.dp))
             Text(
                 if (library.isSending) "Sending…" else "Send message",
                 modifier = Modifier.padding(start = 8.dp),
@@ -1052,7 +1050,7 @@ private fun SendPanel(
                             color = MaterialTheme.colorScheme.primary,
                         )
                         Icon(
-                            Icons.Default.OpenInNew,
+                            Icons.AutoMirrored.Filled.OpenInNew,
                             contentDescription = null,
                             tint = MaterialTheme.colorScheme.primary,
                             modifier = Modifier.size(14.dp),

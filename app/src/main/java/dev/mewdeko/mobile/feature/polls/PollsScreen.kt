@@ -14,7 +14,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.BarChart
 import androidx.compose.material.icons.filled.CheckCircle
@@ -31,7 +30,6 @@ import androidx.compose.material.icons.filled.Poll
 import androidx.compose.material.icons.filled.QueryStats
 import androidx.compose.material.icons.filled.RadioButtonChecked
 import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material.icons.filled.RestartAlt
 import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.Timer
 import androidx.compose.material.icons.filled.Tune
@@ -60,7 +58,7 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.mewdeko.mobile.core.net.InstantParser
 import dev.mewdeko.mobile.core.ui.ConfirmDialog
@@ -68,7 +66,9 @@ import dev.mewdeko.mobile.core.ui.DiscordSelector
 import dev.mewdeko.mobile.core.ui.DiscordSelectorSingle
 import dev.mewdeko.mobile.core.ui.EmptyState
 import dev.mewdeko.mobile.core.ui.FeatureScaffold
+import dev.mewdeko.mobile.core.ui.FullScreenEditor
 import dev.mewdeko.mobile.core.ui.MewdekoTextField
+import dev.mewdeko.mobile.core.ui.NewItemFab
 import dev.mewdeko.mobile.core.ui.SectionCard
 import dev.mewdeko.mobile.core.ui.SectionCardHeader
 import dev.mewdeko.mobile.core.ui.SectionTab
@@ -90,7 +90,6 @@ import kotlin.math.roundToInt
 
 private val Tabs = listOf(
     SectionTab(PollsSection.POLLS, "Polls", Icons.Default.Poll),
-    SectionTab(PollsSection.CREATE, "Create", Icons.Default.Add),
     SectionTab(PollsSection.SCHEDULED, "Scheduled", Icons.Default.Schedule),
     SectionTab(PollsSection.TEMPLATES, "Templates", Icons.Default.ContentCopy),
     SectionTab(PollsSection.ANALYTICS, "Analytics", Icons.Default.BarChart),
@@ -127,11 +126,13 @@ fun PollsScreen(
         onRefresh = { viewModel.load(refreshing = true) },
         onRetry = { viewModel.load() },
         actions = {
-            IconButton(onClick = viewModel::startNewPoll) {
-                Icon(Icons.Default.Add, contentDescription = "New poll")
-            }
             IconButton(onClick = { viewModel.load(refreshing = true) }, enabled = !loadState.isRefreshing) {
                 Icon(Icons.Default.Refresh, contentDescription = "Refresh")
+            }
+        },
+        floatingActionButton = {
+            if (state.section == PollsSection.POLLS || state.section == PollsSection.SCHEDULED) {
+                NewItemFab(label = "New poll", onClick = viewModel::startNewPoll)
             }
         },
     ) {
@@ -145,10 +146,27 @@ fun PollsScreen(
                 onDelete = { pendingDelete = it },
             )
 
-            PollsSection.CREATE -> CreateSection(state, viewModel)
             PollsSection.SCHEDULED -> ScheduledSection(state, viewModel, onCancel = { pendingCancel = it })
             PollsSection.TEMPLATES -> TemplatesSection(state, viewModel, onDelete = { pendingTemplateDelete = it })
             PollsSection.ANALYTICS -> AnalyticsSection(state, viewModel)
+        }
+    }
+
+    if (state.composing) {
+        val scheduling = state.draft.scheduleFor != null
+        FullScreenEditor(
+            title = "New poll",
+            onClose = viewModel::closeComposer,
+            confirmLabel = when {
+                state.isSubmitting -> if (scheduling) "Scheduling..." else "Posting..."
+                scheduling -> "Schedule"
+                else -> "Post"
+            },
+            confirmEnabled = !state.isSubmitting,
+            onConfirm = viewModel::submit,
+            hasUnsavedChanges = state.draft != PollDraft(),
+        ) {
+            CreateSection(state, viewModel)
         }
     }
 
@@ -223,8 +241,10 @@ private fun PollListSection(
                 InlineError(state.pollsError, onRetry = { viewModel.reloadPolls() })
 
             state.polls.isEmpty() -> EmptyState(
-                "No polls yet. Create one from the Create tab.",
+                "No polls yet.",
                 icon = Icons.Default.Poll,
+                actionLabel = "New poll",
+                onAction = viewModel::startNewPoll,
             )
 
             else -> {
@@ -414,7 +434,7 @@ private fun CreateSection(state: PollsState, viewModel: PollsViewModel) {
     val isRoleRestricted = draft.type == PollType.ROLE_RESTRICTED
 
     SectionCard {
-        SectionCardHeader("New poll", Icons.Default.HowToVote)
+        SectionCardHeader("Question", Icons.Default.HowToVote)
         MewdekoTextField(
             value = draft.question,
             onValueChange = viewModel::setQuestion,
@@ -576,32 +596,6 @@ private fun CreateSection(state: PollsState, viewModel: PollsViewModel) {
         }
     }
 
-    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-        OutlinedButton(onClick = viewModel::resetDraft, enabled = !state.isSubmitting) {
-            Icon(Icons.Default.RestartAlt, contentDescription = null, modifier = Modifier.size(18.dp))
-            Text("  Reset")
-        }
-        Button(
-            onClick = viewModel::submit,
-            enabled = !state.isSubmitting,
-            modifier = Modifier.weight(1f),
-        ) {
-            if (state.isSubmitting) {
-                CircularProgressIndicator(
-                    modifier = Modifier.size(18.dp),
-                    strokeWidth = 2.dp,
-                    color = MaterialTheme.colorScheme.onPrimary,
-                )
-            } else {
-                Icon(
-                    if (draft.scheduleFor != null) Icons.Default.Event else Icons.AutoMirrored.Filled.Send,
-                    contentDescription = null,
-                    modifier = Modifier.size(18.dp),
-                )
-            }
-            Text(if (draft.scheduleFor != null) "  Schedule poll" else "  Post poll")
-        }
-    }
 }
 
 @Composable
@@ -676,8 +670,10 @@ private fun ScheduledSection(
                 InlineError(state.scheduledError, onRetry = { viewModel.reloadScheduled() })
 
             pending.isEmpty() -> EmptyState(
-                "Nothing scheduled. Set a time on the Create tab to queue a poll.",
+                "Nothing scheduled. Set a time when creating a poll to queue it.",
                 icon = Icons.Default.Schedule,
+                actionLabel = "New poll",
+                onAction = viewModel::startNewPoll,
             )
 
             else -> {

@@ -13,6 +13,14 @@ import dev.mewdeko.mobile.feature.account.AccountScreen
 import dev.mewdeko.mobile.feature.guilddetail.FeatureBrowserScreen
 import dev.mewdeko.mobile.feature.guilddetail.GuildDetailScreen
 import dev.mewdeko.mobile.feature.guildlist.GuildListScreen
+import dev.mewdeko.mobile.feature.owner.OwnerGate
+import dev.mewdeko.mobile.feature.owner.OwnerPanelScreen
+import dev.mewdeko.mobile.feature.owner.analytics.OwnerAnalyticsScreen
+import dev.mewdeko.mobile.feature.owner.bothells.BotHellsScreen
+import dev.mewdeko.mobile.feature.owner.docker.DockerScreen
+import dev.mewdeko.mobile.feature.owner.leavefeedback.LeaveFeedbackScreen
+import dev.mewdeko.mobile.feature.owner.processlogs.ProcessLogsScreen
+import dev.mewdeko.mobile.feature.performance.PerformanceScreen
 
 /** Wires every destination in the signed-in graph. */
 @Composable
@@ -55,7 +63,50 @@ fun MewdekoNavHost(
                 onSwitchServer = onSwitchServer,
                 onSignOut = onSignOut,
                 onDeleteData = onDeleteData,
+                onOpenOwnerPanel = { navController.navigate(Routes.OWNER_PANEL) { launchSingleTop = true } },
             )
+        }
+
+        val leaveOwnerArea: () -> Unit = {
+            if (!navController.popBackStack(Routes.ACCOUNT, inclusive = false)) {
+                navController.popBackStack()
+            }
+        }
+        val popOwnerPage: () -> Unit = { navController.popBackStack() }
+
+        composable(Routes.OWNER_PANEL) {
+            OwnerGate(onDenied = leaveOwnerArea) {
+                OwnerPanelScreen(
+                    onBack = popOwnerPage,
+                    onOpenPage = { page ->
+                        navController.navigate(page.route) { launchSingleTop = true }
+                    },
+                )
+            }
+        }
+
+        composable(Routes.OWNER_DOCKER) {
+            OwnerGate(onDenied = leaveOwnerArea) { DockerScreen(onBack = popOwnerPage) }
+        }
+
+        composable(Routes.OWNER_BOT_HELLS) {
+            OwnerGate(onDenied = leaveOwnerArea) { BotHellsScreen(onBack = popOwnerPage) }
+        }
+
+        composable(Routes.OWNER_LEAVE_FEEDBACK) {
+            OwnerGate(onDenied = leaveOwnerArea) { LeaveFeedbackScreen(onBack = popOwnerPage) }
+        }
+
+        composable(Routes.OWNER_ANALYTICS) {
+            OwnerGate(onDenied = leaveOwnerArea) { OwnerAnalyticsScreen(onBack = popOwnerPage) }
+        }
+
+        composable(Routes.OWNER_PERFORMANCE) {
+            OwnerGate(onDenied = leaveOwnerArea) { PerformanceScreen(onBack = popOwnerPage) }
+        }
+
+        composable(Routes.OWNER_PROCESS_LOGS) {
+            OwnerGate(onDenied = leaveOwnerArea) { ProcessLogsScreen(onBack = popOwnerPage) }
         }
 
         composable(Routes.GUILD_DETAIL, arguments = guildArgs) { entry ->
@@ -69,16 +120,26 @@ fun MewdekoNavHost(
                         Routes.feature(args.id, args.name, args.iconUrl, featureId)
                     )
                 },
-                onOpenFeatureBrowser = {
-                    navController.navigate(Routes.featureBrowser(args.id, args.name, args.iconUrl))
+                onOpenFeatureBrowser = { category ->
+                    navController.navigate(Routes.featureBrowser(args.id, args.name, args.iconUrl, category?.name))
                 },
             )
         }
 
-        composable(Routes.FEATURE_BROWSER, arguments = guildArgs) { entry ->
+        composable(
+            Routes.FEATURE_BROWSER,
+            arguments = guildArgs + navArgument("category") {
+                type = NavType.StringType
+                nullable = true
+                defaultValue = null
+            },
+        ) { entry ->
             val args = entry.guildArgs()
+            val category = entry.arguments?.getString("category")
+                ?.takeIf { it != "-" }
+                ?.let { raw -> FeatureCategory.entries.firstOrNull { it.name == raw } }
             FeatureBrowserScreen(
-                guild = args,
+                initialCategory = category,
                 onBack = { navController.popBackStack() },
                 onOpenFeature = { featureId ->
                     navController.navigate(

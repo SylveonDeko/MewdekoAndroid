@@ -273,7 +273,7 @@ object DashboardColorStore {
     }
 
     /** `isAnimeColorBand`: light hair or skin, vivid accessories, or mid-tone clothing. */
-    fun isAnimeColorBand(h: Double, s: Double, l: Double): Boolean =
+    fun isAnimeColorBand(s: Double, l: Double): Boolean =
         (l > 80 && s < 20) || (s > 70 && l > 50 && l < 65) || (s > 50 && l > 40 && l < 70)
 
     /** `isLikelyCartoon`: whether the extracted colors read as cartoon or anime art. */
@@ -290,7 +290,7 @@ object DashboardColorStore {
             distinctColorCount.add(floor(h / 30))
             if (isAnimeSkinTone(h, s, l)) hasSkinTones = true
             if (isAnimeEyeColor(h, s, l)) hasEyeColors = true
-            if (isAnimeColorBand(h, s, l)) hasAnimeColorPattern = true
+            if (isAnimeColorBand(s, l)) hasAnimeColorPattern = true
         }
 
         return (highSaturationCount >= 1 && distinctColorCount.size >= 3) ||

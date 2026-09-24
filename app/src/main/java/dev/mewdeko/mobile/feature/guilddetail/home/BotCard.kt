@@ -29,6 +29,7 @@ import dev.mewdeko.mobile.feature.guilddetail.formatted
 import dev.mewdeko.mobile.util.relativeToNow
 import kotlinx.coroutines.delay
 import java.time.Instant
+import kotlin.time.Duration.Companion.seconds
 
 /**
  * The bot's identity in this guild and its health: avatar with status dot,
@@ -49,7 +50,7 @@ fun BotCard(
     val updated by produceState<String?>(lastUpdated?.relativeToNow(), lastUpdated) {
         while (true) {
             value = lastUpdated?.relativeToNow()
-            delay(30_000)
+            delay(30.seconds)
         }
     }
     val name = profile?.nickname?.takeIf { it.isNotBlank() } ?: bot?.botName.orEmpty()
@@ -71,6 +72,7 @@ fun BotCard(
                 Box {
                     Avatar(
                         url = profile?.avatarUrl?.takeIf { it.isNotBlank() } ?: bot?.botAvatar,
+                        fallbackUrl = bot?.botAvatar,
                         contentDescription = null,
                         size = 48,
                         fallbackIcon = Icons.Default.SmartToy,

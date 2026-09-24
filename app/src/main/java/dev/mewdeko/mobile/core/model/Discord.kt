@@ -13,7 +13,16 @@ data class Guild(
     val owner: Boolean = false,
     val permissions: Long = 0L,
     val hasAdminAccess: Boolean? = null,
+    /**
+     * A full CDN URL for the guild's banner, or its invite splash or
+     * discovery splash when it has no banner, or `null` when it has none.
+     */
+    val banner: String? = null,
 ) {
+    /** The [banner] URL when it is a usable, non-blank string. */
+    val bannerUrl: String?
+        get() = banner?.takeIf { it.isNotBlank() }
+
     /** CDN URL for the guild icon at 128px, or `null` if none is set. */
     val iconUrl: String?
         get() {
@@ -32,6 +41,10 @@ data class GuildInfo(
     val iconUrl: String? = null,
     val banner: String? = null,
     val bannerUrl: String? = null,
+    /** The invite splash image, used by the hero when there is no banner. */
+    val splashUrl: String? = null,
+    /** The discovery splash image, used by the hero when there is neither a banner nor a splash. */
+    val discoverySplashUrl: String? = null,
     val description: String? = null,
     val memberCount: Int = 0,
     val premiumTier: Int = 0,

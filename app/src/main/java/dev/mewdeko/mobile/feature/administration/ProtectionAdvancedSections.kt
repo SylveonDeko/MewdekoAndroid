@@ -25,7 +25,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -41,51 +40,46 @@ import androidx.compose.ui.unit.dp
 import dev.mewdeko.mobile.core.ui.DiscordSelector
 import dev.mewdeko.mobile.core.ui.DiscordSelectorSingle
 import dev.mewdeko.mobile.core.ui.EmptyState
+import dev.mewdeko.mobile.core.ui.MewdekoBottomSheet
 import dev.mewdeko.mobile.core.ui.MewdekoTextField
+import dev.mewdeko.mobile.core.ui.MultiSelectDropdown
 import dev.mewdeko.mobile.core.ui.SectionCard
 import dev.mewdeko.mobile.core.ui.SectionCardHeader
 import dev.mewdeko.mobile.core.ui.SelectorKind
 import dev.mewdeko.mobile.core.ui.SelectorOption
 import dev.mewdeko.mobile.core.ui.SliderRow
 import dev.mewdeko.mobile.core.ui.SwitchRow
+import dev.mewdeko.mobile.core.ui.diffSelection
 import kotlinx.coroutines.launch
 
-/** Ignored-channels management for anti-spam. The bot only exposes a toggle, not a list. */
+/**
+ * Ignored-channels management for anti-spam. The list comes from the
+ * protection status; the bot saves it one toggle at a time, so each channel
+ * added or removed in the dropdown is sent as its own toggle.
+ */
 @Composable
 fun AntiSpamIgnoredChannelsCard(state: AdministrationState, viewModel: AdministrationViewModel) {
-    if (state.protection?.antiSpam?.enabled != true) return
-    var expanded by remember { mutableStateOf(false) }
-    var channelId by remember { mutableStateOf<String?>(null) }
+    val antiSpam = state.protection?.antiSpam ?: return
+    if (!antiSpam.enabled) return
 
     SectionCard {
-        SectionCardHeader(
-            "Anti-spam ignored channels",
-            Icons.Default.Shield,
-            trailing = {
-                OutlinedButton(onClick = { expanded = !expanded }) {
-                    Text(if (expanded) "Done" else "Manage")
-                }
-            },
+        SectionCardHeader("Anti-spam ignored channels", Icons.Default.Shield)
+        Text(
+            "Messages in these channels never count toward anti-spam.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
-        if (expanded) {
-            Text(
-                "Toggles whether a channel is exempt from anti-spam. Tap a channel to add it, tap again to remove it.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            DiscordSelectorSingle(
-                kind = SelectorKind.Channel,
-                options = state.availableChannels.map { SelectorOption(it.id, it.name) },
-                placeholder = "Pick a channel",
-                selectedId = channelId,
-                onSelect = { channelId = it },
-            )
-            Button(
-                onClick = { channelId?.let(viewModel::toggleAntiSpamIgnoredChannel) },
-                enabled = channelId != null,
-                modifier = Modifier.fillMaxWidth(),
-            ) { Text("Toggle ignored") }
-        }
+        MultiSelectDropdown(
+            kind = SelectorKind.Channel,
+            options = state.availableChannels.map { SelectorOption(it.id, it.name) },
+            selection = antiSpam.ignoredChannels,
+            onSelectionChange = { next ->
+                val (added, removed) = diffSelection(antiSpam.ignoredChannels, next)
+                (removed + added).forEach(viewModel::toggleAntiSpamIgnoredChannel)
+            },
+            label = "Ignored channels",
+            placeholder = "No ignored channels",
+        )
     }
 }
 
@@ -568,7 +562,7 @@ private fun ActionPicker(action: AntiPunishmentAction, onChange: (AntiPunishment
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun EditorSheet(title: String, onDismiss: () -> Unit, content: @Composable ColumnScope.() -> Unit) {
-    ModalBottomSheet(onDismissRequest = onDismiss) {
+    MewdekoBottomSheet(onDismissRequest = onDismiss, title = title) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
@@ -578,7 +572,6 @@ fun EditorSheet(title: String, onDismiss: () -> Unit, content: @Composable Colum
                 .padding(bottom = 32.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            Text(title, style = MaterialTheme.typography.titleMedium)
             content()
         }
     }

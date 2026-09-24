@@ -21,7 +21,6 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.encodeToString
-import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
@@ -156,7 +155,7 @@ class BirthdayViewModel @Inject constructor(
             put("birthdayRoleId", current.roleId.asJson())
             put("birthdayPingRoleId", current.pingRoleId.asJson())
             put("birthdayMessage", current.message.serialize().let { serialized ->
-                if (serialized == "-") JsonNull else JsonPrimitive(serialized)
+                if (serialized == "-") JsonPrimitive("") else JsonPrimitive(serialized)
             })
             put("birthdayReminderDays", JsonPrimitive(current.reminderDays))
             put("defaultTimezone", JsonPrimitive(current.timezone))
@@ -221,6 +220,11 @@ class BirthdayViewModel @Inject constructor(
         _state.update { transform(it).copy(hasUnsavedChanges = true) }
     }
 
+    /**
+     * The bot's request DTOs use `ulong?`, and only apply a field when it is present
+     * (`HasValue`), then treat 0 as a clear. A JSON null therefore means "leave unchanged", not
+     * "clear", so a deselected picker must send 0 explicitly to actually clear the stored value.
+     */
     private fun Snowflake?.asJson() =
-        if (isNullOrEmpty()) JsonNull else JsonPrimitive(this)
+        JsonPrimitive(this?.toLongOrNull() ?: 0L)
 }

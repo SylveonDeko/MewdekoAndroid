@@ -221,6 +221,28 @@ data class StatChannel(
             }
 }
 
+/**
+ * Everything the stat channel editor collects, for creating and for editing. Fields a counter
+ * does not use are null so they are left out of the request.
+ *
+ * [channelId] is `"0"` to have the bot create a new voice channel (optionally inside
+ * [categoryId]); it is ignored when editing.
+ */
+data class StatChannelDraft(
+    val channelId: Snowflake,
+    val categoryId: Snowflake?,
+    val statType: Int,
+    val template: String,
+    val displayStyle: Int,
+    val mechanism: StatMechanism,
+    val intervalMinutes: Int,
+    val roleId: Snowflake?,
+    val countdownDate: Instant?,
+    val goalTarget: Int?,
+    val targetId: Long?,
+    val targetName: String?,
+)
+
 /** Stat channels screen state. */
 data class StatChannelsState(
     val channels: List<StatChannel> = emptyList(),
@@ -345,61 +367,69 @@ class StatChannelsViewModel @Inject constructor(
     }
 
     /**
-     * Turns a voice channel into a live stat display. When [channelId] is `"0"` the bot creates a
-     * new voice channel instead of reusing an existing one, optionally inside [categoryId].
+     * Turns a voice channel into a live stat display. When the draft's channel id is `"0"` the bot
+     * creates a new voice channel instead of reusing an existing one, optionally inside its category.
+     * The list reloads to show it, so there is no success message.
      */
-    fun add(
-        channelId: Snowflake,
-        categoryId: Snowflake?,
-        statType: Int,
-        template: String,
-        displayStyle: Int,
-        mechanism: StatMechanism,
-        intervalMinutes: Int,
-        roleId: Snowflake?,
-        countdownDate: Instant?,
-        goalTarget: Int?,
-        targetId: Long?,
-        targetName: String?,
-    ) = launchAction("Failed to add stat channel.") {
+    fun add(draft: StatChannelDraft) = launchAction("Failed to add stat channel.") {
         api.sendIgnoringBody(
             Endpoint(
                 "api/StatChannel/$guildId",
                 HttpMethod.POST,
                 jsonBody(
-                    "channelId" to (channelId.toLongOrNull() ?: 0L),
-                    "categoryId" to categoryId?.toLongOrNull(),
-                    "statType" to statType,
-                    "template" to template,
-                    "displayStyle" to displayStyle,
-                    "updateMechanism" to mechanism.raw,
-                    "updateIntervalMinutes" to intervalMinutes,
-                    "roleId" to roleId?.toLongOrNull(),
-                    "countdownDate" to countdownDate?.let { DateTimeFormatter.ISO_INSTANT.format(it) },
-                    "goalTarget" to goalTarget,
-                    "targetId" to targetId,
-                    "targetName" to targetName?.takeIf { it.isNotBlank() },
+                    "channelId" to (draft.channelId.toLongOrNull() ?: 0L),
+                    "categoryId" to draft.categoryId?.toLongOrNull(),
+                    *draftFields(draft),
                 ),
             )
         )
-        postSuccess("Stat channel added.")
         load(refreshing = true)
     }
+
+    /**
+     * Saves the editor's draft over an existing stat channel. The bot only changes the fields
+     * present on the request, so the counter and its target can change along with the template and
+     * delivery. The list reloads to show the result, so there is no success message.
+     */
+    fun update(channelId: Snowflake, draft: StatChannelDraft) =
+        launchAction("Failed to update stat channel.") {
+            api.sendIgnoringBody(
+                Endpoint(
+                    "api/StatChannel/$guildId/$channelId",
+                    HttpMethod.PUT,
+                    jsonBody(*draftFields(draft)),
+                )
+            )
+            load(refreshing = true)
+        }
+
+    /** The request fields shared by adding and updating a stat channel. */
+    private fun draftFields(draft: StatChannelDraft): Array<Pair<String, Any?>> = arrayOf(
+        "statType" to draft.statType,
+        "template" to draft.template,
+        "displayStyle" to draft.displayStyle,
+        "updateMechanism" to draft.mechanism.raw,
+        "updateIntervalMinutes" to draft.intervalMinutes,
+        "roleId" to draft.roleId?.toLongOrNull(),
+        "countdownDate" to draft.countdownDate?.let { DateTimeFormatter.ISO_INSTANT.format(it) },
+        "goalTarget" to draft.goalTarget,
+        "targetId" to draft.targetId,
+        "targetName" to draft.targetName?.takeIf { it.isNotBlank() },
+    )
 
     /**
      * Renders the draft template against live guild data, debounced so typing does not spam the API.
      * The bot does the rendering so the preview matches exactly what the channel name will become.
      */
-    fun refreshPreview(
-        statType: Int,
-        template: String,
-        displayStyle: Int,
-        roleId: Snowflake?,
-        countdownDate: Instant?,
-        goalTarget: Int?,
-        targetId: Long?,
-        targetName: String?,
-    ) {
+    fun refreshPreview(draft: StatChannelDraft) {
+        val statType = draft.statType
+        val template = draft.template
+        val displayStyle = draft.displayStyle
+        val roleId = draft.roleId
+        val countdownDate = draft.countdownDate
+        val goalTarget = draft.goalTarget
+        val targetId = draft.targetId
+        val targetName = draft.targetName
         previewJob?.cancel()
         if (template.isBlank()) {
             _state.update { it.copy(preview = "", previewPending = false) }
@@ -443,48 +473,6 @@ class StatChannelsViewModel @Inject constructor(
         _state.update { it.copy(preview = "", previewPending = false) }
     }
 
-    /** Changes the name template a stat channel renders. */
-    fun updateTemplate(channelId: Snowflake, template: String) =
-        launchAction("Failed to update template.") {
-            api.sendIgnoringBody(
-                Endpoint(
-                    "api/StatChannel/$guildId/$channelId",
-                    HttpMethod.PUT,
-                    jsonBody("template" to template),
-                )
-            )
-            _state.update { current ->
-                current.copy(
-                    channels = current.channels.map {
-                        if (it.channelId == channelId) it.copy(template = template) else it
-                    },
-                )
-            }
-            postSuccess("Template updated.")
-        }
-
-    /** Changes how a stat channel renders its number and pushes updates to Discord. */
-    fun updateDelivery(
-        channelId: Snowflake,
-        displayStyle: Int,
-        mechanism: StatMechanism,
-        intervalMinutes: Int,
-    ) = launchAction("Failed to update stat channel.") {
-        api.sendIgnoringBody(
-            Endpoint(
-                "api/StatChannel/$guildId/$channelId",
-                HttpMethod.PUT,
-                jsonBody(
-                    "displayStyle" to displayStyle,
-                    "updateMechanism" to mechanism.raw,
-                    "updateIntervalMinutes" to intervalMinutes,
-                ),
-            )
-        )
-        postSuccess("Stat channel updated.")
-        load(refreshing = true)
-    }
-
     /** Changes the defaults applied to newly created stat channels. */
     fun updateSettings(settings: StatChannelSettings) =
         launchAction("Failed to save defaults.") {
@@ -511,7 +499,6 @@ class StatChannelsViewModel @Inject constructor(
         _state.update {
             it.copy(channels = it.channels.filterNot { entry -> entry.channelId == channelId })
         }
-        postSuccess("Stat channel removed.")
     }
 
     /** Clamps a requested interval to what the chosen mechanism can sustain. */

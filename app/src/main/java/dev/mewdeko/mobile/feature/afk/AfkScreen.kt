@@ -7,13 +7,13 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.Notes
 import androidx.compose.material.icons.filled.AccessTime
 import androidx.compose.material.icons.filled.AllInclusive
 import androidx.compose.material.icons.filled.ChatBubble
 import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Groups
-import androidx.compose.material.icons.filled.Notes
 import androidx.compose.material.icons.filled.Save
 import androidx.compose.material.icons.filled.Tag
 import androidx.compose.material.icons.filled.Timer
@@ -21,7 +21,6 @@ import androidx.compose.material.icons.filled.ToggleOn
 import androidx.compose.material3.Badge
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.ExtendedFloatingActionButton
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.ListItem
@@ -39,12 +38,14 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.mewdeko.mobile.core.ui.Avatar
 import dev.mewdeko.mobile.core.ui.ConfirmDialog
 import dev.mewdeko.mobile.core.ui.DiscordSelector
 import dev.mewdeko.mobile.core.ui.EmptyState
+import dev.mewdeko.mobile.core.ui.EnumOption
+import dev.mewdeko.mobile.core.ui.EnumPicker
 import dev.mewdeko.mobile.core.ui.FeatureScaffold
 import dev.mewdeko.mobile.core.ui.MewdekoTextField
 import dev.mewdeko.mobile.core.ui.SectionCard
@@ -117,7 +118,7 @@ fun AfkScreen(
         }
 
         SectionCard {
-            SectionCardHeader("Max message length", Icons.Default.Notes)
+            SectionCardHeader("Max message length", Icons.AutoMirrored.Filled.Notes)
             MewdekoTextField(
                 value = state.maxLength.toString(),
                 onValueChange = { raw ->
@@ -137,23 +138,11 @@ fun AfkScreen(
 
         SectionCard {
             SectionCardHeader("Removal trigger", Icons.Default.ToggleOn)
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                AfkRemovalType.entries.forEach { type ->
-                    FilterChip(
-                        selected = state.removalType == type,
-                        onClick = { viewModel.setRemovalType(type) },
-                        label = { Text(type.label, maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                        modifier = Modifier.weight(1f),
-                    )
-                }
-            }
-            Text(
-                text = state.removalType.blurb,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            EnumPicker(
+                label = "Removal trigger",
+                options = AfkRemovalType.entries.map { EnumOption(it, title = it.label, description = it.blurb) },
+                selected = state.removalType,
+                onSelect = viewModel::setRemovalType,
             )
         }
 

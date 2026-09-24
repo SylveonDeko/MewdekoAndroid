@@ -8,21 +8,19 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.MenuBook
 import androidx.compose.material.icons.automirrored.filled.Send
-import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ChatBubble
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.FormatQuote
-import androidx.compose.material.icons.filled.MenuBook
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Security
 import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.material.icons.filled.Timer
-import androidx.compose.material3.Button
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -47,6 +45,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.mewdeko.mobile.core.ui.DiscordSelectorSingle
 import dev.mewdeko.mobile.core.ui.EmptyState
+import dev.mewdeko.mobile.core.ui.FormSheet
+import dev.mewdeko.mobile.core.ui.FullScreenEditor
 import dev.mewdeko.mobile.core.ui.MewdekoTextField
 import dev.mewdeko.mobile.core.ui.SearchField
 import dev.mewdeko.mobile.core.ui.SectionCard
@@ -59,88 +59,99 @@ import dev.mewdeko.mobile.core.ui.clickableRow
 
 private val PermissionOptions = TwitchPermission.entries.map { SelectorOption(it.value, it.value) }
 
-/** Custom command form, preview, list, and the command reference. */
+/**
+ * The custom command editor, opened from the Custom section's New action or
+ * a command row. It has a response composer with variables and a test run,
+ * so it is a [FullScreenEditor].
+ */
+@Composable
+internal fun TwitchCommandEditor(state: TwitchState, viewModel: TwitchViewModel) {
+    val draft = state.commandDraft
+    FullScreenEditor(
+        title = if (draft.editing) "Edit command" else "New command",
+        onClose = viewModel::closeEditor,
+        confirmLabel = if (state.commandSaving) "Saving..." else "Save",
+        confirmEnabled = !state.commandSaving && draft.name.isNotBlank() && draft.response.isNotBlank(),
+        onConfirm = viewModel::saveCommand,
+        hasUnsavedChanges = !draft.editing && (draft.name.isNotEmpty() || draft.response.isNotEmpty()),
+    ) {
+        SectionCard {
+            HelpText("Members type these in Twitch chat and the bot replies with your text.")
+            MewdekoTextField(
+                value = draft.name,
+                onValueChange = { value -> viewModel.updateCommandDraft { it.copy(name = value) } },
+                label = "Name",
+                placeholder = "hello",
+                supportingText = "Runs as ${state.prefix}${draft.name.ifBlank { "name" }}",
+            )
+            DiscordSelectorSingle(
+                kind = SelectorKind.Custom(Icons.Default.Security),
+                options = PermissionOptions,
+                placeholder = TwitchPermission.EVERYONE.value,
+                label = "Permission",
+                selectedId = draft.permission,
+                onSelect = { value ->
+                    viewModel.updateCommandDraft { it.copy(permission = value ?: TwitchPermission.EVERYONE.value) }
+                },
+            )
+            MewdekoTextField(
+                value = draft.cooldownSeconds,
+                onValueChange = { value -> viewModel.updateCommandDraft { it.copy(cooldownSeconds = value.filter(Char::isDigit)) } },
+                label = "Cooldown seconds",
+                numeric = true,
+                supportingText = "0 to 86400.",
+            )
+            MewdekoTextField(
+                value = draft.response,
+                onValueChange = { value -> viewModel.updateCommandDraft { it.copy(response = value) } },
+                label = "Response",
+                placeholder = "Hey %display%, welcome in.",
+                singleLine = false,
+                minLines = 3,
+            )
+            VariableChips(
+                variables = state.variablesFor("custom_commands", TwitchReference.commandVariables),
+                onInsert = { variable -> viewModel.updateCommandDraft { it.copy(response = it.response + variable) } },
+            )
+            SwitchRow(
+                title = "Enabled",
+                checked = draft.enabled,
+                onCheckedChange = { value -> viewModel.updateCommandDraft { it.copy(enabled = value) } },
+            )
+        }
+
+        if (draft.editing) {
+            SectionCard {
+                SectionCardHeader("Test response", Icons.Default.PlayArrow)
+                HelpText("Renders the saved version of this command without sending it to chat.")
+                MewdekoTextField(
+                    value = draft.testArgs,
+                    onValueChange = { value -> viewModel.updateCommandDraft { it.copy(testArgs = value) } },
+                    label = "Test args",
+                    placeholder = "@target extra text",
+                )
+                OutlinedButton(
+                    onClick = viewModel::previewCommand,
+                    enabled = !state.commandPreviewing && draft.name.isNotBlank(),
+                ) {
+                    Icon(Icons.Default.PlayArrow, contentDescription = null)
+                    Text(if (state.commandPreviewing) "  Testing..." else "  Test response")
+                }
+                if (state.commandPreview.isNotEmpty()) {
+                    OutputBlock(state.commandPreview)
+                }
+            }
+        }
+    }
+}
+
+/** Custom command list and the command reference; the New action opens [TwitchCommandEditor]. */
 @Composable
 internal fun CustomCommandsSection(
     state: TwitchState,
     viewModel: TwitchViewModel,
     confirm: (TwitchConfirmation) -> Unit,
 ) {
-    val draft = state.commandDraft
-    SectionCard {
-        SectionCardHeader(if (draft.editing) "Edit command" else "New command", Icons.Default.Add)
-        HelpText("Members type these in Twitch chat and the bot replies with your text.")
-        MewdekoTextField(
-            value = draft.name,
-            onValueChange = { value -> viewModel.updateCommandDraft { it.copy(name = value) } },
-            label = "Name",
-            placeholder = "hello",
-            supportingText = "Runs as ${state.prefix}${draft.name.ifBlank { "name" }}",
-        )
-        DiscordSelectorSingle(
-            kind = SelectorKind.Custom(Icons.Default.Security),
-            options = PermissionOptions,
-            placeholder = TwitchPermission.EVERYONE.value,
-            label = "Permission",
-            selectedId = draft.permission,
-            onSelect = { value ->
-                viewModel.updateCommandDraft { it.copy(permission = value ?: TwitchPermission.EVERYONE.value) }
-            },
-        )
-        MewdekoTextField(
-            value = draft.cooldownSeconds,
-            onValueChange = { value -> viewModel.updateCommandDraft { it.copy(cooldownSeconds = value.filter(Char::isDigit)) } },
-            label = "Cooldown seconds",
-            numeric = true,
-            supportingText = "0 to 86400.",
-        )
-        MewdekoTextField(
-            value = draft.response,
-            onValueChange = { value -> viewModel.updateCommandDraft { it.copy(response = value) } },
-            label = "Response",
-            placeholder = "Hey %display%, welcome in.",
-            singleLine = false,
-            minLines = 3,
-        )
-        VariableChips(
-            variables = state.variablesFor("custom_commands", TwitchReference.commandVariables),
-            onInsert = { variable -> viewModel.updateCommandDraft { it.copy(response = it.response + variable) } },
-        )
-        SwitchRow(
-            title = "Enabled",
-            checked = draft.enabled,
-            onCheckedChange = { value -> viewModel.updateCommandDraft { it.copy(enabled = value) } },
-        )
-        FormButtons(
-            saveLabel = "Save command",
-            saving = state.commandSaving,
-            canSave = draft.name.isNotBlank() && draft.response.isNotBlank(),
-            showCancel = draft.editing || draft.name.isNotEmpty() || draft.response.isNotEmpty(),
-            onSave = viewModel::saveCommand,
-            onCancel = viewModel::resetCommandDraft,
-        )
-
-        HorizontalDivider()
-        Text("Test response", style = MaterialTheme.typography.titleSmall)
-        HelpText("Renders the saved command named above without sending it to chat.")
-        MewdekoTextField(
-            value = draft.testArgs,
-            onValueChange = { value -> viewModel.updateCommandDraft { it.copy(testArgs = value) } },
-            label = "Test args",
-            placeholder = "@target extra text",
-        )
-        OutlinedButton(
-            onClick = viewModel::previewCommand,
-            enabled = !state.commandPreviewing && draft.name.isNotBlank(),
-        ) {
-            Icon(Icons.Default.PlayArrow, contentDescription = null)
-            Text(if (state.commandPreviewing) "  Testing..." else "  Test response")
-        }
-        if (state.commandPreview.isNotEmpty()) {
-            OutputBlock(state.commandPreview)
-        }
-    }
-
     SectionCard {
         SectionCardHeader("Custom commands (${state.customCommands.size})", Icons.Default.Terminal)
         when {
@@ -149,7 +160,12 @@ internal fun CustomCommandsSection(
                 onRetry = { viewModel.load(refreshing = true) },
             )
 
-            state.customCommands.isEmpty() -> EmptyState("No custom commands yet.", icon = Icons.Default.Terminal)
+            state.customCommands.isEmpty() -> EmptyState(
+                message = "No custom commands yet.",
+                icon = Icons.Default.Terminal,
+                actionLabel = "New command",
+                onAction = { viewModel.startNew(TwitchEditor.COMMAND) },
+            )
 
             else -> state.customCommands.forEach { command ->
                 ListItem(
@@ -213,7 +229,7 @@ private fun CommandReferenceCard(state: TwitchState, viewModel: TwitchViewModel)
     SectionCard {
         SectionCardHeader(
             "Command reference",
-            Icons.Default.MenuBook,
+            Icons.AutoMirrored.Filled.MenuBook,
             trailing = {
                 IconButton(onClick = { expanded = !expanded }) {
                     Icon(
@@ -270,7 +286,82 @@ private fun CommandReferenceBody(state: TwitchState, viewModel: TwitchViewModel)
     }
 }
 
-/** Timer form and list with enable, test, edit, and remove. */
+/**
+ * The timer editor, opened from the Timers section's New action or a
+ * timer's Edit button. It has more than five inputs, so it is a
+ * [FullScreenEditor].
+ */
+@Composable
+internal fun TwitchTimerEditor(state: TwitchState, viewModel: TwitchViewModel) {
+    val draft = state.timerDraft
+    FullScreenEditor(
+        title = if (draft.editing) "Edit timer" else "New timer",
+        onClose = viewModel::closeEditor,
+        confirmLabel = if (state.timerSaving) "Saving..." else "Save",
+        confirmEnabled = !state.timerSaving && draft.name.isNotBlank() && draft.messages.isNotBlank(),
+        onConfirm = viewModel::saveTimer,
+        hasUnsavedChanges = !draft.editing && (draft.name.isNotEmpty() || draft.messages.isNotEmpty()),
+    ) {
+        SectionCard {
+            HelpText("Timers post one of their messages to Twitch chat on a schedule.")
+            MewdekoTextField(
+                value = draft.name,
+                onValueChange = { value -> viewModel.updateTimerDraft { it.copy(name = value) } },
+                label = "Name",
+                placeholder = "socials",
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                MewdekoTextField(
+                    value = draft.intervalMinutes,
+                    onValueChange = { value -> viewModel.updateTimerDraft { it.copy(intervalMinutes = value.filter(Char::isDigit)) } },
+                    label = "Interval (min)",
+                    numeric = true,
+                    supportingText = "1 to 1440",
+                    modifier = Modifier.weight(1f),
+                )
+                MewdekoTextField(
+                    value = draft.minChatMessages,
+                    onValueChange = { value -> viewModel.updateTimerDraft { it.copy(minChatMessages = value.filter(Char::isDigit)) } },
+                    label = "Min chat messages",
+                    numeric = true,
+                    supportingText = "0 to 10000",
+                    modifier = Modifier.weight(1f),
+                )
+            }
+            MewdekoTextField(
+                value = draft.messages,
+                onValueChange = { value -> viewModel.updateTimerDraft { it.copy(messages = value) } },
+                label = "Messages",
+                placeholder = "One message per line. Try: Follow the socials: %url%",
+                singleLine = false,
+                minLines = 4,
+            )
+            VariableChips(
+                variables = state.variablesFor("timers", TwitchReference.timerVariables),
+                onInsert = { variable -> viewModel.updateTimerDraft { it.copy(messages = it.messages + variable) } },
+            )
+            SwitchRow(
+                title = "Online only",
+                subtitle = "Only post while the stream is live",
+                checked = draft.onlineOnly,
+                onCheckedChange = { value -> viewModel.updateTimerDraft { it.copy(onlineOnly = value) } },
+            )
+            SwitchRow(
+                title = "Randomize messages",
+                subtitle = "Pick a random line instead of rotating in order",
+                checked = draft.randomizeMessages,
+                onCheckedChange = { value -> viewModel.updateTimerDraft { it.copy(randomizeMessages = value) } },
+            )
+            SwitchRow(
+                title = "Enabled",
+                checked = draft.enabled,
+                onCheckedChange = { value -> viewModel.updateTimerDraft { it.copy(enabled = value) } },
+            )
+        }
+    }
+}
+
+/** Timer list with enable, test, edit, and remove; the New action opens [TwitchTimerEditor]. */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 internal fun TimersSection(
@@ -278,73 +369,6 @@ internal fun TimersSection(
     viewModel: TwitchViewModel,
     confirm: (TwitchConfirmation) -> Unit,
 ) {
-    val draft = state.timerDraft
-    SectionCard {
-        SectionCardHeader(if (draft.editing) "Edit timer" else "New timer", Icons.Default.Add)
-        HelpText("Timers post one of their messages to Twitch chat on a schedule.")
-        MewdekoTextField(
-            value = draft.name,
-            onValueChange = { value -> viewModel.updateTimerDraft { it.copy(name = value) } },
-            label = "Name",
-            placeholder = "socials",
-        )
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            MewdekoTextField(
-                value = draft.intervalMinutes,
-                onValueChange = { value -> viewModel.updateTimerDraft { it.copy(intervalMinutes = value.filter(Char::isDigit)) } },
-                label = "Interval (min)",
-                numeric = true,
-                supportingText = "1 to 1440",
-                modifier = Modifier.weight(1f),
-            )
-            MewdekoTextField(
-                value = draft.minChatMessages,
-                onValueChange = { value -> viewModel.updateTimerDraft { it.copy(minChatMessages = value.filter(Char::isDigit)) } },
-                label = "Min chat messages",
-                numeric = true,
-                supportingText = "0 to 10000",
-                modifier = Modifier.weight(1f),
-            )
-        }
-        MewdekoTextField(
-            value = draft.messages,
-            onValueChange = { value -> viewModel.updateTimerDraft { it.copy(messages = value) } },
-            label = "Messages",
-            placeholder = "One message per line. Try: Follow the socials: %url%",
-            singleLine = false,
-            minLines = 4,
-        )
-        VariableChips(
-            variables = state.variablesFor("timers", TwitchReference.timerVariables),
-            onInsert = { variable -> viewModel.updateTimerDraft { it.copy(messages = it.messages + variable) } },
-        )
-        SwitchRow(
-            title = "Online only",
-            subtitle = "Only post while the stream is live",
-            checked = draft.onlineOnly,
-            onCheckedChange = { value -> viewModel.updateTimerDraft { it.copy(onlineOnly = value) } },
-        )
-        SwitchRow(
-            title = "Randomize messages",
-            subtitle = "Pick a random line instead of rotating in order",
-            checked = draft.randomizeMessages,
-            onCheckedChange = { value -> viewModel.updateTimerDraft { it.copy(randomizeMessages = value) } },
-        )
-        SwitchRow(
-            title = "Enabled",
-            checked = draft.enabled,
-            onCheckedChange = { value -> viewModel.updateTimerDraft { it.copy(enabled = value) } },
-        )
-        FormButtons(
-            saveLabel = "Save timer",
-            saving = state.timerSaving,
-            canSave = draft.name.isNotBlank() && draft.messages.isNotBlank(),
-            showCancel = draft.editing || draft.name.isNotEmpty() || draft.messages.isNotEmpty(),
-            onSave = viewModel::saveTimer,
-            onCancel = viewModel::resetTimerDraft,
-        )
-    }
-
     SectionCard {
         SectionCardHeader("Timers (${state.timers.size})", Icons.Default.Timer)
         when {
@@ -353,7 +377,12 @@ internal fun TimersSection(
                 onRetry = { viewModel.load(refreshing = true) },
             )
 
-            state.timers.isEmpty() -> EmptyState("No timers yet.", icon = Icons.Default.Timer)
+            state.timers.isEmpty() -> EmptyState(
+                message = "No timers yet.",
+                icon = Icons.Default.Timer,
+                actionLabel = "New timer",
+                onAction = { viewModel.startNew(TwitchEditor.TIMER) },
+            )
 
             else -> state.timers.forEachIndexed { index, timer ->
                 if (index > 0) HorizontalDivider()
@@ -424,15 +453,16 @@ internal fun TimersSection(
     }
 }
 
-/** Quote add form, search filter, and list with remove. */
+/** The short sheet for saving a new quote, opened from the Quotes section's New action. */
 @Composable
-internal fun QuotesSection(
-    state: TwitchState,
-    viewModel: TwitchViewModel,
-    confirm: (TwitchConfirmation) -> Unit,
-) {
-    SectionCard {
-        SectionCardHeader("Add a quote", Icons.Default.Add)
+internal fun TwitchQuoteSheet(state: TwitchState, viewModel: TwitchViewModel) {
+    FormSheet(
+        title = "Add quote",
+        confirmLabel = if (state.quoteSaving) "Saving..." else "Add quote",
+        confirmEnabled = !state.quoteSaving && state.quoteText.isNotBlank(),
+        onConfirm = viewModel::addQuote,
+        onDismiss = viewModel::closeEditor,
+    ) {
         MewdekoTextField(
             value = state.quoteText,
             onValueChange = viewModel::setQuoteText,
@@ -447,15 +477,16 @@ internal fun QuotesSection(
             label = "Author",
             placeholder = "optional username",
         )
-        Button(
-            onClick = viewModel::addQuote,
-            enabled = !state.quoteSaving && state.quoteText.isNotBlank(),
-            modifier = Modifier.fillMaxWidth(),
-        ) {
-            Text(if (state.quoteSaving) "Saving..." else "Add quote")
-        }
     }
+}
 
+/** Quote search filter and list with remove; the New action opens [TwitchQuoteSheet]. */
+@Composable
+internal fun QuotesSection(
+    state: TwitchState,
+    viewModel: TwitchViewModel,
+    confirm: (TwitchConfirmation) -> Unit,
+) {
     SectionCard {
         SectionCardHeader(
             "Quotes (${state.quotes.size})",
@@ -488,8 +519,10 @@ internal fun QuotesSection(
             )
 
             state.quotes.isEmpty() -> EmptyState(
-                if (state.quoteSearch.isBlank()) "No quotes saved yet." else "No quotes match that filter.",
+                message = if (state.quoteSearch.isBlank()) "No quotes saved yet." else "No quotes match that filter.",
                 icon = Icons.Default.FormatQuote,
+                actionLabel = if (state.quoteSearch.isBlank()) "Add quote" else null,
+                onAction = if (state.quoteSearch.isBlank()) ({ viewModel.startNew(TwitchEditor.QUOTE) }) else null,
             )
 
             else -> state.quotes.forEach { quote ->

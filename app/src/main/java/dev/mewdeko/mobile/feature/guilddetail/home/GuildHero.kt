@@ -124,8 +124,8 @@ private class HeroAnchor {
 /**
  * The edge-to-edge guild identity block that opens the home.
  *
- * The banner (or a palette gradient with the blurred icon when there is none)
- * runs under the status bar and the transparent top app bar, then melts into
+ * The banner, invite splash or discovery splash, in that order (or a palette
+ * gradient with the blurred icon when there is none of them) runs under the status bar and the transparent top app bar, then melts into
  * the page. The icon overlaps the seam, followed by the name, the member line,
  * the description and a row of status chips.
  */
@@ -158,7 +158,8 @@ fun GuildHero(
     ) {
         HeroBackdrop(
             iconUrl = iconUrl,
-            bannerUrl = info?.bannerUrl?.takeIf { it.isNotBlank() },
+            bannerUrl = listOf(info?.bannerUrl, info?.splashUrl, info?.discoverySplashUrl)
+                .firstOrNull { !it.isNullOrBlank() },
             bannerHeight = bannerHeight,
             statusTop = statusTop,
             metrics = metrics,
@@ -552,6 +553,7 @@ fun BotPulseChip(bot: BotStatus, profile: BotGuildProfile?, roles: HomeRoles, re
         ) {
             Avatar(
                 url = profile?.avatarUrl?.takeIf { it.isNotBlank() } ?: bot.botAvatar,
+                fallbackUrl = bot.botAvatar,
                 contentDescription = null,
                 size = 18,
                 fallbackIcon = Icons.Default.SmartToy,

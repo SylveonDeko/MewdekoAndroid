@@ -5,6 +5,7 @@ import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dev.mewdeko.mobile.core.auth.AuthManager
 import dev.mewdeko.mobile.core.auth.SessionHolder
+import dev.mewdeko.mobile.core.model.GuildChannelLite
 import dev.mewdeko.mobile.core.model.GuildMember
 import dev.mewdeko.mobile.core.model.GuildRole
 import dev.mewdeko.mobile.core.model.Snowflake
@@ -43,11 +44,14 @@ import java.net.URLEncoder
 import javax.inject.Inject
 import io.ktor.http.HttpMethod as KtorMethod
 
+/** Channel types offered by the Lookup channel picker and the ignored channels list. */
+private val PickableChannelTypes = setOf("text", "voice", "stage", "announcement")
+
 /** Screen state for Activity Stats. */
 data class ServerStatsState(
     val section: String = "overview",
     val lookback: Int = 14,
-    val channels: List<TextChannelLite> = emptyList(),
+    val channels: List<GuildChannelLite> = emptyList(),
     val roles: List<GuildRole> = emptyList(),
     val members: List<GuildMember> = emptyList(),
     val settings: ServerStatsSettings? = null,
@@ -128,12 +132,7 @@ class ServerStatsViewModel @Inject constructor(
     /** Loads guild lists and settings, then the overview, rankings, and any open lookups. */
     fun load(refreshing: Boolean = false) = launchLoad(refreshing) {
         coroutineScope {
-            val textChannels = async {
-                list("api/ClientOperations/textchannels/$guildId", TextChannelLite.serializer())
-            }
-            val voiceChannels = async {
-                list("api/ClientOperations/channels/$guildId/1", TextChannelLite.serializer())
-            }
+            val channels = async { loadChannels() }
             val roles = async { list("api/ClientOperations/roles/$guildId", GuildRole.serializer()) }
             val members = async { list("api/ClientOperations/members/$guildId", GuildMember.serializer()) }
             val settings = async { api.send(Endpoint("$base/settings"), ServerStatsSettings.serializer()) }
@@ -145,10 +144,7 @@ class ServerStatsViewModel @Inject constructor(
             hasLoadedOnce = true
             _state.update { current ->
                 current.copy(
-                    channels = (textChannels.await() + voiceChannels.await())
-                        .filter { it.id.isNotEmpty() }
-                        .distinctBy { it.id }
-                        .sortedBy { it.name.lowercase() },
+                    channels = channels.await(),
                     roles = roles.await().sortedBy { it.name.lowercase() },
                     members = members.await().sortedBy { it.displayName.ifEmpty { it.username }.lowercase() },
                     settings = loadedSettings,
@@ -641,6 +637,42 @@ class ServerStatsViewModel @Inject constructor(
                 _state.update { it.copy(settings = previous) }
                 postError("Failed to save the setting.")
             }
+        }
+    }
+
+    /**
+     * Loads the guild's text, voice, stage, and announcement channels for the channel picker
+     * and the ignored channels list, sorted by category then position. Categories and threads
+     * are never included.
+     *
+     * Falls back to the older, untyped text and voice channel endpoints (with categories
+     * stripped out by id) when the typed endpoint is not yet available on the bot.
+     */
+    private suspend fun loadChannels(): List<GuildChannelLite> {
+        val typed = list("api/ClientOperations/guildchannels/$guildId", GuildChannelLite.serializer())
+            .filter { it.id.isNotEmpty() && it.type in PickableChannelTypes }
+        if (typed.isNotEmpty()) {
+            return typed
+                .distinctBy { it.id }
+                .sortedWith(compareBy({ it.categoryName.orEmpty().lowercase() }, { it.position }))
+        }
+
+        return coroutineScope {
+            val textChannels = async {
+                list("api/ClientOperations/textchannels/$guildId", TextChannelLite.serializer())
+            }
+            val voiceChannels = async {
+                list("api/ClientOperations/channels/$guildId/1", TextChannelLite.serializer())
+            }
+            val categories = async {
+                list("api/ClientOperations/categories/$guildId", TextChannelLite.serializer())
+            }
+            val categoryIds = categories.await().map { it.id }.toSet()
+            (textChannels.await() + voiceChannels.await())
+                .filter { it.id.isNotEmpty() && it.id !in categoryIds }
+                .distinctBy { it.id }
+                .map { GuildChannelLite(id = it.id, name = it.name, type = "text") }
+                .sortedBy { it.name.lowercase() }
         }
     }
 

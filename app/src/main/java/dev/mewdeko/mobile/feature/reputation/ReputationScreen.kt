@@ -11,7 +11,6 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.ChevronLeft
 import androidx.compose.material.icons.filled.ChevronRight
@@ -22,14 +21,12 @@ import androidx.compose.material.icons.filled.Leaderboard
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.WorkspacePremium
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -43,12 +40,14 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.mewdeko.mobile.core.ui.ConfirmDialog
 import dev.mewdeko.mobile.core.ui.DiscordSelectorSingle
 import dev.mewdeko.mobile.core.ui.EmptyState
 import dev.mewdeko.mobile.core.ui.FeatureScaffold
+import dev.mewdeko.mobile.core.ui.FullScreenEditor
+import dev.mewdeko.mobile.core.ui.NewItemFab
 import dev.mewdeko.mobile.core.ui.MewdekoTextField
 import dev.mewdeko.mobile.core.ui.SectionCard
 import dev.mewdeko.mobile.core.ui.SectionCardHeader
@@ -94,6 +93,11 @@ fun ReputationScreen(
         onStatusShown = viewModel::clearStatus,
         onRefresh = { viewModel.load(refreshing = true) },
         onRetry = { viewModel.load() },
+        floatingActionButton = {
+            if (state.section == "rewards") {
+                NewItemFab(label = "Add reward", onClick = { showAddReward = true })
+            }
+        },
     ) {
         SectionCard {
             SectionCardHeader("Overview", Icons.Default.EmojiEvents)
@@ -182,7 +186,12 @@ fun ReputationScreen(
             "rewards" -> SectionCard {
                 SectionCardHeader("Role rewards", Icons.Default.WorkspacePremium)
                 if (state.rewards.isEmpty()) {
-                    EmptyState("No role rewards configured.")
+                    EmptyState(
+                        message = "No role rewards configured.",
+                        icon = Icons.Default.WorkspacePremium,
+                        actionLabel = "Add reward",
+                        onAction = { showAddReward = true },
+                    )
                 } else {
                     state.rewards.forEach { reward ->
                         ListItem(
@@ -208,13 +217,6 @@ fun ReputationScreen(
                             colors = ListItemDefaults.colors(containerColor = Color.Transparent),
                         )
                     }
-                }
-                OutlinedButton(
-                    onClick = { showAddReward = true },
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    Icon(Icons.Default.Add, contentDescription = null)
-                    Text("Add role reward", modifier = Modifier.padding(start = 6.dp))
                 }
             }
 
@@ -340,77 +342,75 @@ fun ReputationScreen(
         var announceChannel by remember { mutableStateOf<String?>(null) }
         val repRequired = repRequiredText.toIntOrNull()
 
-        AlertDialog(
-            onDismissRequest = { showAddReward = false },
-            title = { Text("Role reward") },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    DiscordSelectorSingle(
-                        kind = SelectorKind.Role,
-                        options = state.availableRoles.map { SelectorOption(it.id, it.name) },
-                        placeholder = "Pick a role",
-                        label = "Role",
-                        selectedId = roleId,
-                        onSelect = { roleId = it },
+        FullScreenEditor(
+            title = "New role reward",
+            onClose = { showAddReward = false },
+            confirmLabel = "Add",
+            confirmEnabled = roleId != null && repRequired != null && repRequired >= 1,
+            onConfirm = {
+                val role = roleId
+                val rep = repRequired
+                if (role != null && rep != null && rep >= 1) {
+                    viewModel.upsertRoleReward(
+                        roleId = role,
+                        repRequired = rep,
+                        removeOnDrop = removeOnDrop,
+                        announceChannel = announceChannel,
+                        announceDm = announceDm,
+                        xpReward = xpRewardText.toIntOrNull() ?: 0,
                     )
-                    MewdekoTextField(
-                        value = repRequiredText,
-                        onValueChange = { repRequiredText = it.filter(Char::isDigit).take(9) },
-                        label = "Reputation required",
-                        numeric = true,
-                        isError = repRequired == null || repRequired < 1,
-                        supportingText = if (repRequired == null || repRequired < 1) "Must be at least 1" else null,
-                    )
-                    MewdekoTextField(
-                        value = xpRewardText,
-                        onValueChange = { xpRewardText = it.filter(Char::isDigit).take(9) },
-                        label = "Bonus XP",
-                        numeric = true,
-                    )
-                    SwitchRow(
-                        title = "Remove if rep drops",
-                        checked = removeOnDrop,
-                        onCheckedChange = { removeOnDrop = it },
-                    )
-                    SwitchRow(
-                        title = "Announce by DM",
-                        checked = announceDm,
-                        onCheckedChange = { announceDm = it },
-                    )
-                    DiscordSelectorSingle(
-                        kind = SelectorKind.Channel,
-                        options = state.availableChannels.map { SelectorOption(it.id, it.name) },
-                        placeholder = "No announcement",
-                        label = "Announce in",
-                        selectedId = announceChannel,
-                        onSelect = { announceChannel = it },
-                    )
+                    showAddReward = false
                 }
             },
-            confirmButton = {
-                Button(
-                    onClick = {
-                        val role = roleId
-                        val rep = repRequired
-                        if (role != null && rep != null && rep >= 1) {
-                            viewModel.upsertRoleReward(
-                                roleId = role,
-                                repRequired = rep,
-                                removeOnDrop = removeOnDrop,
-                                announceChannel = announceChannel,
-                                announceDm = announceDm,
-                                xpReward = xpRewardText.toIntOrNull() ?: 0,
-                            )
-                            showAddReward = false
-                        }
-                    },
-                    enabled = roleId != null && repRequired != null && repRequired >= 1,
-                ) { Text("Save") }
-            },
-            dismissButton = {
-                TextButton(onClick = { showAddReward = false }) { Text("Cancel") }
-            },
-        )
+            hasUnsavedChanges = roleId != null || announceChannel != null,
+        ) {
+            SectionCard {
+                SectionCardHeader("Reward", Icons.Default.WorkspacePremium)
+                DiscordSelectorSingle(
+                    kind = SelectorKind.Role,
+                    options = state.availableRoles.map { SelectorOption(it.id, it.name) },
+                    placeholder = "Pick a role",
+                    label = "Role",
+                    selectedId = roleId,
+                    onSelect = { roleId = it },
+                )
+                MewdekoTextField(
+                    value = repRequiredText,
+                    onValueChange = { repRequiredText = it.filter(Char::isDigit).take(9) },
+                    label = "Reputation required",
+                    numeric = true,
+                    isError = repRequired == null || repRequired < 1,
+                    supportingText = if (repRequired == null || repRequired < 1) "Must be at least 1" else null,
+                )
+                MewdekoTextField(
+                    value = xpRewardText,
+                    onValueChange = { xpRewardText = it.filter(Char::isDigit).take(9) },
+                    label = "Bonus XP",
+                    numeric = true,
+                )
+                SwitchRow(
+                    title = "Remove if rep drops",
+                    checked = removeOnDrop,
+                    onCheckedChange = { removeOnDrop = it },
+                )
+            }
+            SectionCard {
+                SectionCardHeader("Announcement", Icons.Default.EmojiEvents)
+                SwitchRow(
+                    title = "Announce by DM",
+                    checked = announceDm,
+                    onCheckedChange = { announceDm = it },
+                )
+                DiscordSelectorSingle(
+                    kind = SelectorKind.Channel,
+                    options = state.availableChannels.map { SelectorOption(it.id, it.name) },
+                    placeholder = "No announcement",
+                    label = "Announce in",
+                    selectedId = announceChannel,
+                    onSelect = { announceChannel = it },
+                )
+            }
+        }
     }
 
     pendingDeleteReward?.let { reward ->

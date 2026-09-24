@@ -14,7 +14,7 @@ data class Rgb(val r: Double, val g: Double, val b: Double) {
     val color: Color get() = Color(r.toFloat(), g.toFloat(), b.toFloat(), 1f)
 
     /** WCAG relative luminance. */
-    val luminance: Double get() = ColorUtils.calculateLuminance(color.toArgb()).toDouble()
+    val luminance: Double get() = ColorUtils.calculateLuminance(color.toArgb())
 
     /** Conversion to HSL with components in `0..1`. */
     val hsl: Triple<Double, Double, Double>
@@ -33,14 +33,6 @@ data class Rgb(val r: Double, val g: Double, val b: Double) {
             return Triple(h / 6, s, l)
         }
 
-    /** Rotates the hue by the given number of degrees. */
-    fun rotated(degrees: Double): Rgb {
-        val (h, s, l) = hsl
-        var hue = (h + degrees / 360) % 1.0
-        if (hue < 0) hue += 1
-        return fromHsl(hue, s, l)
-    }
-
     /** Returns a variant lifted to a lightness range readable on a dark UI. */
     fun adjustedForDarkUi(): Rgb {
         val (h, s, l) = hsl
@@ -51,31 +43,6 @@ data class Rgb(val r: Double, val g: Double, val b: Double) {
     fun adjustedForLightUi(): Rgb {
         val (h, s, l) = hsl
         return fromHsl(h, max(s, 0.45), min(max(l, 0.32), 0.5))
-    }
-
-    /** Returns a more saturated variant, used for accent roles. */
-    fun boostedSaturation(): Rgb {
-        val (h, s, l) = hsl
-        return fromHsl(h, min(1.0, s * 1.2 + 0.1), l)
-    }
-
-    /**
-     * Returns a desaturated variant whose lightness is iteratively pushed
-     * toward or away from [background] until it meets a 3:1 contrast ratio
-     * (WCAG AA Large).
-     */
-    fun softenedForReadability(background: Rgb): Rgb {
-        val (h, s, _) = hsl
-        val saturation = s * 0.5
-        val bgLuminance = background.luminance
-        val lighten = bgLuminance < 0.5
-        var lightness = if (lighten) 0.7 else 0.35
-        repeat(8) {
-            val candidate = fromHsl(h, saturation, lightness)
-            if (contrastRatio(candidate.luminance, bgLuminance) >= 3.0) return candidate
-            lightness = if (lighten) min(lightness + 0.05, 0.95) else max(lightness - 0.05, 0.05)
-        }
-        return fromHsl(h, saturation, lightness)
     }
 
     /** Returns this color at the given lightness, keeping hue and saturation. */
@@ -163,6 +130,3 @@ data class Rgb(val r: Double, val g: Double, val b: Double) {
             (max(a, b) + 0.05) / (min(a, b) + 0.05)
     }
 }
-
-/** Parses a `#RRGGBB` hex string into a Compose [Color]. */
-fun colorFromHex(hex: String): Color = Rgb.fromHex(hex).color

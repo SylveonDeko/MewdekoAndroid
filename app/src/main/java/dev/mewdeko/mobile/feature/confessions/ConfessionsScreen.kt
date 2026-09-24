@@ -11,7 +11,6 @@ import androidx.compose.material.icons.filled.Save
 import androidx.compose.material.icons.filled.Tag
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
-import androidx.compose.material3.Checkbox
 import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -24,23 +23,24 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.mewdeko.mobile.core.ui.ConfirmDialog
 import dev.mewdeko.mobile.core.ui.DiscordSelectorSingle
 import dev.mewdeko.mobile.core.ui.EmptyState
 import dev.mewdeko.mobile.core.ui.FeatureScaffold
+import dev.mewdeko.mobile.core.ui.MultiSelectDropdown
 import dev.mewdeko.mobile.core.ui.SectionCard
 import dev.mewdeko.mobile.core.ui.SectionCardHeader
 import dev.mewdeko.mobile.core.ui.SelectorKind
 import dev.mewdeko.mobile.core.ui.SelectorOption
 import dev.mewdeko.mobile.core.ui.StatTile
 import dev.mewdeko.mobile.core.ui.clickableRow
+import dev.mewdeko.mobile.core.ui.diffSelection
 import dev.mewdeko.mobile.navigation.GuildRouteArgs
 import dev.mewdeko.mobile.util.relativeToNow
 
@@ -144,22 +144,18 @@ fun ConfessionsScreen(
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-            if (state.availableRoles.isEmpty()) {
-                EmptyState("No roles found.")
-            } else {
-                state.availableRoles.forEach { role ->
-                    ListItem(
-                        headlineContent = { Text("@${role.name}") },
-                        trailingContent = {
-                            Checkbox(checked = role.id in state.blacklist, onCheckedChange = null)
-                        },
-                        colors = ListItemDefaults.colors(containerColor = Color.Transparent),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickableRow { viewModel.toggleBlacklist(role.id) },
-                    )
-                }
-            }
+            MultiSelectDropdown(
+                kind = SelectorKind.Role,
+                options = state.availableRoles.map { SelectorOption(it.id, it.name) },
+                selection = state.blacklist,
+                onSelectionChange = { next ->
+                    val (added, removed) = diffSelection(state.blacklist, next)
+                    (removed + added).forEach(viewModel::toggleBlacklist)
+                },
+                label = "Blacklisted roles",
+                placeholder = "No blacklisted roles",
+                destructive = true,
+            )
         }
 
         SectionCard {

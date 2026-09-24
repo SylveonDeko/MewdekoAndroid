@@ -1,20 +1,27 @@
 package dev.mewdeko.mobile.feature.settings
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.VolumeOff
 import androidx.compose.material.icons.filled.ChatBubble
 import androidx.compose.material.icons.filled.Forum
 import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.Save
 import androidx.compose.material.icons.filled.Tag
 import androidx.compose.material.icons.filled.Tune
-import androidx.compose.material.icons.filled.VolumeOff
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.mewdeko.mobile.core.ui.DiscordSelectorSingle
 import dev.mewdeko.mobile.core.ui.FeatureScaffold
@@ -76,10 +83,51 @@ fun SettingsScreen(
     val channelOptions = state.availableChannels.map { SelectorOption(it.id, it.name) }
     val roleOptions = state.availableRoles.map { SelectorOption(it.id, it.name) }
 
+    var showUnsavedDialog by remember { mutableStateOf(false) }
+    var pendingBackAfterSave by remember { mutableStateOf(false) }
+
+    val guardedBack: () -> Unit = {
+        if (state.hasUnsaved) showUnsavedDialog = true else onBack()
+    }
+
+    BackHandler(enabled = state.hasUnsaved) { showUnsavedDialog = true }
+
+    LaunchedEffect(state.isSaving, state.hasUnsaved, pendingBackAfterSave) {
+        if (pendingBackAfterSave && !state.isSaving) {
+            pendingBackAfterSave = false
+            if (!state.hasUnsaved) onBack()
+        }
+    }
+
+    if (showUnsavedDialog) {
+        AlertDialog(
+            onDismissRequest = { showUnsavedDialog = false },
+            title = { Text("Unsaved changes") },
+            text = { Text("Save your changes before leaving this screen?") },
+            confirmButton = {
+                TextButton(onClick = {
+                    showUnsavedDialog = false
+                    pendingBackAfterSave = true
+                    viewModel.save()
+                }) {
+                    Text("Save")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = {
+                    showUnsavedDialog = false
+                    onBack()
+                }) {
+                    Text("Discard")
+                }
+            },
+        )
+    }
+
     FeatureScaffold(
         title = "Settings",
         subtitle = guild.name.takeIf { it.isNotEmpty() },
-        onBack = onBack,
+        onBack = guardedBack,
         loadState = loadState,
         status = status,
         onStatusShown = viewModel::clearStatus,
@@ -163,7 +211,7 @@ fun SettingsScreen(
         }
 
         SectionCard {
-            SectionCardHeader("Mute role", Icons.Default.VolumeOff)
+            SectionCardHeader("Mute role", Icons.AutoMirrored.Filled.VolumeOff)
             MewdekoTextField(
                 value = state.muteRoleName,
                 onValueChange = { viewModel.setMuteRoleName(it.take(100)) },

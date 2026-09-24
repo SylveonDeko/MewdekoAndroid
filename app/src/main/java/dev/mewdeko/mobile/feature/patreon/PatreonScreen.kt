@@ -30,7 +30,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.mewdeko.mobile.core.model.EmbedMessage
 import dev.mewdeko.mobile.core.ui.Avatar
@@ -57,7 +57,7 @@ private val Tabs = listOf(
     SectionTab("overview", "Overview", Icons.Default.Favorite),
     SectionTab("supporters", "Supporters", Icons.Default.Groups),
     SectionTab("tiers", "Tiers", Icons.Default.WorkspacePremium),
-    SectionTab("settings", "Configuration", Icons.Default.Tune),
+    SectionTab("settings", "Settings", Icons.Default.Tune),
 )
 
 /** Patreon supporter integration. */

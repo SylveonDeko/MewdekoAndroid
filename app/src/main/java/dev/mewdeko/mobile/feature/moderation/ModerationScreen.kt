@@ -1,10 +1,13 @@
 package dev.mewdeko.mobile.feature.moderation
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
@@ -37,18 +40,26 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.mewdeko.mobile.core.model.Snowflake
 import dev.mewdeko.mobile.core.theme.MonospaceStyle
 import dev.mewdeko.mobile.core.ui.ConfirmDialog
 import dev.mewdeko.mobile.core.ui.DiscordSelectorSingle
 import dev.mewdeko.mobile.core.ui.EmptyState
+import dev.mewdeko.mobile.core.ui.EnumOption
+import dev.mewdeko.mobile.core.ui.EnumPicker
 import dev.mewdeko.mobile.core.ui.FeatureScaffold
+import dev.mewdeko.mobile.core.ui.FormSheet
 import dev.mewdeko.mobile.core.ui.MewdekoTextField
+import dev.mewdeko.mobile.core.ui.NewItemFab
 import dev.mewdeko.mobile.core.ui.SearchField
 import dev.mewdeko.mobile.core.ui.SectionCard
 import dev.mewdeko.mobile.core.ui.SectionCardHeader
@@ -56,7 +67,6 @@ import dev.mewdeko.mobile.core.ui.SectionTab
 import dev.mewdeko.mobile.core.ui.SectionTabs
 import dev.mewdeko.mobile.core.ui.SelectorKind
 import dev.mewdeko.mobile.core.ui.SelectorOption
-import dev.mewdeko.mobile.core.ui.SliderRow
 import dev.mewdeko.mobile.core.ui.StatTile
 import dev.mewdeko.mobile.core.ui.SwitchRow
 import dev.mewdeko.mobile.core.ui.TagChip
@@ -67,15 +77,18 @@ import dev.mewdeko.mobile.util.withSeparators
 private val Tabs = listOf(
     SectionTab("overview", "Overview", Icons.Default.BarChart),
     SectionTab("warnings", "Warnings", Icons.Default.Warning),
-    SectionTab("punishments", "Ladder", Icons.Default.Gavel),
+    SectionTab("warnactions", "Warning actions", Icons.Default.Gavel),
     SectionTab("activity", "Activity", Icons.Default.Schedule),
-    SectionTab("purge", "Purge", Icons.Default.DeleteSweep),
+    SectionTab("purge", "Ban cleanup", Icons.Default.DeleteSweep),
 )
 
 private const val AllActionsId = "*"
 private const val MaxPruneDays = 7
 
-/** Warnings, the auto-punishment ladder, the warn-log destination, and ban purge settings. */
+/** The "Default for every ban" choice meaning no server-wide value, so each action keeps its built in value. */
+private const val BuiltInDays = -1
+
+/** Warnings, the automatic warning actions, the warn-log destination, and ban cleanup settings. */
 @Composable
 fun ModerationScreen(
     guild: GuildRouteArgs,
@@ -85,6 +98,7 @@ fun ModerationScreen(
     val state by viewModel.state.collectAsStateWithLifecycle()
     val loadState by viewModel.loadState.collectAsStateWithLifecycle()
     val status by viewModel.status.collectAsStateWithLifecycle()
+    var showAddAction by remember { mutableStateOf(false) }
 
     FeatureScaffold(
         title = "Moderation",
@@ -95,6 +109,11 @@ fun ModerationScreen(
         onStatusShown = viewModel::clearStatus,
         onRefresh = { viewModel.load(refreshing = true) },
         onRetry = { viewModel.load() },
+        floatingActionButton = {
+            if (state.section == "warnactions") {
+                NewItemFab(label = "New action", onClick = { showAddAction = true })
+            }
+        },
     ) {
         SectionTabs(
             tabs = Tabs,
@@ -104,9 +123,15 @@ fun ModerationScreen(
 
         when (state.section) {
             "warnings" -> WarningsSection(state, viewModel)
-            "punishments" -> PunishmentsSection(state, viewModel)
+            "warnactions" -> WarningActionsSection(
+                state = state,
+                viewModel = viewModel,
+                showAddAction = showAddAction,
+                onRequestAddAction = { showAddAction = true },
+                onDismissAddAction = { showAddAction = false },
+            )
             "activity" -> ActivitySection(state)
-            "purge" -> PurgeSection(state, viewModel)
+            "purge" -> BanCleanupSection(state, viewModel)
             else -> OverviewSection(state)
         }
     }
@@ -135,9 +160,9 @@ private fun OverviewSection(state: ModerationState) {
 
     if (state.punishments.isNotEmpty()) {
         SectionCard {
-            SectionCardHeader("Auto-punishment ladder", Icons.Default.Shield)
+            SectionCardHeader("Warning actions", Icons.Default.Shield)
             state.punishments.take(5).forEach {
-                PunishmentRow(it, compact = true, roleName = state.roleName(it.roleId))
+                WarningActionRow(it, compact = true, roleName = state.roleName(it.roleId))
             }
         }
     }
@@ -381,8 +406,19 @@ private fun ActivitySection(state: ModerationState) {
     }
 }
 
+/**
+ * The automatic actions triggered when a member reaches a warning count, plus the
+ * channel warnings are logged to. New actions are added through the [NewItemFab] and
+ * [FormSheet] in [ModerationScreen], following the app-wide "new" convention.
+ */
 @Composable
-private fun PunishmentsSection(state: ModerationState, viewModel: ModerationViewModel) {
+private fun WarningActionsSection(
+    state: ModerationState,
+    viewModel: ModerationViewModel,
+    showAddAction: Boolean,
+    onRequestAddAction: () -> Unit,
+    onDismissAddAction: () -> Unit,
+) {
     var pendingRemoval by remember { mutableStateOf<WarningPunishment?>(null) }
 
     SectionCard {
@@ -401,26 +437,30 @@ private fun PunishmentsSection(state: ModerationState, viewModel: ModerationView
         )
     }
 
-    SectionCard {
-        SectionCardHeader("Add a rung", Icons.Default.Add)
-        AddPunishmentForm(state, viewModel)
-    }
-
     if (state.punishments.isEmpty()) {
         SectionCard {
-            EmptyState("No automatic punishments configured.", icon = Icons.Default.Gavel)
+            EmptyState(
+                message = "No warning actions yet. Warnings are recorded, but nothing " +
+                    "happens automatically.",
+                icon = Icons.Default.Gavel,
+                actionLabel = "Add a warning action",
+                onAction = onRequestAddAction,
+            )
         }
     } else {
-        state.punishments.forEach { punishment ->
-            key(punishment.id) {
+        state.punishments.forEach { action ->
+            key(action.id) {
                 SectionCard(contentPadding = 12) {
-                    PunishmentRow(punishment, compact = false, roleName = state.roleName(punishment.roleId))
+                    WarningActionRow(action, compact = false, roleName = state.roleName(action.roleId))
                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
                         TextButton(
-                            onClick = { pendingRemoval = punishment },
+                            onClick = { pendingRemoval = action },
                             colors = ButtonDefaults.textButtonColors(
                                 contentColor = MaterialTheme.colorScheme.error,
                             ),
+                            modifier = Modifier.semantics {
+                                contentDescription = "Remove warning action at ${action.count} warnings"
+                            },
                         ) { Text("Remove") }
                     }
                 }
@@ -428,90 +468,90 @@ private fun PunishmentsSection(state: ModerationState, viewModel: ModerationView
         }
     }
 
-    pendingRemoval?.let { punishment ->
+    pendingRemoval?.let { action ->
         ConfirmDialog(
-            title = "Remove rung?",
-            message = "Warning count ${punishment.count} no longer triggers " +
-                "${punishment.actionLabel}.",
+            title = "Remove this warning action?",
+            message = action.removalMessage(state.roleName(action.roleId)),
             confirmLabel = "Remove",
-            onConfirm = { viewModel.removePunishment(punishment.count) },
+            onConfirm = { viewModel.removePunishment(action.count) },
             onDismiss = { pendingRemoval = null },
         )
+    }
+
+    if (showAddAction) {
+        AddWarningActionSheet(state = state, viewModel = viewModel, onDismiss = onDismissAddAction)
     }
 }
 
 @Composable
-private fun AddPunishmentForm(state: ModerationState, viewModel: ModerationViewModel) {
+private fun AddWarningActionSheet(
+    state: ModerationState,
+    viewModel: ModerationViewModel,
+    onDismiss: () -> Unit,
+) {
     var count by remember { mutableStateOf("3") }
     var punishment by remember { mutableIntStateOf(PunishmentActions.MUTE) }
     var timeMinutes by remember { mutableStateOf("") }
     var roleId by remember { mutableStateOf<String?>(null) }
-    var error by remember { mutableStateOf<String?>(null) }
 
-    MewdekoTextField(
-        value = count,
-        onValueChange = { count = it.filter(Char::isDigit) },
-        label = "Warning count",
-        placeholder = "1-100",
-        numeric = true,
-    )
+    val countValue = count.toIntOrNull()
+    val canConfirm = countValue != null && countValue in 1..100 &&
+        (punishment != PunishmentActions.ADD_ROLE || roleId != null)
 
-    DiscordSelectorSingle(
-        kind = SelectorKind.Custom(Icons.Default.Gavel),
-        options = PunishmentActions.Selectable.map { (code, name) -> SelectorOption(code.toString(), name) },
-        placeholder = "Punishment",
-        label = "Punishment",
-        selectedId = punishment.toString(),
-        onSelect = { selected -> punishment = selected?.toIntOrNull() ?: PunishmentActions.MUTE },
-    )
-
-    if (punishment in PunishmentActions.Timed) {
+    FormSheet(
+        title = "Add a warning action",
+        confirmLabel = "Add",
+        confirmEnabled = canConfirm,
+        onConfirm = {
+            countValue?.let { value ->
+                viewModel.addPunishment(value, punishment, timeMinutes.toIntOrNull(), roleId)
+                onDismiss()
+            }
+        },
+        onDismiss = onDismiss,
+    ) {
         MewdekoTextField(
-            value = timeMinutes,
-            onValueChange = { timeMinutes = it.filter(Char::isDigit) },
-            label = "Duration in minutes",
-            placeholder = "Permanent",
+            value = count,
+            onValueChange = { count = it.filter(Char::isDigit) },
+            label = "Warnings",
+            placeholder = "1-100",
             numeric = true,
         )
-    }
 
-    if (punishment == PunishmentActions.ADD_ROLE) {
-        DiscordSelectorSingle(
-            kind = SelectorKind.Role,
-            options = state.availableRoles.map { SelectorOption(it.id, it.name) },
-            placeholder = "Pick a role",
-            label = "Role to add",
-            selectedId = roleId,
-            onSelect = { roleId = it },
+        EnumPicker(
+            label = "Action",
+            options = PunishmentActions.Selectable.map { (code, name) -> EnumOption(code, name) },
+            selected = punishment,
+            onSelect = { punishment = it },
+            showDescription = false,
         )
-    }
 
-    error?.let {
-        Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
-    }
+        if (punishment in PunishmentActions.Timed) {
+            MewdekoTextField(
+                value = timeMinutes,
+                onValueChange = { timeMinutes = it.filter(Char::isDigit) },
+                label = "Duration in minutes",
+                placeholder = "Permanent",
+                numeric = true,
+            )
+        }
 
-    Button(
-        onClick = {
-            val countValue = count.toIntOrNull()
-            if (countValue == null || countValue !in 1..100) {
-                error = "Warning count must be between 1 and 100."
-                return@Button
-            }
-            if (punishment == PunishmentActions.ADD_ROLE && roleId == null) {
-                error = "Choose the role to add."
-                return@Button
-            }
-            error = null
-            viewModel.addPunishment(countValue, punishment, timeMinutes.toIntOrNull(), roleId)
-            count = (countValue + 1).toString()
-            timeMinutes = ""
-        },
-        modifier = Modifier.fillMaxWidth(),
-    ) { Text("Add rung") }
+        if (punishment == PunishmentActions.ADD_ROLE) {
+            DiscordSelectorSingle(
+                kind = SelectorKind.Role,
+                options = state.availableRoles.map { SelectorOption(it.id, it.name) },
+                placeholder = "Pick a role",
+                label = "Role to add",
+                selectedId = roleId,
+                onSelect = { roleId = it },
+            )
+        }
+    }
 }
 
+/** A warning action's threshold and effect, read as a sentence such as "When a member reaches 3 warnings: Ban". */
 @Composable
-private fun PunishmentRow(punishment: WarningPunishment, compact: Boolean, roleName: String? = null) {
+private fun WarningActionRow(action: WarningPunishment, compact: Boolean, roleName: String? = null) {
     Row(
         modifier = Modifier.fillMaxWidth(),
         verticalAlignment = Alignment.CenterVertically,
@@ -522,186 +562,193 @@ private fun PunishmentRow(punishment: WarningPunishment, compact: Boolean, roleN
             contentAlignment = Alignment.Center,
         ) {
             Text(
-                text = "${punishment.count}w",
+                text = action.count.toString(),
                 style = if (compact) MaterialTheme.typography.labelLarge
                 else MaterialTheme.typography.titleMedium,
                 color = MaterialTheme.colorScheme.tertiary,
                 textAlign = TextAlign.Center,
             )
         }
-        Column(modifier = Modifier.weight(1f)) {
-            Text(
-                text = punishment.actionLabel,
-                style = if (compact) MaterialTheme.typography.bodySmall
-                else MaterialTheme.typography.titleSmall,
-            )
-            if (!compact) {
-                if (punishment.time > 0) {
-                    Text(
-                        text = "Duration: ${punishment.time}m",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-                roleName?.let {
-                    Text(
-                        text = "Role: $it",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-            }
-        }
-        if (compact && punishment.time > 0) {
-            Text(
-                text = "${punishment.time}m",
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
+        Text(
+            text = action.sentence(roleName),
+            style = if (compact) MaterialTheme.typography.bodySmall
+            else MaterialTheme.typography.bodyMedium,
+            modifier = Modifier.weight(1f),
+            maxLines = if (compact) 2 else 3,
+            overflow = TextOverflow.Ellipsis,
+        )
     }
 }
 
+/** Which rule sheet is open, and the stored setting it edits, or null when adding a new one. */
+private data class RuleSheetTarget(val existing: BanPruneSetting?)
+
+/** "Don't delete", or how many days of messages a ban removes. */
+private fun pruneDaysLabel(days: Int): String = when {
+    days <= 0 -> "Don't delete"
+    days == 1 -> "1 day"
+    else -> "$days days"
+}
+
+/** The 0 through 7 day choices Discord accepts when banning. */
+private val PruneDayOptions: List<EnumOption<Int>> =
+    (0..MaxPruneDays).map { EnumOption(it, pruneDaysLabel(it)) }
+
+/** Joins names as a sentence list, such as "Ban, Softban and Mass ban". */
+private fun joinNames(names: List<String>): String = when (names.size) {
+    0 -> ""
+    1 -> names.first()
+    else -> names.dropLast(1).joinToString(", ") + " and " + names.last()
+}
+
+/**
+ * Describes what each action deletes when no server-wide default is set, such as
+ * "Ban and Softban delete 7 days. Everything else keeps messages."
+ */
+private fun builtInSummary(actions: List<BanPruneActionInfo>): String {
+    if (actions.isEmpty()) return "Each kind of ban uses its own built in value."
+    val deleting = actions.filter { it.defaultDays > 0 }.groupBy { it.defaultDays }
+    if (deleting.isEmpty()) return "No ban deletes messages unless you choose otherwise."
+    val sentences = deleting.entries.sortedByDescending { it.key }.map { (days, group) ->
+        val verb = if (group.size == 1) "deletes" else "delete"
+        "${joinNames(group.map { it.displayName })} $verb ${pruneDaysLabel(days)}."
+    }
+    val coveredCount = deleting.values.sumOf { it.size }
+    val rest = if (coveredCount < actions.size) " Everything else keeps messages." else ""
+    return sentences.joinToString(" ") + rest
+}
+
+/**
+ * How many days of messages the bot deletes when it bans someone, as one compact card:
+ * a server-wide default, a short list of actions that differ from it, and a short list
+ * of channel or category overrides. Every value is a 0 to 7 day dropdown, and rules are
+ * added or edited in a [FormSheet]. Resetting everything asks first.
+ */
 @Composable
-private fun PurgeSection(state: ModerationState, viewModel: ModerationViewModel) {
+private fun BanCleanupSection(state: ModerationState, viewModel: ModerationViewModel) {
     var pendingRemoval by remember { mutableStateOf<BanPruneSetting?>(null) }
     var showReset by remember { mutableStateOf(false) }
+    var actionRuleSheet by remember { mutableStateOf<RuleSheetTarget?>(null) }
+    var overrideSheet by remember { mutableStateOf<RuleSheetTarget?>(null) }
+
+    val guildDefaults = state.guildPruneDefaults
+    val allActionsSetting = guildDefaults[""]
+    val actionRules = guildDefaults.values
+        .filter { it.actionKey.isNotEmpty() }
+        .sortedBy { state.pruneActionName(it.actionKey).lowercase() }
+    val unconfiguredActions = state.pruneActions.filter { it.key !in guildDefaults }
 
     SectionCard {
-        SectionCardHeader("Server defaults", Icons.Default.DeleteSweep)
+        SectionCardHeader("Ban cleanup", Icons.Default.DeleteSweep)
         Text(
-            text = "How many days of a member's messages each action deletes when it bans them.",
+            text = "When the bot bans someone, it can also delete their recent messages.",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
 
-        val allActionsSetting = state.guildPruneDefaults[""]
-        PruneSliderRow(
-            label = "All actions",
-            subtitle = "Applies to any action below that has no value of its own.",
-            days = allActionsSetting?.pruneDays ?: 0,
-            onCommit = { days ->
-                viewModel.setPrune(BanPruneScope.GUILD, "0", null, days)
+        EnumPicker(
+            label = "Default for every ban",
+            options = listOf(
+                EnumOption(BuiltInDays, "Built in", builtInSummary(state.pruneActions)),
+            ) + PruneDayOptions,
+            selected = allActionsSetting?.pruneDays ?: BuiltInDays,
+            onSelect = { days ->
+                when {
+                    days == BuiltInDays -> allActionsSetting?.let { viewModel.clearPrune(it) }
+                    days != allActionsSetting?.pruneDays ->
+                        viewModel.setPrune(BanPruneScope.GUILD, "0", null, days)
+                }
             },
-            onClear = allActionsSetting?.let { setting -> { viewModel.clearPrune(setting) } },
         )
-    }
 
-    if (state.pruneActions.isEmpty()) {
-        SectionCard {
-            EmptyState("No ban actions reported by the bot.", icon = Icons.Default.DeleteSweep)
-        }
-    } else {
-        state.pruneActions.forEach { action ->
-            key(action.key) {
-                SectionCard(contentPadding = 12) {
-                    PruneSliderRow(
-                        label = action.displayName,
-                        subtitle = state.guildPruneSource(action),
-                        days = state.guildPruneFor(action),
-                        onCommit = { days ->
-                            viewModel.setPrune(BanPruneScope.GUILD, "0", action.key, days)
-                        },
-                        onClear = state.guildPruneDefaults[action.key]
-                            ?.let { setting -> { viewModel.clearPrune(setting) } },
-                    )
-                }
-            }
-        }
-    }
-
-    SectionCard {
-        SectionCardHeader("Overrides", Icons.Default.Layers)
-        Text(
-            text = "A channel beats its category, which beats the server default.",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        HorizontalDivider()
+        RuleGroupHeading(
+            title = "Different for specific actions",
+            caption = "Actions not listed here use the default above.",
         )
-        AddOverrideForm(state, viewModel)
-    }
-
-    if (state.pruneOverrides.isEmpty()) {
-        SectionCard {
-            EmptyState(
-                message = "No overrides. Every channel uses the server defaults.",
-                icon = Icons.Default.Layers,
-            )
-        }
-    } else {
-        state.pruneOverrides.forEach { setting ->
+        actionRules.forEach { setting ->
             key(setting.id) {
-                SectionCard(contentPadding = 12) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    ) {
-                        Icon(
-                            if (setting.scopeType == BanPruneScope.CATEGORY) {
-                                Icons.Default.Layers
-                            } else {
-                                Icons.Default.Tag
-                            },
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.tertiary,
-                            modifier = Modifier.size(18.dp),
-                        )
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = state.pruneScopeName(setting),
-                                style = MaterialTheme.typography.titleSmall,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                            )
-                            Text(
-                                text = state.pruneActionName(setting.actionKey),
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
-                        IconButton(onClick = { pendingRemoval = setting }) {
-                            Icon(
-                                Icons.Default.Delete,
-                                contentDescription = "Remove override",
-                                tint = MaterialTheme.colorScheme.error,
-                            )
-                        }
-                    }
-                    PruneSliderRow(
-                        label = null,
-                        subtitle = null,
-                        days = setting.pruneDays,
-                        onCommit = { days ->
-                            viewModel.setPrune(
-                                setting.scopeType,
-                                setting.scopeId,
-                                setting.actionKey.takeIf { it.isNotEmpty() },
-                                days,
-                            )
-                        },
-                        onClear = null,
-                    )
-                }
-            }
-        }
-    }
-
-    if (state.pruneSettings.isNotEmpty()) {
-        SectionCard(contentPadding = 12) {
-            TextButton(onClick = { showReset = true }) {
-                Text(
-                    text = "Reset everything to defaults",
-                    color = MaterialTheme.colorScheme.error,
+                PruneRuleRow(
+                    icon = Icons.Default.Gavel,
+                    title = state.pruneActionName(setting.actionKey),
+                    subtitle = null,
+                    days = setting.pruneDays,
+                    onEdit = { actionRuleSheet = RuleSheetTarget(setting) },
+                    onRemove = { pendingRemoval = setting },
                 )
             }
         }
+        if (unconfiguredActions.isNotEmpty()) {
+            AddRuleButton("Add action rule") { actionRuleSheet = RuleSheetTarget(null) }
+        }
+
+        HorizontalDivider()
+        RuleGroupHeading(
+            title = "Channel and category overrides",
+            caption = "A channel beats its category, which beats the server default.",
+        )
+        state.pruneOverrides.forEach { setting ->
+            key(setting.id) {
+                PruneRuleRow(
+                    icon = if (setting.scopeType == BanPruneScope.CATEGORY) {
+                        Icons.Default.Layers
+                    } else {
+                        Icons.Default.Tag
+                    },
+                    title = state.pruneScopeName(setting),
+                    subtitle = state.pruneActionName(setting.actionKey),
+                    days = setting.pruneDays,
+                    onEdit = { overrideSheet = RuleSheetTarget(setting) },
+                    onRemove = { pendingRemoval = setting },
+                )
+            }
+        }
+        AddRuleButton("Add override") { overrideSheet = RuleSheetTarget(null) }
+
+        if (state.pruneSettings.isNotEmpty()) {
+            HorizontalDivider()
+            TextButton(
+                onClick = { showReset = true },
+                colors = ButtonDefaults.textButtonColors(
+                    contentColor = MaterialTheme.colorScheme.error,
+                ),
+            ) { Text("Reset everything") }
+        }
+    }
+
+    actionRuleSheet?.let { target ->
+        ActionRuleSheet(
+            state = state,
+            existing = target.existing,
+            onSave = { actionKey, days ->
+                viewModel.setPrune(BanPruneScope.GUILD, "0", actionKey, days)
+                actionRuleSheet = null
+            },
+            onDismiss = { actionRuleSheet = null },
+        )
+    }
+
+    overrideSheet?.let { target ->
+        OverrideSheet(
+            state = state,
+            existing = target.existing,
+            onSave = { scopeType, scopeId, actionKey, days ->
+                viewModel.setPrune(scopeType, scopeId, actionKey, days)
+                overrideSheet = null
+            },
+            onDismiss = { overrideSheet = null },
+        )
     }
 
     pendingRemoval?.let { setting ->
+        val isActionRule = setting.scopeType == BanPruneScope.GUILD
         ConfirmDialog(
-            title = "Remove override?",
-            message = "Bans in ${state.pruneScopeName(setting)} fall back to the next " +
-                "broadest setting.",
+            title = if (isActionRule) "Remove action rule?" else "Remove override?",
+            message = if (isActionRule) {
+                "${state.pruneActionName(setting.actionKey)} goes back to the default for every ban."
+            } else {
+                "Bans in ${state.pruneScopeName(setting)} fall back to the next broadest setting."
+            },
             confirmLabel = "Remove",
             onConfirm = { viewModel.clearPrune(setting) },
             onDismiss = { pendingRemoval = null },
@@ -710,9 +757,9 @@ private fun PurgeSection(state: ModerationState, viewModel: ModerationViewModel)
 
     if (showReset) {
         ConfirmDialog(
-            title = "Reset purge settings?",
-            message = "Every server default and override is removed, and each action goes back " +
-                "to its built in purge.",
+            title = "Reset ban cleanup?",
+            message = "Every rule and override is removed, and each kind of ban goes back " +
+                "to its built in value.",
             confirmLabel = "Reset",
             onConfirm = { viewModel.resetPrune() },
             onDismiss = { showReset = false },
@@ -720,128 +767,221 @@ private fun PurgeSection(state: ModerationState, viewModel: ModerationViewModel)
     }
 }
 
-/**
- * A slider bound to a stored purge value. The slider tracks the drag locally and
- * only writes once the gesture ends, so a drag does not fire a request per frame.
- */
+/** A group title inside the ban cleanup card, with a one-line explanation under it. */
 @Composable
-private fun PruneSliderRow(
-    label: String?,
-    subtitle: String?,
-    days: Int,
-    onCommit: (Int) -> Unit,
-    onClear: (() -> Unit)?,
-) {
-    var draft by remember(days) { mutableIntStateOf(days) }
-
-    if (label != null || onClear != null) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            Column(modifier = Modifier.weight(1f)) {
-                label?.let { Text(it, style = MaterialTheme.typography.titleSmall) }
-                subtitle?.let {
-                    Text(
-                        text = it,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-            }
-            onClear?.let {
-                TextButton(onClick = it) { Text("Unset") }
-            }
-        }
+private fun RuleGroupHeading(title: String, caption: String) {
+    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        Text(
+            text = title,
+            style = MaterialTheme.typography.titleSmall,
+            color = MaterialTheme.colorScheme.onSurface,
+        )
+        Text(
+            text = caption,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
     }
-
-    SliderRow(
-        label = "Days of messages",
-        value = draft.toFloat(),
-        onValueChange = { draft = it.toInt() },
-        onValueChangeFinished = { onCommit(draft) },
-        valueRange = 0f..MaxPruneDays.toFloat(),
-        steps = MaxPruneDays - 1,
-        valueLabel = if (draft <= 0) "None" else "$draft day${if (draft == 1) "" else "s"}",
-    )
 }
 
+/** The inline "add" action at the foot of a rule list. */
 @Composable
-private fun AddOverrideForm(state: ModerationState, viewModel: ModerationViewModel) {
-    var scopeType by remember { mutableIntStateOf(BanPruneScope.CHANNEL) }
-    var targetId by remember { mutableStateOf<String?>(null) }
-    var actionId by remember { mutableStateOf(AllActionsId) }
-    var days by remember { mutableIntStateOf(0) }
-
-    val targets = if (scopeType == BanPruneScope.CATEGORY) {
-        state.availableCategories
-    } else {
-        state.availableChannels
+private fun AddRuleButton(label: String, onClick: () -> Unit) {
+    TextButton(onClick = onClick) {
+        Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp))
+        Spacer(Modifier.width(8.dp))
+        Text(label)
     }
+}
 
-    DiscordSelectorSingle(
-        kind = SelectorKind.Custom(Icons.Default.Layers),
-        options = listOf(
-            SelectorOption(BanPruneScope.CHANNEL.toString(), "Channel"),
-            SelectorOption(BanPruneScope.CATEGORY.toString(), "Category"),
-        ),
-        placeholder = "Scope",
-        label = "Scope",
-        selectedId = scopeType.toString(),
-        onSelect = { selected ->
-            scopeType = selected?.toIntOrNull() ?: BanPruneScope.CHANNEL
-            targetId = null
-        },
-    )
-
-    DiscordSelectorSingle(
-        kind = if (scopeType == BanPruneScope.CATEGORY) {
-            SelectorKind.Custom(Icons.Default.Layers)
-        } else {
-            SelectorKind.Channel
-        },
-        options = targets.map { SelectorOption(it.id, it.name) },
-        placeholder = "Pick one",
-        label = if (scopeType == BanPruneScope.CATEGORY) "Category" else "Channel",
-        selectedId = targetId,
-        onSelect = { targetId = it },
-    )
-
-    DiscordSelectorSingle(
-        kind = SelectorKind.Custom(Icons.Default.Gavel),
-        options = listOf(SelectorOption(AllActionsId, "All actions")) +
-            state.pruneActions.map { SelectorOption(it.key, it.displayName) },
-        placeholder = "Action",
-        label = "Action",
-        selectedId = actionId,
-        onSelect = { actionId = it ?: AllActionsId },
-    )
-
-    SliderRow(
-        label = "Purge",
-        value = days.toFloat(),
-        onValueChange = { days = it.toInt() },
-        valueRange = 0f..MaxPruneDays.toFloat(),
-        steps = MaxPruneDays - 1,
-        valueLabel = if (days <= 0) "None" else "$days day${if (days == 1) "" else "s"}",
-    )
-
-    Button(
-        onClick = {
-            targetId?.let { target ->
-                viewModel.setPrune(
-                    scopeType,
-                    target,
-                    actionId.takeIf { it != AllActionsId },
-                    days,
+/**
+ * One stored ban cleanup rule: what it covers, how many days it deletes, and a remove
+ * button. Tapping the row opens it for editing.
+ */
+@Composable
+private fun PruneRuleRow(
+    icon: ImageVector,
+    title: String,
+    subtitle: String?,
+    days: Int,
+    onEdit: () -> Unit,
+    onRemove: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(MaterialTheme.shapes.small)
+            .clickable(onClickLabel = "Edit", onClick = onEdit)
+            .padding(start = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Icon(
+            icon,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.tertiary,
+            modifier = Modifier.size(18.dp),
+        )
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = title,
+                style = MaterialTheme.typography.bodyMedium,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+            subtitle?.let {
+                Text(
+                    text = it,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                 )
-                targetId = null
-                actionId = AllActionsId
-                days = 0
+            }
+        }
+        TagChip(pruneDaysLabel(days))
+        IconButton(onClick = onRemove) {
+            Icon(
+                Icons.Default.Delete,
+                contentDescription = "Remove $title",
+                tint = MaterialTheme.colorScheme.error,
+            )
+        }
+    }
+}
+
+/**
+ * Adds or edits a rule giving one action its own ban cleanup value. When editing, the
+ * action is fixed and only the number of days changes.
+ */
+@Composable
+private fun ActionRuleSheet(
+    state: ModerationState,
+    existing: BanPruneSetting?,
+    onSave: (actionKey: String, days: Int) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val choices = if (existing != null) {
+        state.pruneActions.filter { it.key == existing.actionKey }.ifEmpty {
+            listOf(BanPruneActionInfo(existing.actionKey, state.pruneActionName(existing.actionKey)))
+        }
+    } else {
+        state.pruneActions.filter { it.key !in state.guildPruneDefaults }
+    }
+    var actionKey by remember { mutableStateOf(existing?.actionKey ?: choices.firstOrNull()?.key.orEmpty()) }
+    var days by remember { mutableIntStateOf(existing?.pruneDays ?: 0) }
+
+    FormSheet(
+        title = if (existing == null) "Add action rule" else "Edit action rule",
+        confirmLabel = if (existing == null) "Add" else "Save",
+        confirmEnabled = actionKey.isNotEmpty(),
+        onConfirm = { onSave(actionKey, days) },
+        onDismiss = onDismiss,
+    ) {
+        EnumPicker(
+            label = "Action",
+            options = choices.map { action ->
+                EnumOption(
+                    value = action.key,
+                    title = action.displayName,
+                    description = if (action.defaultDays > 0) {
+                        "Normally deletes ${pruneDaysLabel(action.defaultDays)}"
+                    } else {
+                        "Normally keeps messages"
+                    },
+                )
+            },
+            selected = actionKey,
+            onSelect = { actionKey = it },
+            enabled = existing == null,
+        )
+        EnumPicker(
+            label = "Messages to delete",
+            options = PruneDayOptions,
+            selected = days,
+            onSelect = { days = it },
+            showDescription = false,
+        )
+    }
+}
+
+/**
+ * Adds or edits a channel or category override. When editing, what the override covers
+ * is fixed and only the number of days changes.
+ */
+@Composable
+private fun OverrideSheet(
+    state: ModerationState,
+    existing: BanPruneSetting?,
+    onSave: (scopeType: Int, scopeId: String, actionKey: String?, days: Int) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val editing = existing != null
+    var scopeType by remember { mutableIntStateOf(existing?.scopeType ?: BanPruneScope.CHANNEL) }
+    var targetId by remember { mutableStateOf(existing?.scopeId) }
+    var actionId by remember {
+        mutableStateOf(existing?.actionKey?.takeIf { it.isNotEmpty() } ?: AllActionsId)
+    }
+    var days by remember { mutableIntStateOf(existing?.pruneDays ?: 0) }
+
+    val isCategory = scopeType == BanPruneScope.CATEGORY
+    val targets = if (isCategory) state.availableCategories else state.availableChannels
+
+    FormSheet(
+        title = if (editing) "Edit override" else "Add override",
+        confirmLabel = if (editing) "Save" else "Add",
+        confirmEnabled = targetId != null,
+        onConfirm = {
+            targetId?.let { target ->
+                onSave(scopeType, target, actionId.takeIf { it != AllActionsId }, days)
             }
         },
-        enabled = targetId != null,
-        modifier = Modifier.fillMaxWidth(),
-    ) { Text("Add override") }
+        onDismiss = onDismiss,
+    ) {
+        EnumPicker(
+            label = "Applies to",
+            options = listOf(
+                EnumOption(BanPruneScope.CHANNEL, "One channel", icon = Icons.Default.Tag),
+                EnumOption(
+                    BanPruneScope.CATEGORY,
+                    "Every channel in a category",
+                    icon = Icons.Default.Layers,
+                ),
+            ),
+            selected = scopeType,
+            onSelect = { selected ->
+                if (selected != scopeType) {
+                    scopeType = selected
+                    targetId = null
+                }
+            },
+            enabled = !editing,
+            showDescription = false,
+        )
+        DiscordSelectorSingle(
+            kind = if (isCategory) SelectorKind.Custom(Icons.Default.Layers) else SelectorKind.Channel,
+            options = targets.map { SelectorOption(it.id, it.name) },
+            placeholder = if (isCategory) "Pick a category" else "Pick a channel",
+            label = if (isCategory) "Category" else "Channel",
+            selectedId = targetId,
+            onSelect = { targetId = it },
+            enabled = !editing,
+        )
+        EnumPicker(
+            label = "Action",
+            options = listOf(EnumOption(AllActionsId, "All actions")) +
+                state.pruneActions.map { EnumOption(it.key, it.displayName) },
+            selected = actionId,
+            onSelect = { actionId = it },
+            enabled = !editing,
+            showDescription = false,
+        )
+        EnumPicker(
+            label = "Messages to delete",
+            options = PruneDayOptions,
+            selected = days,
+            onSelect = { days = it },
+            showDescription = false,
+        )
+    }
 }

@@ -35,26 +35,26 @@ import dev.mewdeko.mobile.core.ui.EmptyState
 import dev.mewdeko.mobile.core.ui.FeatureLinkCard
 import dev.mewdeko.mobile.core.ui.guildGlow
 import dev.mewdeko.mobile.navigation.FeatureCategory
-import dev.mewdeko.mobile.navigation.GuildRouteArgs
 import dev.mewdeko.mobile.navigation.NavigationCatalog
 
 /** Searchable catalog of every feature page available for a guild. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun FeatureBrowserScreen(
-    guild: GuildRouteArgs,
     onBack: () -> Unit,
     onOpenFeature: (String) -> Unit,
+    initialCategory: FeatureCategory? = null,
 ) {
     var query by remember { mutableStateOf("") }
-    var category by remember { mutableStateOf<FeatureCategory?>(null) }
+    var category by remember { mutableStateOf(initialCategory) }
 
     val visible = remember(query, category) {
         NavigationCatalog.items.filter { item ->
             (category == null || item.category == category) &&
                 (query.isBlank() ||
                     item.label.contains(query, ignoreCase = true) ||
-                    item.summary.contains(query, ignoreCase = true))
+                    item.summary.contains(query, ignoreCase = true) ||
+                    item.keywords.any { it.contains(query, ignoreCase = true) })
         }.sortedBy { it.label.lowercase() }
     }
 

@@ -1,28 +1,25 @@
 package dev.mewdeko.mobile.feature.repeaters
 
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.automirrored.filled.ListAlt
 import androidx.compose.material.icons.filled.BarChart
-import androidx.compose.material.icons.filled.ListAlt
-import androidx.compose.material3.ExtendedFloatingActionButton
-import androidx.compose.material3.Icon
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.mewdeko.mobile.core.ui.ConfirmDialog
 import dev.mewdeko.mobile.core.ui.FeatureScaffold
+import dev.mewdeko.mobile.core.ui.NewItemFab
 import dev.mewdeko.mobile.core.ui.SectionTab
 import dev.mewdeko.mobile.core.ui.SectionTabs
 import dev.mewdeko.mobile.navigation.GuildRouteArgs
 
 private val Tabs = listOf(
     SectionTab("overview", "Overview", Icons.Default.BarChart),
-    SectionTab("manage", "Manage", Icons.Default.ListAlt),
+    SectionTab("manage", "Manage", Icons.AutoMirrored.Filled.ListAlt),
 )
 
 /** Which single property a [QuickEditDialog] is editing. */
@@ -56,11 +53,7 @@ fun RepeatersScreen(
         onRetry = { viewModel.load() },
         floatingActionButton = {
             if (section == "manage") {
-                ExtendedFloatingActionButton(
-                    onClick = { showCreate = true },
-                    icon = { Icon(Icons.Default.Add, contentDescription = null) },
-                    text = { Text("New repeater") },
-                )
+                NewItemFab(label = "New repeater", onClick = { showCreate = true })
             }
         },
     ) {
@@ -74,12 +67,13 @@ fun RepeatersScreen(
                 onEdit = { formTarget = it },
                 onDelete = { pendingDelete = it },
                 onQuickEdit = { repeater, field -> quickEdit = repeater to field },
+                onNew = { showCreate = true },
             )
         }
     }
 
     if (showCreate) {
-        RepeaterFormSheet(
+        RepeaterEditor(
             state = state,
             original = null,
             draft = RepeaterDraft(),
@@ -92,7 +86,7 @@ fun RepeatersScreen(
     }
 
     formTarget?.let { repeater ->
-        RepeaterFormSheet(
+        RepeaterEditor(
             state = state,
             original = repeater,
             draft = RepeaterDraft.from(repeater),

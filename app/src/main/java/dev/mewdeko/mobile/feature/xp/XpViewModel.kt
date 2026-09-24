@@ -26,6 +26,8 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.builtins.serializer
@@ -35,7 +37,7 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.decodeFromJsonElement
 import kotlinx.serialization.json.encodeToJsonElement
-import kotlinx.serialization.json.intOrNull
+import kotlinx.serialization.json.doubleOrNull
 import javax.inject.Inject
 
 /**
@@ -118,14 +120,6 @@ data class XpRecentActivity(
     @Serializable(with = InstantSerializer::class) val timestamp: Instant = Instant.EPOCH,
 )
 
-/** How long a member has held their current level. */
-@Serializable
-data class XpTimeOnLevel(
-    val days: Int = 0,
-    val hours: Int = 0,
-    val minutes: Int = 0,
-)
-
 /** One member's own XP standing, used to render the rank card preview. */
 @Serializable
 data class XpUserPreview(
@@ -143,13 +137,14 @@ data class XpUserPreview(
 )
 
 /**
- * A point-in-time copy of the rank card template used to undo or redo a
- * property edit, a layer add/remove, or a built-in element change.
+ * A point-in-time copy of the whole staged card (template, custom layers,
+ * built-in order, and background URL) used to undo or redo one edit.
  */
 data class XpTemplateSnapshot(
     val template: XpTemplate,
     val customElements: List<XpCustomElement>,
     val builtInOrder: List<String>,
+    val backgroundUrl: String,
 )
 
 /** XP screen state. */
@@ -179,11 +174,37 @@ data class XpState(
     /** Whether the configuration differs from what the server has. */
     val hasUnsavedSettings: Boolean get() = settings != loadedSettings
 
-    /** Whether the rank card template differs from what the server has. */
+    /** Whether the staged card background URL differs from the saved one. */
+    val hasUnsavedBackground: Boolean
+        get() = settings.customXpImageUrl != loadedSettings.customXpImageUrl
+
+    /** Whether the rank card (template, layers, order, or background) differs from what the server has. */
     val hasUnsavedTemplate: Boolean
         get() = template != loadedTemplate ||
             customElements != loadedCustomElements ||
-            builtInOrder != loadedBuiltInOrder
+            builtInOrder != loadedBuiltInOrder ||
+            hasUnsavedBackground
+
+    /** The member the card previews with real data, when the viewer has an XP row. */
+    fun realCardData(guildName: String, guildId: String): XpCardData? = viewerPreview?.let {
+        XpCardData(
+            username = it.username,
+            displayName = it.username,
+            nickname = it.username,
+            avatarUrl = it.avatarUrl?.takeIf { url -> url.isNotBlank() },
+            level = it.level,
+            rank = it.rank,
+            totalXp = it.totalXp,
+            levelXp = it.levelXp,
+            requiredXp = it.requiredXp,
+            bonusXp = it.bonusXp,
+            timeOnLevel = it.timeOnLevel.normalized(),
+            clubName = "Elite Gamers",
+            guildName = guildName,
+            userId = it.userId,
+            guildId = guildId,
+        )
+    }
 }
 
 /** Leveling, leaderboard, rewards, and rank card template. */
@@ -196,8 +217,18 @@ class XpViewModel @Inject constructor(
 
     private val _state = MutableStateFlow(XpState())
 
+    /**
+     * Runs exclusion toggles one after another, so a multi-select change
+     * that adds or removes several ids at once (Clear, for one) reads each
+     * id's current state before it decides between add and remove.
+     */
+    private val exclusionLock = Mutex()
+
     /** Observable screen state. */
     val state: StateFlow<XpState> = _state.asStateFlow()
+
+    /** View state of the rank card designer (zoom, pan, selection, toggles). */
+    val designer = XpDesignerController()
 
     init {
         load()
@@ -273,6 +304,8 @@ class XpViewModel @Inject constructor(
             val loaded = settings.await()
             val loadedTemplate = template.await() ?: XpTemplate(guildId = guildId)
             val loadedCustom = decodeCustomElements(loadedTemplate.customElementsJson)
+                .sortedBy { element -> element.zIndex }
+                .mapIndexed { index, element -> element.copy(zIndex = index) }
             val loadedOrder = decodeBuiltInOrder(loadedTemplate.builtInOrderJson)
             _state.update {
                 it.copy(
@@ -329,8 +362,14 @@ class XpViewModel @Inject constructor(
 
     /** Writes the staged settings. */
     fun saveSettings() = launchAction("Failed to save settings.") {
-        val current = _state.value.settings
-        val updated = api.send(
+        val updated = postSettings(_state.value.settings)
+        _state.update { it.copy(settings = updated, loadedSettings = updated) }
+        postSuccess("XP settings saved.")
+    }
+
+    /** POSTs a full settings object and returns what the bot stored. */
+    private suspend fun postSettings(current: XpSettings): XpSettings =
+        api.send(
             Endpoint(
                 "api/Xp/$guildId/settings",
                 HttpMethod.POST,
@@ -356,9 +395,6 @@ class XpViewModel @Inject constructor(
             ),
             XpSettings.serializer(),
         )
-        _state.update { it.copy(settings = updated, loadedSettings = updated) }
-        postSuccess("XP settings saved.")
-    }
 
     /** Grants a role at a level. */
     fun addRoleReward(level: Int, roleId: Snowflake) = launchAction("Failed to add role reward.") {
@@ -420,49 +456,53 @@ class XpViewModel @Inject constructor(
     /** Adds or removes a channel from the XP exclusion list. */
     fun toggleExcludedChannel(channelId: Snowflake) =
         launchAction("Failed to update excluded channels.") {
-            val excluded = channelId in _state.value.excludedChannels
-            if (excluded) {
-                api.sendIgnoringBody(
-                    Endpoint("api/Xp/$guildId/excluded/channels/$channelId", HttpMethod.DELETE)
-                )
-            } else {
-                api.sendIgnoringBody(
-                    Endpoint(
-                        "api/Xp/$guildId/excluded/channels",
-                        HttpMethod.POST,
-                        (channelId.toLongOrNull() ?: 0L).toString(),
+            exclusionLock.withLock {
+                val excluded = channelId in _state.value.excludedChannels
+                if (excluded) {
+                    api.sendIgnoringBody(
+                        Endpoint("api/Xp/$guildId/excluded/channels/$channelId", HttpMethod.DELETE)
                     )
-                )
-            }
-            _state.update {
-                it.copy(
-                    excludedChannels = if (excluded) it.excludedChannels - channelId
-                    else it.excludedChannels + channelId,
-                )
+                } else {
+                    api.sendIgnoringBody(
+                        Endpoint(
+                            "api/Xp/$guildId/excluded/channels",
+                            HttpMethod.POST,
+                            (channelId.toLongOrNull() ?: 0L).toString(),
+                        )
+                    )
+                }
+                _state.update {
+                    it.copy(
+                        excludedChannels = if (excluded) it.excludedChannels - channelId
+                        else it.excludedChannels + channelId,
+                    )
+                }
             }
         }
 
     /** Adds or removes a role from the XP exclusion list. */
     fun toggleExcludedRole(roleId: Snowflake) = launchAction("Failed to update excluded roles.") {
-        val excluded = roleId in _state.value.excludedRoles
-        if (excluded) {
-            api.sendIgnoringBody(
-                Endpoint("api/Xp/$guildId/excluded/roles/$roleId", HttpMethod.DELETE)
-            )
-        } else {
-            api.sendIgnoringBody(
-                Endpoint(
-                    "api/Xp/$guildId/excluded/roles",
-                    HttpMethod.POST,
-                    (roleId.toLongOrNull() ?: 0L).toString(),
+        exclusionLock.withLock {
+            val excluded = roleId in _state.value.excludedRoles
+            if (excluded) {
+                api.sendIgnoringBody(
+                    Endpoint("api/Xp/$guildId/excluded/roles/$roleId", HttpMethod.DELETE)
                 )
-            )
-        }
-        _state.update {
-            it.copy(
-                excludedRoles = if (excluded) it.excludedRoles - roleId
-                else it.excludedRoles + roleId,
-            )
+            } else {
+                api.sendIgnoringBody(
+                    Endpoint(
+                        "api/Xp/$guildId/excluded/roles",
+                        HttpMethod.POST,
+                        (roleId.toLongOrNull() ?: 0L).toString(),
+                    )
+                )
+            }
+            _state.update {
+                it.copy(
+                    excludedRoles = if (excluded) it.excludedRoles - roleId
+                    else it.excludedRoles + roleId,
+                )
+            }
         }
     }
 
@@ -530,35 +570,31 @@ class XpViewModel @Inject constructor(
         editTemplate(transform)
     }
 
-    /** Adds a new custom element of [type] on top of the stack. */
+    /**
+     * Adds a new custom element of [type] on top of the stack, selects it,
+     * and opens its properties.
+     */
     fun addCustomElement(type: XpCustomElementType) {
         pushTemplateUndo()
-        val id = "custom-${java.util.UUID.randomUUID()}"
-        val isLine = type == XpCustomElementType.LINE
-        val element = XpCustomElement(
-            id = id,
-            type = type.raw,
-            label = type.label,
-            zIndex = _state.value.customElements.size,
-            width = if (isLine) 180.0 else 140.0,
-            height = if (isLine) 0.0 else 64.0,
-            cornerRadius = if (type == XpCustomElementType.RECTANGLE) 12.0 else 0.0,
-            fill = if (type == XpCustomElementType.TEXT) "#FFFFFF" else "#5865F2",
-            strokeWidth = if (isLine) 4.0 else 0.0,
-            text = if (type == XpCustomElementType.TEXT) {
-                "Level %xp.level.current% • Rank #%xp.rank%"
-            } else {
-                ""
-            },
-        )
+        val element = newCustomElement(type, _state.value.customElements.size)
         _state.update {
             it.copy(customElements = it.customElements + element)
         }
+        designer.selectedId = element.id
+        designer.openSheet(XpSheetTab.PROPERTIES)
     }
 
     /** Applies an undoable edit to one custom element. */
     fun updateCustomElement(id: String, transform: (XpCustomElement) -> XpCustomElement) {
         pushTemplateUndo()
+        stageCustomElement(id, transform)
+    }
+
+    /**
+     * Applies an edit to one custom element without an undo entry, for live
+     * slider drags whose single entry was pushed when the drag began.
+     */
+    fun stageCustomElement(id: String, transform: (XpCustomElement) -> XpCustomElement) {
         _state.update {
             it.copy(
                 customElements = it.customElements.map { element ->
@@ -572,8 +608,133 @@ class XpViewModel @Inject constructor(
     fun removeCustomElement(id: String) {
         pushTemplateUndo()
         _state.update {
-            it.copy(customElements = it.customElements.filterNot { element -> element.id == id })
+            it.copy(
+                customElements = it.customElements.filterNot { element -> element.id == id }
+                    .mapIndexed { index, element -> element.copy(zIndex = index) },
+            )
         }
+        if (designer.selectedId == id) designer.clearSelection()
+    }
+
+    /**
+     * Snaps a custom element against one edge or the centre of the card:
+     * `left`, `center`, `right`, `top`, `middle`, or `bottom`.
+     */
+    fun alignCustomElement(id: String, edge: String) {
+        val size = _state.value.template
+        updateCustomElement(id) {
+            when (edge) {
+                "left" -> it.copy(x = 0.0)
+                "center" -> it.copy(x = ((size.outputSizeX - it.width) / 2).roundToIntDouble())
+                "right" -> it.copy(x = (size.outputSizeX - it.width).roundToIntDouble())
+                "top" -> it.copy(y = 0.0)
+                "middle" -> it.copy(y = ((size.outputSizeY - it.height) / 2).roundToIntDouble())
+                "bottom" -> it.copy(y = (size.outputSizeY - it.height).roundToIntDouble())
+                else -> it
+            }
+        }
+    }
+
+    /** Pushes one undo entry for an edit about to be staged in several steps, such as a slider drag. */
+    fun beginTemplateEdit() = pushTemplateUndo()
+
+    /** The drag origin of any element: its x/y, or point A for the bar. */
+    fun elementOrigin(id: String): XpPoint? {
+        val current = _state.value
+        current.template.builtInOrigin(id)?.let { return it }
+        return current.customElements.firstOrNull { it.id == id }?.let { XpPoint(it.x.toFloat(), it.y.toFloat()) }
+    }
+
+    /** Selects [id] and pushes the single undo entry for the drag that is starting. */
+    fun beginDrag(id: String) {
+        designer.selectedId = id
+        pushTemplateUndo()
+    }
+
+    /**
+     * Moves an element to card point ([x], [y]) without an undo entry,
+     * snapped to the grid when snap is on and rounded to integers otherwise.
+     */
+    fun setElementPosition(id: String, x: Float, y: Float) {
+        val nx = snapCoordinate(x, designer.snapToGrid, designer.gridSize)
+        val ny = snapCoordinate(y, designer.snapToGrid, designer.gridSize)
+        if (isBuiltInId(id)) {
+            _state.update { it.copy(template = it.template.withBuiltInPosition(id, nx, ny)) }
+        } else {
+            stageCustomElement(id) { it.copy(x = nx.toDouble(), y = ny.toDouble()) }
+        }
+    }
+
+    /** A committed X/Y field edit: one undo entry, then the same snapped update a drag uses. */
+    fun commitElementPosition(id: String, x: Float, y: Float) {
+        pushTemplateUndo()
+        setElementPosition(id, x, y)
+    }
+
+    /** Shows or hides any element, built-in or custom, as one undo entry. */
+    fun setElementVisible(id: String, visible: Boolean) {
+        if (isBuiltInId(id)) {
+            pushTemplateUndo()
+            _state.update { it.copy(template = it.template.withBuiltInShown(id, visible)) }
+        } else {
+            updateCustomElement(id) { it.copy(visible = visible) }
+        }
+    }
+
+    /**
+     * Moves a layer one step in the draw order. A positive [direction] draws
+     * it later (on top). Built-ins move within the seven-id built-in order
+     * and custom layers within the custom stack; neither crosses the other,
+     * and the dormant club layers do not move.
+     */
+    fun moveLayer(id: String, direction: Int) {
+        if (id in ClubBuiltInIds) return
+        if (isBuiltInId(id)) moveBuiltInElement(id, direction) else moveCustomElement(id, direction)
+    }
+
+    /** Stages a new card background URL (blank means the bot's default) as one undo entry. */
+    fun setBackgroundUrl(url: String) {
+        val trimmed = url.trim()
+        if (trimmed == _state.value.settings.customXpImageUrl) return
+        pushTemplateUndo()
+        _state.update { it.copy(settings = it.settings.copy(customXpImageUrl = trimmed)) }
+    }
+
+    /**
+     * Matches the stored output size to the background's natural size, the
+     * size the bot actually renders at. Marks the card dirty when it
+     * changes, the way both web editors do on load; not an undo entry.
+     */
+    fun syncOutputSizeToBackground(width: Int, height: Int) {
+        if (width <= 0 || height <= 0) return
+        val template = _state.value.template
+        if (template.outputSizeX == width && template.outputSizeY == height) return
+        _state.update { it.copy(template = it.template.copy(outputSizeX = width, outputSizeY = height)) }
+    }
+
+    /** Sets the stored card size as one undo entry. */
+    fun setCanvasSize(width: Int, height: Int) {
+        val template = _state.value.template
+        if (template.outputSizeX == width && template.outputSizeY == height) return
+        pushTemplateUndo()
+        editTemplate { it.copy(outputSizeX = width.coerceAtLeast(1), outputSizeY = height.coerceAtLeast(1)) }
+    }
+
+    /**
+     * Replaces the staged card with the bot's defaults: every built-in at its
+     * default placement, an 800 by 246 card, no custom layers, and the
+     * default draw order.
+     */
+    fun resetToBotDefaults() {
+        pushTemplateUndo()
+        _state.update {
+            it.copy(
+                template = botDefaultTemplate(it.template),
+                customElements = emptyList(),
+                builtInOrder = DefaultBuiltInOrder,
+            )
+        }
+        designer.clearSelection()
     }
 
     /** Duplicates a custom element, offsetting the copy slightly. */
@@ -588,9 +749,14 @@ class XpViewModel @Inject constructor(
             zIndex = _state.value.customElements.size,
         )
         _state.update { it.copy(customElements = it.customElements + copy) }
+        designer.selectedId = copy.id
     }
 
-    /** Moves a custom element up (`direction = -1`) or down (`direction = 1`) the stack. */
+    /**
+     * Moves a custom element through the stack: `direction = 1` draws it
+     * later (on top), `-1` earlier. Array order is z order, so every
+     * `zIndex` is rewritten to its index.
+     */
     fun moveCustomElement(id: String, direction: Int) {
         val items = _state.value.customElements.toMutableList()
         val index = items.indexOfFirst { it.id == id }
@@ -604,7 +770,10 @@ class XpViewModel @Inject constructor(
         }
     }
 
-    /** Moves a built-in element's position in the draw order. */
+    /**
+     * Moves a built-in element in the draw order: `direction = 1` draws it
+     * later (on top), `-1` earlier.
+     */
     fun moveBuiltInElement(id: String, direction: Int) {
         val items = _state.value.builtInOrder.toMutableList()
         val index = items.indexOf(id)
@@ -618,57 +787,13 @@ class XpViewModel @Inject constructor(
 
     /** Replaces the custom elements with one of the built-in starter layouts. */
     fun applyTemplatePreset(name: String) {
+        val chosen = XpTemplatePresets[name] ?: return
         pushTemplateUndo()
-        val presets: Map<String, List<XpCustomElement>> = mapOf(
-            "minimal" to listOf(
-                XpCustomElement(
-                    type = "text", label = "Level and rank", x = 130.0, y = 90.0, width = 360.0,
-                    height = 36.0, fill = "#FFFFFF",
-                    text = "Level %xp.level.current%  •  Rank #%xp.rank%", fontSize = 26.0,
-                ),
-                XpCustomElement(
-                    type = "progress", label = "XP progress", x = 130.0, y = 140.0, width = 540.0,
-                    height = 18.0, fill = "#5865F2", trackFill = "#FFFFFF30", cornerRadius = 9.0,
-                ),
-            ),
-            "glass" to listOf(
-                XpCustomElement(
-                    type = "rectangle", label = "Glass panel", x = 110.0, y = 45.0, width = 610.0,
-                    height = 190.0, fill = "#111827B8", stroke = "#FFFFFF30", strokeWidth = 1.0,
-                    cornerRadius = 24.0, shadowBlur = 16.0, shadowY = 8.0,
-                ),
-                XpCustomElement(
-                    type = "text", label = "Profile heading", x = 145.0, y = 76.0, width = 480.0,
-                    height = 40.0, fill = "#FFFFFF", text = "%xp.user.displayname%", fontSize = 30.0,
-                ),
-                XpCustomElement(
-                    type = "progress", label = "XP progress", x = 145.0, y = 160.0, width = 520.0,
-                    height = 20.0, fill = "#7C3AED", gradientEnd = "#22D3EE", trackFill = "#FFFFFF25",
-                    cornerRadius = 10.0,
-                ),
-            ),
-            "gaming" to listOf(
-                XpCustomElement(
-                    type = "rectangle", label = "Rank plate", x = 485.0, y = 38.0, width = 250.0,
-                    height = 72.0, fill = "#EF4444", gradientEnd = "#F59E0B", cornerRadius = 8.0,
-                    rotation = -2.0,
-                ),
-                XpCustomElement(
-                    type = "text", label = "Rank", x = 505.0, y = 52.0, width = 210.0, height = 42.0,
-                    fill = "#FFFFFF", text = "RANK  #%xp.rank%", fontSize = 30.0, textAlign = "center",
-                ),
-                XpCustomElement(
-                    type = "progress", label = "Segmented XP", x = 130.0, y = 205.0, width = 590.0,
-                    height = 22.0, fill = "#F59E0B", trackFill = "#FFFFFF25", progressStyle = "segmented",
-                    segments = 12, cornerRadius = 3.0,
-                ),
-            ),
-        )
-        val chosen = presets[name] ?: return
         val withIds = chosen.mapIndexed { index, element ->
             element.copy(id = "custom-${java.util.UUID.randomUUID()}", zIndex = index)
         }
         _state.update { it.copy(customElements = withIds) }
+        designer.clearSelection()
     }
 
     /**
@@ -709,8 +834,10 @@ class XpViewModel @Inject constructor(
             is JsonArray -> elementsJson = root
             is JsonObject -> {
                 elementsJson = root["customElements"] as? JsonArray ?: return false
-                sizeX = (root["outputSizeX"] as? JsonPrimitive)?.intOrNull
-                sizeY = (root["outputSizeY"] as? JsonPrimitive)?.intOrNull
+                sizeX = (root["outputSizeX"] as? JsonPrimitive)?.doubleOrNull
+                    ?.takeIf { it.isFinite() && it >= 1 }?.let { Math.round(it).toInt() }
+                sizeY = (root["outputSizeY"] as? JsonPrimitive)?.doubleOrNull
+                    ?.takeIf { it.isFinite() && it >= 1 }?.let { Math.round(it).toInt() }
             }
             else -> return false
         }
@@ -730,6 +857,7 @@ class XpViewModel @Inject constructor(
                 ),
             )
         }
+        designer.clearSelection()
         return true
     }
 
@@ -738,15 +866,13 @@ class XpViewModel @Inject constructor(
         val current = _state.value
         val last = current.templateUndoStack.lastOrNull() ?: return
         _state.update {
-            it.copy(
-                template = last.template,
-                customElements = last.customElements,
-                builtInOrder = last.builtInOrder,
+            restore(it, last).copy(
                 templateUndoStack = it.templateUndoStack.dropLast(1),
                 templateRedoStack = (it.templateRedoStack + snapshotOf(current))
                     .takeLast(TemplateUndoLimit),
             )
         }
+        dropVanishedSelection()
     }
 
     /** Re-applies the most recently undone template edit. */
@@ -754,41 +880,56 @@ class XpViewModel @Inject constructor(
         val current = _state.value
         val next = current.templateRedoStack.lastOrNull() ?: return
         _state.update {
-            it.copy(
-                template = next.template,
-                customElements = next.customElements,
-                builtInOrder = next.builtInOrder,
+            restore(it, next).copy(
                 templateRedoStack = it.templateRedoStack.dropLast(1),
                 templateUndoStack = (it.templateUndoStack + snapshotOf(current))
                     .takeLast(TemplateUndoLimit),
             )
         }
+        dropVanishedSelection()
     }
 
-    /** Discards every staged template change, reverting to what the server has. */
+    /** Discards every staged card change (template, layers, order, background), reverting to the server's. */
     fun resetTemplateChanges() {
         _state.update {
             it.copy(
                 template = it.loadedTemplate,
                 customElements = it.loadedCustomElements,
                 builtInOrder = it.loadedBuiltInOrder,
+                settings = it.settings.copy(customXpImageUrl = it.loadedSettings.customXpImageUrl),
                 templateUndoStack = emptyList(),
                 templateRedoStack = emptyList(),
             )
         }
+        dropVanishedSelection()
     }
 
-    /** Writes the staged rank card template. */
+    /**
+     * Writes the staged rank card: the full template with the layers and
+     * built-in order re-serialised, then the background URL through the
+     * settings endpoint when it changed. Refuses to send a built-in colour
+     * the bot's `SKColor.Parse` would throw on.
+     */
     fun saveTemplate() = launchAction("Failed to save the rank card template.") {
         val current = _state.value
-        val toSend = current.template.copy(
+        val invalid = current.template.invalidColorFields()
+        if (invalid.isNotEmpty()) {
+            postError("Fix the colour of ${invalid.joinToString()} before saving (6 or 8 hex digits).")
+            return@launchAction
+        }
+        val staged = current.template.copy(
+            templateBar = current.template.templateBar.copy(
+                barTransparency = current.template.templateBar.barTransparency.coerceIn(0, 255),
+            ),
+        )
+        val toSend = staged.copy(
             customElementsJson = MewdekoJson.encodeToString(
                 ListSerializer(XpCustomElement.serializer()),
                 current.customElements,
             ),
             builtInOrderJson = MewdekoJson.encodeToString(
                 ListSerializer(String.serializer()),
-                current.builtInOrder,
+                sanitizeBuiltInOrder(current.builtInOrder),
             ),
         )
         val encoded = MewdekoJson.encodeToJsonElement(XpTemplate.serializer(), toSend)
@@ -806,19 +947,23 @@ class XpViewModel @Inject constructor(
         )
         _state.update {
             it.copy(
-                template = toSend,
-                loadedTemplate = toSend,
+                template = staged,
+                loadedTemplate = staged,
                 loadedCustomElements = current.customElements,
                 loadedBuiltInOrder = current.builtInOrder,
-                templateUndoStack = emptyList(),
-                templateRedoStack = emptyList(),
             )
         }
-        postSuccess("Rank card template saved.")
+        if (current.hasUnsavedBackground) {
+            val backgroundUrl = current.settings.customXpImageUrl
+            postSettings(current.loadedSettings.copy(customXpImageUrl = backgroundUrl))
+            _state.update {
+                it.copy(loadedSettings = it.loadedSettings.copy(customXpImageUrl = backgroundUrl))
+            }
+        }
     }
 
     /**
-     * Snapshots the staged template so the change about to be made can be
+     * Snapshots the staged card so the change about to be made can be
      * undone, and clears the redo stack, since it now describes a future
      * that no longer follows from the current state.
      */
@@ -837,7 +982,22 @@ class XpViewModel @Inject constructor(
         template = state.template,
         customElements = state.customElements,
         builtInOrder = state.builtInOrder,
+        backgroundUrl = state.settings.customXpImageUrl,
     )
+
+    private fun restore(state: XpState, snapshot: XpTemplateSnapshot) = state.copy(
+        template = snapshot.template,
+        customElements = snapshot.customElements,
+        builtInOrder = snapshot.builtInOrder,
+        settings = state.settings.copy(customXpImageUrl = snapshot.backgroundUrl),
+    )
+
+    private fun dropVanishedSelection() {
+        val selected = designer.selectedId ?: return
+        if (!isBuiltInId(selected) && _state.value.customElements.none { it.id == selected }) {
+            designer.clearSelection()
+        }
+    }
 
     private fun decodeCustomElements(json: String?): List<XpCustomElement> {
         if (json.isNullOrBlank()) return emptyList()
@@ -851,8 +1011,7 @@ class XpViewModel @Inject constructor(
         val saved = runCatching {
             MewdekoJson.decodeFromString(ListSerializer(String.serializer()), json)
         }.getOrDefault(emptyList())
-        val known = saved.filter { it in DefaultBuiltInOrder }
-        return known + DefaultBuiltInOrder.filterNot { it in known }
+        return sanitizeBuiltInOrder(saved)
     }
 
     private suspend fun idList(path: String): List<Snowflake> = runCatching {
@@ -862,4 +1021,7 @@ class XpViewModel @Inject constructor(
     }.getOrDefault(emptyList())
 }
 
-private const val TemplateUndoLimit = 20
+private const val TemplateUndoLimit = 50
+
+/** Rounds to the nearest integer, kept as a double for the custom element columns. */
+private fun Double.roundToIntDouble(): Double = Math.round(this).toDouble()

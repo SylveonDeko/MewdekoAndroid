@@ -4,10 +4,12 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -26,6 +28,7 @@ import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
 import dev.mewdeko.mobile.core.model.EmbedMessage
 import dev.mewdeko.mobile.core.model.EmbedSpec
+import dev.mewdeko.mobile.core.model.embedColorValue
 import dev.mewdeko.mobile.core.theme.Rgb
 
 /**
@@ -58,16 +61,38 @@ fun EmbedPreview(message: EmbedMessage, modifier: Modifier = Modifier) {
     }
 }
 
+/**
+ * Renders a single [EmbedSpec] as its Discord card, for showing a change in
+ * place while the embed is being edited. An embed with nothing filled in
+ * still draws its card and color stripe, with a hint in place of the body,
+ * so picking a color is visible straight away.
+ */
 @Composable
-private fun EmbedCard(embed: EmbedSpec) {
-    val accent = parseEmbedColor(embed.color) ?: MaterialTheme.colorScheme.primary
+fun EmbedSpecPreview(embed: EmbedSpec, modifier: Modifier = Modifier) {
+    Box(modifier = modifier.fillMaxWidth()) {
+        EmbedCard(embed = embed, showEmptyHint = true)
+    }
+}
+
+/**
+ * One embed card. The left stripe is the embed color; with no color set
+ * (or `0`, which Discord treats as unset) it is the neutral outline tone,
+ * as in the Discord client.
+ */
+@Composable
+private fun EmbedCard(embed: EmbedSpec, showEmptyHint: Boolean = false) {
+    val accent = parseEmbedColor(embed.color) ?: MaterialTheme.colorScheme.outlineVariant
 
     Surface(
         shape = RoundedCornerShape(6.dp),
         color = MaterialTheme.colorScheme.surfaceContainerHighest,
         modifier = Modifier.fillMaxWidth(),
     ) {
-        Row(modifier = Modifier.fillMaxWidth()) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(IntrinsicSize.Min),
+        ) {
             Box(
                 modifier = Modifier
                     .width(4.dp)
@@ -80,6 +105,13 @@ private fun EmbedCard(embed: EmbedSpec) {
                     .padding(12.dp),
                 verticalArrangement = Arrangement.spacedBy(6.dp),
             ) {
+                if (showEmptyHint && embed.isEmpty) {
+                    Text(
+                        text = "Add a title or description to see the full embed.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
                 if (!embed.author.isEmpty) {
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
@@ -112,7 +144,7 @@ private fun EmbedCard(embed: EmbedSpec) {
                             Text(
                                 text = embed.title,
                                 style = MaterialTheme.typography.titleSmall,
-                                color = if (embed.url.isNotEmpty()) accent
+                                color = if (embed.url.isNotEmpty()) MaterialTheme.colorScheme.primary
                                 else MaterialTheme.colorScheme.onSurface,
                             )
                         }
@@ -196,16 +228,10 @@ private fun EmbedCard(embed: EmbedSpec) {
 }
 
 /**
- * Parses Discord-style embed colours, accepting `#RRGGBB`, bare `RRGGBB`, or a
- * stringified integer.
+ * Parses an embed color with the rules of [embedColorValue]: `#RGB`,
+ * `#RRGGBB`, `0x` hex, bare hex containing a letter, or a decimal integer.
+ * Returns null for malformed or partial input (never black), and for `0`,
+ * which Discord renders as no color.
  */
-fun parseEmbedColor(raw: String): Color? {
-    val trimmed = raw.trim()
-    if (trimmed.isEmpty()) return null
-    if (trimmed.startsWith("#") || (trimmed.length == 6 && trimmed.all { it.isHexDigit() })) {
-        return Rgb.fromHex(trimmed).color
-    }
-    return trimmed.toIntOrNull()?.let { Rgb.fromArgb(it).color }
-}
-
-private fun Char.isHexDigit(): Boolean = isDigit() || lowercaseChar() in 'a'..'f'
+fun parseEmbedColor(raw: String): Color? =
+    embedColorValue(raw)?.takeIf { it != 0 }?.let { Rgb.fromArgb(it).color }

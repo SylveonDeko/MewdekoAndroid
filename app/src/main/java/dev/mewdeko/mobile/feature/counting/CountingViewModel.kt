@@ -82,6 +82,7 @@ data class CountingConfig(
     val errorEmote: String? = null,
     val enableAchievements: Boolean = false,
     val enableCompetitions: Boolean = false,
+    val milestoneMessage: String? = null,
 ) {
     /** The typed form of [pattern]. */
     val patternType: CountingPattern get() = CountingPattern.from(pattern)
@@ -297,7 +298,10 @@ class CountingViewModel @Inject constructor(
     /** Stops counting in a channel. */
     fun remove(channelId: Snowflake) = launchAction("Failed to remove counting channel.") {
         api.sendIgnoringBody(
-            Endpoint("api/Counting/$guildId/channels/$channelId", HttpMethod.DELETE)
+            Endpoint(
+                "api/Counting/$guildId/channels/$channelId?userId=${userId.asSnowflakeNumber()}",
+                HttpMethod.DELETE,
+            )
         )
         _state.update {
             it.copy(channels = it.channels.filterNot { channel -> channel.channelId == channelId })
@@ -436,7 +440,7 @@ class CountingViewModel @Inject constructor(
                 Endpoint(
                     "api/Counting/$guildId/channels/$channelId/users/${targetUserId.asSnowflakeNumber()}/ban",
                     HttpMethod.DELETE,
-                    jsonBody("unbannedBy" to userId.asSnowflakeNumber()),
+                    jsonBody("unbannedBy" to userId),
                 )
             )
             _state.update { it.copy(bans = it.bans.filterNot { ban -> ban.userId == targetUserId }) }
@@ -449,7 +453,7 @@ class CountingViewModel @Inject constructor(
                 Endpoint(
                     "api/Counting/$guildId/channels/$channelId/purge",
                     HttpMethod.DELETE,
-                    jsonBody("userId" to userId.asSnowflakeNumber(), "reason" to reason),
+                    jsonBody("userId" to userId, "reason" to reason),
                 )
             )
             postSuccess("Counting data purged.")

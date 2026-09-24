@@ -62,6 +62,8 @@ data class AppState(
     val savedServers: List<ServerConfig> = emptyList(),
     val lastError: String? = null,
     val isSigningIn: Boolean = false,
+    /** True while a dashboard added on the setup screen is being probed. */
+    val isProbing: Boolean = false,
 )
 
 /**
@@ -155,17 +157,25 @@ class AppViewModel @Inject constructor(
         }
     }
 
-    /** Adds a dashboard from the setup screen and advances past it on success. */
+    /**
+     * Adds a dashboard from the setup screen and advances past it on success.
+     *
+     * The setup screen stays up while the dashboard is probed, showing
+     * progress through [AppState.isProbing], so a failure leaves the user's
+     * input in place beside the error.
+     */
     fun addServer(label: String, baseUrl: String) = viewModelScope.launch {
-        _state.update { it.copy(phase = AppPhase.Launching, lastError = null) }
+        if (_state.value.isProbing) return@launch
+        _state.update { it.copy(isProbing = true, lastError = null) }
         val normalized = baseUrl.trim().let {
             if (it.startsWith("http://") || it.startsWith("https://")) it else "https://$it"
         }.trimEnd('/')
         val config = ServerConfig(label = label.ifBlank { normalized.hostOrSelf() }, baseUrl = normalized)
         if (!select(config)) {
-            _state.update { it.copy(phase = AppPhase.NeedsServer) }
+            _state.update { it.copy(isProbing = false, phase = AppPhase.NeedsServer) }
             return@launch
         }
+        _state.update { it.copy(isProbing = false, phase = AppPhase.Launching) }
         val user = secureStore.loadUser(config.id)
         if (user == null) {
             _state.update { it.copy(phase = AppPhase.NeedsSignIn) }
@@ -183,6 +193,7 @@ class AppViewModel @Inject constructor(
         val target = _state.value.savedServers.firstOrNull { it.id == id } ?: return@launch
         configStore.setActive(id)
         api.setInstance(null)
+        session.setInstance(null)
         _state.update { it.copy(phase = AppPhase.Launching) }
         if (!select(target)) {
             val reason = _state.value.lastError ?: "Could not reach ${target.baseUrl.hostOrSelf()}."
@@ -268,14 +279,25 @@ class AppViewModel @Inject constructor(
     /** Records the user's chosen bot instance and shows the main shell. */
     fun selectInstance(instance: MobileInstance, user: MobileUser) = viewModelScope.launch {
         api.setInstance(instance.botId)
+        session.setInstance(instance)
         _state.value.serverConfig?.let { instanceStore.save(instance, it.id) }
         _state.update { it.copy(phase = AppPhase.SignedIn(user, instance)) }
+    }
+
+    /**
+     * Loads the dashboard's bots again for [user], for the bot picker's
+     * "Try again" button when the last load came back empty or failed.
+     */
+    fun reloadInstances(user: MobileUser) = viewModelScope.launch {
+        _state.update { it.copy(phase = AppPhase.Launching, lastError = null) }
+        beginInstanceSelection(user)
     }
 
     /** Returns to the instance picker for the signed-in user. */
     fun switchInstance() = viewModelScope.launch {
         val user = (_state.value.phase as? AppPhase.SignedIn)?.user ?: return@launch
         api.setInstance(null)
+        session.setInstance(null)
         _state.value.serverConfig?.let { instanceStore.clear(it.id) }
         beginInstanceSelection(user)
     }
@@ -325,12 +347,6 @@ class AppViewModel @Inject constructor(
     }
 
     /**
-     * Clears tokens and the cached profile for the current server.
-     *
-     * @param forgetServer When `true`, also removes the saved server from the
-     *   list. Other servers stay intact.
-     */
-    /**
      * Revokes the session on the dashboard and erases everything this device
      * holds for it: tokens, the cached profile, the pinned instance, and the
      * saved server entry.
@@ -348,6 +364,7 @@ class AppViewModel @Inject constructor(
             configStore.remove(activeId)
         }
         api.setInstance(null)
+        session.setInstance(null)
         refreshServerList()
         _state.update {
             it.copy(serverConfig = null, phase = AppPhase.NeedsServer, lastError = null)
@@ -363,6 +380,7 @@ class AppViewModel @Inject constructor(
             instanceStore.clear(activeId)
         }
         api.setInstance(null)
+        session.setInstance(null)
 
         if (forgetServer && activeId != null) {
             configStore.remove(activeId)

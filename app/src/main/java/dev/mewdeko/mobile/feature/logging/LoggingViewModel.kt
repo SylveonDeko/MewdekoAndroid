@@ -1,6 +1,8 @@
 package dev.mewdeko.mobile.feature.logging
 
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.VolumeOff
+import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Block
 import androidx.compose.material.icons.filled.CheckCircle
@@ -12,8 +14,6 @@ import androidx.compose.material.icons.filled.PersonRemove
 import androidx.compose.material.icons.filled.RemoveCircle
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Tag
-import androidx.compose.material.icons.filled.VolumeOff
-import androidx.compose.material.icons.filled.VolumeUp
 import androidx.compose.material.icons.filled.WarningAmber
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.lifecycle.SavedStateHandle
@@ -144,7 +144,7 @@ enum class LogType(
     ),
     USER_MUTED(
         "UserMuted", "User muted", LogCategory.MODERATION,
-        "Logs when a user is muted", Icons.Default.VolumeOff,
+        "Logs when a user is muted", Icons.AutoMirrored.Filled.VolumeOff,
     ),
     VOICE_PRESENCE(
         "VoicePresence", "Voice presence", LogCategory.VOICE,
@@ -152,7 +152,7 @@ enum class LogType(
     ),
     VOICE_PRESENCE_TTS(
         "VoicePresenceTts", "Voice presence TTS", LogCategory.VOICE,
-        "Logs TTS usage in voice channels", Icons.Default.VolumeUp,
+        "Logs TTS usage in voice channels", Icons.AutoMirrored.Filled.VolumeUp,
     ),
     SERVER_UPDATED(
         "ServerUpdated", "Server updated", LogCategory.SERVER,
@@ -301,7 +301,7 @@ class LoggingViewModel @Inject constructor(
             _state.update {
                 it.copy(
                     logTypeChannels = if (numeric == null) it.logTypeChannels - type.raw
-                    else it.logTypeChannels + (type.raw to channelId!!),
+                    else it.logTypeChannels + (type.raw to channelId),
                 )
             }
         }

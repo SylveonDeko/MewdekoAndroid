@@ -6,8 +6,8 @@ import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ListAlt
 import androidx.compose.material.icons.filled.Extension
-import androidx.compose.material.icons.filled.ListAlt
 import androidx.compose.material.icons.filled.PersonAdd
 import androidx.compose.material.icons.filled.PersonRemove
 import androidx.compose.material.icons.filled.Refresh
@@ -46,7 +46,7 @@ fun MinecraftOnlinePlayersCard(
     if (players.isEmpty()) return
 
     SectionCard(contentPadding = 12) {
-        SectionCardHeader("Online players (${players.size})", Icons.Default.ListAlt)
+        SectionCardHeader("Online players (${players.size})", Icons.AutoMirrored.Filled.ListAlt)
         players.forEach { player ->
             ListItem(
                 headlineContent = { Text(player) },
@@ -90,7 +90,7 @@ fun MinecraftWhitelistCard(
     SectionCard {
         SectionCardHeader(
             "Whitelist",
-            Icons.Default.ListAlt,
+            Icons.AutoMirrored.Filled.ListAlt,
             trailing = {
                 IconButton(onClick = onRefresh) {
                     Icon(Icons.Default.Refresh, contentDescription = "Refresh whitelist")

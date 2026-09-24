@@ -237,7 +237,7 @@ class FeatureRequestsViewModel @Inject constructor(
                 patchEntry(entry.id) { it.copy(votes = result.votes, voted = result.voted) }
             } catch (c: CancellationException) {
                 throw c
-            } catch (t: Throwable) {
+            } catch (_: Throwable) {
                 patchEntry(entry.id) { it.copy(votes = beforeVotes, voted = beforeVoted) }
                 postError("Failed to save your vote.")
             } finally {
@@ -398,7 +398,7 @@ class FeatureRequestsViewModel @Inject constructor(
                 fetchStats()
             } catch (c: CancellationException) {
                 throw c
-            } catch (t: Throwable) {
+            } catch (_: Throwable) {
                 postError("Failed to delete that request.")
             }
         }
@@ -462,7 +462,7 @@ class FeatureRequestsViewModel @Inject constructor(
             _state.update { it.copy(entries = result.items, total = result.total, pageLoading = false) }
         } catch (c: CancellationException) {
             throw c
-        } catch (t: Throwable) {
+        } catch (_: Throwable) {
             _state.update { it.copy(pageLoading = false, pageError = "Failed to load feature requests.") }
         }
     }
@@ -477,7 +477,7 @@ class FeatureRequestsViewModel @Inject constructor(
             _state.update { it.copy(mine = items, mineLoading = false) }
         } catch (c: CancellationException) {
             throw c
-        } catch (t: Throwable) {
+        } catch (_: Throwable) {
             _state.update { it.copy(mineLoading = false, mineError = "Failed to load your requests.") }
         }
     }
@@ -489,7 +489,7 @@ class FeatureRequestsViewModel @Inject constructor(
             _state.update { it.copy(stats = stats) }
         } catch (c: CancellationException) {
             throw c
-        } catch (t: Throwable) {
+        } catch (_: Throwable) {
         }
     }
 
@@ -508,7 +508,7 @@ class FeatureRequestsViewModel @Inject constructor(
             }
         } catch (c: CancellationException) {
             throw c
-        } catch (t: Throwable) {
+        } catch (_: Throwable) {
             _state.update {
                 it.copy(
                     settingsLoading = false,
@@ -525,7 +525,7 @@ class FeatureRequestsViewModel @Inject constructor(
             (raw as? JsonPrimitive)?.booleanOrNull ?: false
         } catch (c: CancellationException) {
             throw c
-        } catch (t: Throwable) {
+        } catch (_: Throwable) {
             false
         }
     }

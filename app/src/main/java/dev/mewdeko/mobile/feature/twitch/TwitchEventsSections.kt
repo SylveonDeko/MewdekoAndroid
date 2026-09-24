@@ -43,6 +43,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.mewdeko.mobile.core.ui.DiscordSelectorSingle
 import dev.mewdeko.mobile.core.ui.EmptyState
+import dev.mewdeko.mobile.core.ui.FullScreenEditor
 import dev.mewdeko.mobile.core.ui.MewdekoTextField
 import dev.mewdeko.mobile.core.ui.SectionCard
 import dev.mewdeko.mobile.core.ui.SectionCardHeader
@@ -72,7 +73,7 @@ internal fun AlertsSection(
         if (state.status?.hasChannelAuthorization == true) {
             HelpText(
                 "This channel is connected via OAuth, so go-live notifications set up here replace anything " +
-                    "configured for @${state.status?.channelUsername.orEmpty()} under Streams."
+                    "configured for @${state.status.channelUsername.orEmpty()} under Streams."
             )
         }
         DiscordSelectorSingle(
@@ -159,6 +160,63 @@ private fun TestButton(state: TwitchState, event: TwitchTestEvent, label: String
     }
 }
 
+/**
+ * The channel point action editor, opened from the actions card's Add
+ * button or an action row. It sits over the Alerts section, whose FAB is
+ * reserved for saving alert settings.
+ */
+@Composable
+internal fun TwitchRedemptionEditor(state: TwitchState, viewModel: TwitchViewModel) {
+    val draft = state.redemptionDraft
+    val channelOptions = state.channels.map { SelectorOption(it.id, it.name) }
+    FullScreenEditor(
+        title = if (draft.editing) "Edit channel point action" else "New channel point action",
+        onClose = viewModel::closeEditor,
+        confirmLabel = if (state.redemptionSaving) "Saving..." else "Save",
+        confirmEnabled = !state.redemptionSaving && draft.rewardTitle.isNotBlank(),
+        onConfirm = viewModel::saveRedemption,
+        hasUnsavedChanges = !draft.editing && draft.rewardTitle.isNotEmpty(),
+    ) {
+        SectionCard {
+            HelpText("Match a reward by its exact title on Twitch, then reply in chat, post to Discord, or both.")
+            MewdekoTextField(
+                value = draft.rewardTitle,
+                onValueChange = { value -> viewModel.updateRedemptionDraft { it.copy(rewardTitle = value) } },
+                label = "Reward title",
+                placeholder = "Hydrate",
+            )
+            DiscordSelectorSingle(
+                kind = SelectorKind.Channel,
+                options = channelOptions,
+                placeholder = "No Discord post",
+                label = "Discord channel",
+                selectedId = draft.discordChannelId,
+                onSelect = { value -> viewModel.updateRedemptionDraft { it.copy(discordChannelId = value) } },
+            )
+            MewdekoTextField(
+                value = draft.twitchResponse,
+                onValueChange = { value -> viewModel.updateRedemptionDraft { it.copy(twitchResponse = value) } },
+                label = "Twitch reply",
+                placeholder = "Thanks %display%, hydrate time.",
+                singleLine = false,
+                minLines = 2,
+            )
+            MewdekoTextField(
+                value = draft.discordMessage,
+                onValueChange = { value -> viewModel.updateRedemptionDraft { it.copy(discordMessage = value) } },
+                label = "Discord message",
+                placeholder = "%display% redeemed %reward%: %input%",
+                singleLine = false,
+                minLines = 2,
+            )
+            VariableChips(
+                variables = state.variablesFor("redemption", TwitchReference.redemptionVariables),
+                onInsert = null,
+            )
+        }
+    }
+}
+
 @Composable
 private fun RedemptionsCards(
     state: TwitchState,
@@ -166,66 +224,29 @@ private fun RedemptionsCards(
     channelOptions: List<SelectorOption>,
     confirm: (TwitchConfirmation) -> Unit,
 ) {
-    val draft = state.redemptionDraft
     SectionCard {
         SectionCardHeader(
-            if (draft.editing) "Edit channel point action" else "New channel point action",
-            Icons.Default.Add,
+            "Channel point actions (${state.redemptions.size})",
+            Icons.Default.Redeem,
+            trailing = {
+                TextButton(onClick = { viewModel.startNew(TwitchEditor.REDEMPTION) }) {
+                    Icon(Icons.Default.Add, contentDescription = null)
+                    Text("  Add")
+                }
+            },
         )
-        HelpText("Match a reward by its exact title on Twitch, then reply in chat, post to Discord, or both.")
-        MewdekoTextField(
-            value = draft.rewardTitle,
-            onValueChange = { value -> viewModel.updateRedemptionDraft { it.copy(rewardTitle = value) } },
-            label = "Reward title",
-            placeholder = "Hydrate",
-        )
-        DiscordSelectorSingle(
-            kind = SelectorKind.Channel,
-            options = channelOptions,
-            placeholder = "No Discord post",
-            label = "Discord channel",
-            selectedId = draft.discordChannelId,
-            onSelect = { value -> viewModel.updateRedemptionDraft { it.copy(discordChannelId = value) } },
-        )
-        MewdekoTextField(
-            value = draft.twitchResponse,
-            onValueChange = { value -> viewModel.updateRedemptionDraft { it.copy(twitchResponse = value) } },
-            label = "Twitch reply",
-            placeholder = "Thanks %display%, hydrate time.",
-            singleLine = false,
-            minLines = 2,
-        )
-        MewdekoTextField(
-            value = draft.discordMessage,
-            onValueChange = { value -> viewModel.updateRedemptionDraft { it.copy(discordMessage = value) } },
-            label = "Discord message",
-            placeholder = "%display% redeemed %reward%: %input%",
-            singleLine = false,
-            minLines = 2,
-        )
-        VariableChips(
-            variables = state.variablesFor("redemption", TwitchReference.redemptionVariables),
-            onInsert = null,
-        )
-        FormButtons(
-            saveLabel = "Save action",
-            saving = state.redemptionSaving,
-            canSave = draft.rewardTitle.isNotBlank(),
-            showCancel = draft.editing || draft.rewardTitle.isNotEmpty(),
-            onSave = viewModel::saveRedemption,
-            onCancel = viewModel::resetRedemptionDraft,
-        )
-    }
-
-    SectionCard {
-        SectionCardHeader("Channel point actions (${state.redemptions.size})", Icons.Default.Redeem)
         when {
             TwitchList.REDEMPTIONS in state.failedLists -> ListError(
                 "Could not load channel point actions.",
                 onRetry = { viewModel.load(refreshing = true) },
             )
 
-            state.redemptions.isEmpty() -> EmptyState("No channel point actions yet.", icon = Icons.Default.Redeem)
+            state.redemptions.isEmpty() -> EmptyState(
+                message = "No channel point actions yet.",
+                icon = Icons.Default.Redeem,
+                actionLabel = "New action",
+                onAction = { viewModel.startNew(TwitchEditor.REDEMPTION) },
+            )
 
             else -> state.redemptions.forEach { action ->
                 val channelName = action.discordChannelId

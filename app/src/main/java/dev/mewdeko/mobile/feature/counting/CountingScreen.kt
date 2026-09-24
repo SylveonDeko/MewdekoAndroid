@@ -10,7 +10,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Block
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.DeleteForever
@@ -21,11 +20,9 @@ import androidx.compose.material.icons.filled.RestartAlt
 import androidx.compose.material.icons.filled.Save
 import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material.icons.filled.Tune
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -47,7 +44,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.mewdeko.mobile.core.model.Snowflake
 import dev.mewdeko.mobile.core.ui.Avatar
@@ -56,6 +53,8 @@ import dev.mewdeko.mobile.core.ui.DiscordSelector
 import dev.mewdeko.mobile.core.ui.DiscordSelectorSingle
 import dev.mewdeko.mobile.core.ui.EmptyState
 import dev.mewdeko.mobile.core.ui.FeatureScaffold
+import dev.mewdeko.mobile.core.ui.FormSheet
+import dev.mewdeko.mobile.core.ui.NewItemFab
 import dev.mewdeko.mobile.core.ui.MewdekoTextField
 import dev.mewdeko.mobile.core.ui.SectionCard
 import dev.mewdeko.mobile.core.ui.SectionCardHeader
@@ -109,11 +108,7 @@ fun CountingScreen(
         onRefresh = { viewModel.load(refreshing = true) },
         onRetry = { viewModel.load() },
         floatingActionButton = {
-            ExtendedFloatingActionButton(
-                onClick = { showSetup = true },
-                icon = { Icon(Icons.Default.Add, contentDescription = null) },
-                text = { Text("Add channel") },
-            )
+            NewItemFab(label = "Add channel", onClick = { showSetup = true })
         },
     ) {
         if (state.channels.isEmpty()) {
@@ -121,6 +116,8 @@ fun CountingScreen(
                 EmptyState(
                     message = "No counting channels yet. Add one to start the game.",
                     icon = Icons.Default.Numbers,
+                    actionLabel = "Add channel",
+                    onAction = { showSetup = true },
                 )
             }
             return@FeatureScaffold
@@ -500,115 +497,98 @@ fun CountingScreen(
         var channelPick by remember { mutableStateOf<String?>(null) }
         var startNumber by remember { mutableStateOf("0") }
         var increment by remember { mutableIntStateOf(1) }
-        AlertDialog(
-            onDismissRequest = { showSetup = false },
-            title = { Text("Add counting channel") },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    DiscordSelectorSingle(
-                        kind = SelectorKind.Channel,
-                        options = state.availableChannels.map { SelectorOption(it.id, it.name) },
-                        placeholder = "Pick a channel",
-                        label = "Channel",
-                        selectedId = channelPick,
-                        onSelect = { channelPick = it },
-                    )
-                    MewdekoTextField(
-                        value = startNumber,
-                        onValueChange = { startNumber = it.filter(Char::isDigit) },
-                        label = "Start at",
-                        numeric = true,
-                    )
-                    SliderRow(
-                        label = "Increment",
-                        value = increment.toFloat(),
-                        onValueChange = { increment = it.toInt().coerceAtLeast(1) },
-                        valueRange = 1f..10f,
-                        valueLabel = "$increment",
-                    )
+        FormSheet(
+            title = "Add counting channel",
+            confirmLabel = "Add",
+            confirmEnabled = channelPick != null,
+            onConfirm = {
+                channelPick?.let {
+                    viewModel.setup(it, startNumber.toIntOrNull() ?: 0, increment)
                 }
+                showSetup = false
             },
-            confirmButton = {
-                Button(
-                    onClick = {
-                        channelPick?.let {
-                            viewModel.setup(it, startNumber.toIntOrNull() ?: 0, increment)
-                        }
-                        showSetup = false
-                    },
-                    enabled = channelPick != null,
-                ) { Text("Add") }
-            },
-            dismissButton = { TextButton(onClick = { showSetup = false }) { Text("Cancel") } },
-        )
+            onDismiss = { showSetup = false },
+        ) {
+            DiscordSelectorSingle(
+                kind = SelectorKind.Channel,
+                options = state.availableChannels.map { SelectorOption(it.id, it.name) },
+                placeholder = "Pick a channel",
+                label = "Channel",
+                selectedId = channelPick,
+                onSelect = { channelPick = it },
+            )
+            MewdekoTextField(
+                value = startNumber,
+                onValueChange = { startNumber = it.filter(Char::isDigit) },
+                label = "Start at",
+                numeric = true,
+            )
+            SliderRow(
+                label = "Increment",
+                value = increment.toFloat(),
+                onValueChange = { increment = it.toInt().coerceAtLeast(1) },
+                valueRange = 1f..10f,
+                valueLabel = "$increment",
+            )
+        }
     }
 
     if (showReset) {
         var newNumber by remember { mutableStateOf("0") }
         var reason by remember { mutableStateOf("") }
-        AlertDialog(
-            onDismissRequest = { showReset = false },
-            title = { Text("Reset count") },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    MewdekoTextField(
-                        value = newNumber,
-                        onValueChange = { newNumber = it.filter(Char::isDigit) },
-                        label = "New number",
-                        numeric = true,
-                    )
-                    MewdekoTextField(
-                        value = reason,
-                        onValueChange = { reason = it },
-                        label = "Reason (optional)",
+        FormSheet(
+            title = "Reset count",
+            confirmLabel = "Reset",
+            confirmEnabled = true,
+            onConfirm = {
+                state.selectedChannelId?.let {
+                    viewModel.reset(
+                        it,
+                        newNumber.toIntOrNull() ?: 0,
+                        reason.takeIf { value -> value.isNotBlank() },
                     )
                 }
+                showReset = false
             },
-            confirmButton = {
-                Button(
-                    onClick = {
-                        state.selectedChannelId?.let {
-                            viewModel.reset(
-                                it,
-                                newNumber.toIntOrNull() ?: 0,
-                                reason.takeIf { value -> value.isNotBlank() },
-                            )
-                        }
-                        showReset = false
-                    },
-                ) { Text("Reset") }
-            },
-            dismissButton = { TextButton(onClick = { showReset = false }) { Text("Cancel") } },
-        )
+            onDismiss = { showReset = false },
+        ) {
+            MewdekoTextField(
+                value = newNumber,
+                onValueChange = { newNumber = it.filter(Char::isDigit) },
+                label = "New number",
+                numeric = true,
+            )
+            MewdekoTextField(
+                value = reason,
+                onValueChange = { reason = it },
+                label = "Reason (optional)",
+            )
+        }
     }
 
     if (showSavePoint) {
         var reason by remember { mutableStateOf("") }
-        AlertDialog(
-            onDismissRequest = { showSavePoint = false },
-            title = { Text("Create save point") },
-            text = {
-                MewdekoTextField(
-                    value = reason,
-                    onValueChange = { reason = it },
-                    label = "Reason (optional)",
-                )
+        FormSheet(
+            title = "Create save point",
+            confirmLabel = "Save",
+            confirmEnabled = true,
+            onConfirm = {
+                state.selectedChannelId?.let {
+                    viewModel.createSavePoint(
+                        it,
+                        reason.takeIf { value -> value.isNotBlank() },
+                    )
+                }
+                showSavePoint = false
             },
-            confirmButton = {
-                Button(
-                    onClick = {
-                        state.selectedChannelId?.let {
-                            viewModel.createSavePoint(
-                                it,
-                                reason.takeIf { value -> value.isNotBlank() },
-                            )
-                        }
-                        showSavePoint = false
-                    },
-                ) { Text("Save") }
-            },
-            dismissButton = { TextButton(onClick = { showSavePoint = false }) { Text("Cancel") } },
-        )
+            onDismiss = { showSavePoint = false },
+        ) {
+            MewdekoTextField(
+                value = reason,
+                onValueChange = { reason = it },
+                label = "Reason (optional)",
+            )
+        }
     }
 
     pendingRemove?.let { channel ->
@@ -768,7 +748,9 @@ private fun ManagementSection(
             ) { Text("Add") }
         }
 
-        var milestoneMessage by remember { mutableStateOf("") }
+        var milestoneMessage by remember(state.config?.milestoneMessage) {
+            mutableStateOf(state.config?.milestoneMessage.orEmpty())
+        }
         MewdekoTextField(
             value = milestoneMessage,
             onValueChange = { milestoneMessage = it },

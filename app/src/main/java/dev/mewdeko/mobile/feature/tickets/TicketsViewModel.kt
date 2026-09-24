@@ -67,7 +67,18 @@ data class TicketPanel(
     val buttonCount: Int = 0,
     val selectMenuCount: Int = 0,
     val embedJson: String? = null,
-)
+) {
+    /**
+     * The id the bot's panel routes key on: the Discord message id.
+     * Every panel detail endpoint (buttons, select menus, delete, embed, status, recreate,
+     * add button, add select menu) looks the panel up by message id, not the local database id,
+     * so this is what every request path must use.
+     */
+    val routeId: Snowflake get() = messageId ?: id.toString()
+
+    /** A label for the panel that means something to a user, unlike the local database id. */
+    val displayLabel: String get() = channelName?.let { "#$it" } ?: "Panel $id"
+}
 
 /** A named urgency level a ticket can be set to. */
 @Serializable
@@ -600,7 +611,7 @@ class TicketsViewModel @Inject constructor(
     /** Deletes a panel and its message. */
     fun deletePanel(panel: TicketPanel) = launchAction("Failed to delete panel.") {
         api.sendIgnoringBody(
-            Endpoint("api/Ticket/$guildId/panels/${panel.id}", HttpMethod.DELETE)
+            Endpoint("api/Ticket/$guildId/panels/${panel.routeId}", HttpMethod.DELETE)
         )
         _state.update {
             it.copy(
@@ -616,7 +627,7 @@ class TicketsViewModel @Inject constructor(
         launchAction("Failed to update embed.") {
             api.sendIgnoringBody(
                 Endpoint(
-                    "api/Ticket/$guildId/panels/${panel.id}/embed",
+                    "api/Ticket/$guildId/panels/${panel.routeId}/embed",
                     HttpMethod.PUT,
                     jsonBody("embedJson" to embedJson),
                 )
@@ -628,23 +639,34 @@ class TicketsViewModel @Inject constructor(
     /** Checks whether a panel's message and channel still exist. */
     fun checkPanelStatus(panel: TicketPanel) = launchAction("Failed to check panel status.") {
         val result = api.send(
-            Endpoint("api/Ticket/$guildId/panels/${panel.id}/status"),
+            Endpoint("api/Ticket/$guildId/panels/${panel.routeId}/status"),
             PanelStatusResponse.serializer(),
         )
         when (result.status) {
-            0 -> postSuccess("Panel #${panel.id} is healthy.")
-            1 -> postError("Panel #${panel.id}'s message was deleted. Use Repost to recreate it.")
-            2 -> postError("Panel #${panel.id}'s channel was deleted.")
-            else -> postError("Panel #${panel.id} status is unknown.")
+            0 -> postSuccess("${panel.displayLabel} is healthy.")
+            1 -> postError("${panel.displayLabel}'s message was deleted. Use Repost to recreate it.")
+            2 -> postError("${panel.displayLabel}'s channel was deleted.")
+            else -> postError("${panel.displayLabel} status is unknown.")
         }
     }
 
-    /** Reposts one panel's message. */
+    /** Reposts one panel's message. Its message id changes, so the panel list is reloaded. */
     fun recreatePanel(panel: TicketPanel) = launchAction("Failed to repost panel.") {
         api.sendIgnoringBody(
-            Endpoint("api/Ticket/$guildId/panels/${panel.id}/recreate", HttpMethod.POST)
+            Endpoint("api/Ticket/$guildId/panels/${panel.routeId}/recreate", HttpMethod.POST)
         )
-        load()
+        val refreshedPanels = list("api/Ticket/$guildId/panels", TicketPanel.serializer())
+        _state.update { current ->
+            current.copy(
+                panels = refreshedPanels,
+                openPanel = current.openPanel?.let { open ->
+                    refreshedPanels.firstOrNull { it.id == open.panel.id }
+                        ?.let { refreshed -> open.copy(panel = refreshed) }
+                        ?: open
+                },
+            )
+        }
+        _state.value.openPanel?.takeIf { it.panel.id == panel.id }?.let { loadPanelDetail(it.panel) }
         postSuccess("Panel reposted.")
     }
 
@@ -669,11 +691,14 @@ class TicketsViewModel @Inject constructor(
     fun loadPanelDetail(panel: TicketPanel) = launchAction("Failed to load panel.") {
         coroutineScope {
             val buttons = async {
-                list("api/Ticket/$guildId/panels/${panel.id}/buttons", PanelButton.serializer())
+                list(
+                    "api/Ticket/$guildId/panels/${panel.routeId}/buttons",
+                    PanelButton.serializer(),
+                )
             }
             val menus = async {
                 list(
-                    "api/Ticket/$guildId/panels/${panel.id}/selectmenus",
+                    "api/Ticket/$guildId/panels/${panel.routeId}/selectmenus",
                     PanelSelectMenu.serializer(),
                 )
             }
@@ -683,7 +708,7 @@ class TicketsViewModel @Inject constructor(
                 val refreshedMenu = it.openMenu
                     ?.takeIf { open -> open.panel.id == panel.id }
                     ?.let { open -> loadedMenus.firstOrNull { m -> m.id == open.menu.id } }
-                    ?.let { menu -> it.openMenu?.copy(menu = menu) }
+                    ?.let { menu -> it.openMenu.copy(menu = menu) }
                 if (it.openPanel?.panel?.id == panel.id) {
                     it.copy(openPanel = loaded, openMenu = refreshedMenu ?: it.openMenu)
                 } else {
@@ -698,7 +723,7 @@ class TicketsViewModel @Inject constructor(
         launchAction("Failed to add button.") {
             api.sendIgnoringBody(
                 Endpoint(
-                    "api/Ticket/$guildId/panels/${panel.id}/buttons",
+                    "api/Ticket/$guildId/panels/${panel.routeId}/buttons",
                     HttpMethod.POST,
                     jsonBody(*form.toButtonFields()),
                 )
@@ -754,7 +779,7 @@ class TicketsViewModel @Inject constructor(
     ) = launchAction("Failed to add select menu.") {
         api.sendIgnoringBody(
             Endpoint(
-                "api/Ticket/$guildId/panels/${panel.id}/selectmenus",
+                "api/Ticket/$guildId/panels/${panel.routeId}/selectmenus",
                 HttpMethod.POST,
                 jsonBody(
                     "placeholder" to placeholder,
@@ -1179,9 +1204,35 @@ data class ComponentSubmission(
         "modalJson" to modalJson?.takeIf { it.isNotBlank() },
     )
 
-    /** The fields the update endpoints (`UpdateTicketComponentRequestBase`) accept. */
+    /**
+     * The fields the update endpoints (`UpdateTicketComponentRequestBase`) accept.
+     *
+     * The bot treats an omitted key as "leave unchanged", so a genuine clear needs an explicit
+     * sentinel rather than a dropped key: 0 for ids, an empty array for lists, `""` for strings,
+     * and `00:00:00` for a timespan the user switched off.
+     */
     fun toUpdateFields(): Array<Pair<String, Any?>> = arrayOf(
-        *toButtonFields(),
+        "label" to label,
+        "description" to description?.takeIf { it.isNotBlank() },
+        "style" to style,
+        "maxActiveTickets" to maxActiveTickets,
+        "emoji" to emoji?.takeIf { it.isNotEmpty() },
+        "channelFormat" to (channelFormat?.takeIf { it.isNotBlank() } ?: ""),
+        "categoryId" to (categoryId?.toLongOrNull() ?: 0L),
+        "archiveCategoryId" to (archiveCategoryId?.toLongOrNull() ?: 0L),
+        "supportRoles" to JsonArray(
+            supportRoles.orEmpty().mapNotNull { it.toLongOrNull() }.map { JsonPrimitive(it) }
+        ),
+        "viewerRoles" to JsonArray(
+            viewerRoles.orEmpty().mapNotNull { it.toLongOrNull() }.map { JsonPrimitive(it) }
+        ),
+        "autoCloseTime" to (autoCloseHours?.takeIf { it > 0 }?.let(::hoursToTimeSpan) ?: "00:00:00"),
+        "requiredResponseTime" to
+            (requiredResponseMinutes?.takeIf { it > 0 }?.let(::minutesToTimeSpan) ?: "00:00:00"),
+        "allowedPriorities" to JsonArray(allowedPriorities.orEmpty().map { JsonPrimitive(it) }),
+        "defaultPriority" to (defaultPriority?.takeIf { it.isNotBlank() } ?: ""),
+        "openMessageJson" to (openMessageJson?.takeIf { it.isNotBlank() } ?: ""),
+        "modalJson" to (modalJson?.takeIf { it.isNotBlank() } ?: ""),
         "saveTranscript" to saveTranscript,
         "deleteOnClose" to deleteOnClose,
         "lockOnClose" to lockOnClose,
@@ -1199,34 +1250,59 @@ data class ComponentSubmission(
 fun List<Snowflake>.asIdArray(): JsonArray? = takeIf { it.isNotEmpty() }
     ?.let { ids -> JsonArray(ids.mapNotNull { it.toLongOrNull() }.map { JsonPrimitive(it) }) }
 
-/** Encodes whole hours as the `hh:mm:ss` string .NET's `TimeSpan` expects. */
-fun hoursToTimeSpan(hours: Int): String = "%02d:00:00".format(hours)
+/**
+ * Encodes whole hours as the `hh:mm:ss` (with an optional `d.` day prefix) string .NET's `TimeSpan` binder expects.
+ * The bot rejects `hh` values of 24 or more, so 24h and beyond move into the day prefix.
+ */
+fun hoursToTimeSpan(hours: Int): String =
+    if (hours >= 24) "%d.%02d:00:00".format(hours / 24, hours % 24) else "%02d:00:00".format(hours)
 
-/** Encodes whole minutes as the `hh:mm:ss` string .NET's `TimeSpan` expects. */
-fun minutesToTimeSpan(minutes: Int): String = "%02d:%02d:00".format(minutes / 60, minutes % 60)
-
-/** Encodes whole seconds as the `hh:mm:ss` string .NET's `TimeSpan` expects. */
-fun secondsToTimeSpan(seconds: Int): String =
-    "%02d:%02d:%02d".format(seconds / 3600, (seconds % 3600) / 60, seconds % 60)
-
-/** Reads the whole-minutes value out of a `hh:mm:ss` `TimeSpan` string. */
-fun timeSpanToMinutes(value: String?): Int {
-    if (value.isNullOrBlank()) return 0
-    val parts = value.split(":")
-    val hours = parts.getOrNull(0)?.toIntOrNull() ?: 0
-    val minutes = parts.getOrNull(1)?.toIntOrNull() ?: 0
-    return hours * 60 + minutes
+/** Encodes whole minutes as the `hh:mm:ss` (with an optional `d.` day prefix) string .NET's `TimeSpan` binder expects. */
+fun minutesToTimeSpan(minutes: Int): String = hoursToTimeSpan(minutes / 60).let { base ->
+    val remainingMinutes = minutes % 60
+    base.dropLast(5) + "%02d:00".format(remainingMinutes)
 }
 
-/** Reads the whole-hours value out of a `hh:mm:ss` `TimeSpan` string. */
+/** Encodes whole seconds as the `hh:mm:ss` (with an optional `d.` day prefix) string .NET's `TimeSpan` binder expects. */
+fun secondsToTimeSpan(seconds: Int): String {
+    val hours = seconds / 3600
+    val minutes = (seconds % 3600) / 60
+    val remainingSeconds = seconds % 60
+    val base = hoursToTimeSpan(hours)
+    return base.dropLast(5) + "%02d:%02d".format(minutes, remainingSeconds)
+}
+
+/** Splits an optional leading `d.` day prefix off a `hh:mm:ss` (with an optional `d.` day prefix) `TimeSpan` string's first segment. */
+private fun splitTimeSpanDays(value: String): Pair<Int, List<String>> {
+    val parts = value.split(":")
+    val first = parts.firstOrNull().orEmpty()
+    val (days, hours) = if ('.' in first) {
+        val (d, h) = first.split(".", limit = 2)
+        (d.toIntOrNull() ?: 0) to h
+    } else {
+        0 to first
+    }
+    return days to (listOf(hours) + parts.drop(1))
+}
+
+/** Reads the whole-minutes value out of a `hh:mm:ss` (with an optional `d.` day prefix) `TimeSpan` string. */
+fun timeSpanToMinutes(value: String?): Int {
+    if (value.isNullOrBlank()) return 0
+    val (days, parts) = splitTimeSpanDays(value)
+    val hours = parts.getOrNull(0)?.toIntOrNull() ?: 0
+    val minutes = parts.getOrNull(1)?.toIntOrNull() ?: 0
+    return days * 1440 + hours * 60 + minutes
+}
+
+/** Reads the whole-hours value out of a `hh:mm:ss` (with an optional `d.` day prefix) `TimeSpan` string. */
 fun timeSpanToHours(value: String?): Int = timeSpanToMinutes(value) / 60
 
-/** Reads the whole-seconds value out of a `hh:mm:ss` `TimeSpan` string. */
+/** Reads the whole-seconds value out of a `hh:mm:ss` (with an optional `d.` day prefix) `TimeSpan` string. */
 fun timeSpanToSeconds(value: String?): Int {
     if (value.isNullOrBlank()) return 0
-    val parts = value.split(":")
+    val (days, parts) = splitTimeSpanDays(value)
     val hours = parts.getOrNull(0)?.toIntOrNull() ?: 0
     val minutes = parts.getOrNull(1)?.toIntOrNull() ?: 0
     val seconds = parts.getOrNull(2)?.toIntOrNull() ?: 0
-    return hours * 3600 + minutes * 60 + seconds
+    return days * 86400 + hours * 3600 + minutes * 60 + seconds
 }

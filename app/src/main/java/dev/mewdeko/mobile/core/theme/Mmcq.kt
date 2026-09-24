@@ -292,7 +292,7 @@ internal object Mmcq {
         var niters = 0
         while (niters < MAX_ITERATIONS) {
             if (ncolors >= target) return
-            if (niters++ > MAX_ITERATIONS) return
+            niters++
             val vbox = lh.pop()
             if (vbox.count() == 0L) {
                 lh.push(vbox)

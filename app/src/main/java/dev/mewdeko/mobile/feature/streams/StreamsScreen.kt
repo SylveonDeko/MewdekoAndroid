@@ -8,16 +8,12 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Code
 import androidx.compose.material.icons.filled.DeleteSweep
 import androidx.compose.material.icons.filled.Save
-import androidx.compose.material.icons.filled.Tag
 import androidx.compose.material.icons.filled.VideoCameraFront
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
-import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -30,17 +26,18 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalClipboardManager
-import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.mewdeko.mobile.core.model.EmbedMessage
 import dev.mewdeko.mobile.core.ui.ConfirmDialog
 import dev.mewdeko.mobile.core.ui.DiscordSelectorSingle
 import dev.mewdeko.mobile.core.ui.EmptyState
 import dev.mewdeko.mobile.core.ui.FeatureScaffold
+import dev.mewdeko.mobile.core.ui.FormSheet
+import dev.mewdeko.mobile.core.ui.FullScreenEditor
+import dev.mewdeko.mobile.core.ui.NewItemFab
 import dev.mewdeko.mobile.core.ui.MewdekoTextField
 import dev.mewdeko.mobile.core.ui.SectionCard
 import dev.mewdeko.mobile.core.ui.SectionCardHeader
@@ -49,6 +46,7 @@ import dev.mewdeko.mobile.core.ui.SelectorOption
 import dev.mewdeko.mobile.core.ui.StatTile
 import dev.mewdeko.mobile.core.ui.SwitchRow
 import dev.mewdeko.mobile.core.ui.TagChip
+import dev.mewdeko.mobile.core.ui.rememberTextClipboard
 import dev.mewdeko.mobile.feature.embed.EmbedMessageEditor
 import dev.mewdeko.mobile.feature.embed.EmbedPreview
 import dev.mewdeko.mobile.navigation.GuildRouteArgs
@@ -80,7 +78,7 @@ private val StreamPlaceholders = listOf(
  */
 @Composable
 private fun StreamPlaceholderReference(modifier: Modifier = Modifier) {
-    val clipboard = LocalClipboardManager.current
+    val clipboard = rememberTextClipboard()
     Column(modifier = modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
         Text(
             text = "Tap a placeholder to copy it",
@@ -97,7 +95,7 @@ private fun StreamPlaceholderReference(modifier: Modifier = Modifier) {
                 TagChip(
                     label = placeholder.token,
                     icon = Icons.Default.Code,
-                    onClick = { clipboard.setText(AnnotatedString(placeholder.token)) },
+                    onClick = { clipboard.copy(placeholder.token) },
                 )
             }
         }
@@ -149,19 +147,7 @@ fun StreamsScreen(
             }
         },
         floatingActionButton = {
-            if (state.hasUnsavedMessage) {
-                ExtendedFloatingActionButton(
-                    onClick = viewModel::saveCustomMessage,
-                    icon = { Icon(Icons.Default.Save, contentDescription = null) },
-                    text = { Text("Save template") },
-                )
-            } else {
-                ExtendedFloatingActionButton(
-                    onClick = { showAdd = true },
-                    icon = { Icon(Icons.Default.Add, contentDescription = null) },
-                    text = { Text("Follow stream") },
-                )
-            }
+            NewItemFab(label = "Follow stream", onClick = { showAdd = true })
         },
     ) {
         SectionCard {
@@ -226,6 +212,15 @@ fun StreamsScreen(
                 onMessageChange = viewModel::setCustomMessage,
             )
             StreamPlaceholderReference()
+            if (state.hasUnsavedMessage) {
+                Button(
+                    onClick = viewModel::saveCustomMessage,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Icon(Icons.Default.Save, contentDescription = null, modifier = Modifier.padding(end = 8.dp))
+                    Text("Save template")
+                }
+            }
         }
 
         if (state.streams.isEmpty()) {
@@ -233,6 +228,8 @@ fun StreamsScreen(
                 EmptyState(
                     message = "Not following any streamers yet.",
                     icon = Icons.Default.VideoCameraFront,
+                    actionLabel = "Follow stream",
+                    onAction = { showAdd = true },
                 )
             }
         } else {
@@ -341,42 +338,35 @@ fun StreamsScreen(
     if (showAdd) {
         var url by remember { mutableStateOf("") }
         var channelId by remember { mutableStateOf<String?>(null) }
-        AlertDialog(
-            onDismissRequest = { showAdd = false },
-            title = { Text("Follow stream") },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    MewdekoTextField(
-                        value = url,
-                        onValueChange = { url = it },
-                        label = "Stream URL",
-                        placeholder = "https://twitch.tv/example",
-                    )
-                    DiscordSelectorSingle(
-                        kind = SelectorKind.Channel,
-                        options = state.availableChannels.map { SelectorOption(it.id, it.name) },
-                        placeholder = "Pick a channel",
-                        label = "Notify in",
-                        selectedId = channelId,
-                        onSelect = { channelId = it },
-                    )
-                }
+        FormSheet(
+            title = "Follow stream",
+            confirmLabel = "Follow",
+            confirmEnabled = url.isNotBlank() && channelId != null,
+            onConfirm = {
+                channelId?.let { viewModel.follow(it, url.trim()) }
+                showAdd = false
             },
-            confirmButton = {
-                Button(
-                    onClick = {
-                        channelId?.let { viewModel.follow(it, url.trim()) }
-                        showAdd = false
-                    },
-                    enabled = url.isNotBlank() && channelId != null,
-                ) { Text("Follow") }
-            },
-            dismissButton = { TextButton(onClick = { showAdd = false }) { Text("Cancel") } },
-        )
+            onDismiss = { showAdd = false },
+        ) {
+            MewdekoTextField(
+                value = url,
+                onValueChange = { url = it },
+                label = "Stream URL",
+                placeholder = "https://twitch.tv/example",
+            )
+            DiscordSelectorSingle(
+                kind = SelectorKind.Channel,
+                options = state.availableChannels.map { SelectorOption(it.id, it.name) },
+                placeholder = "Pick a channel",
+                label = "Notify in",
+                selectedId = channelId,
+                onSelect = { channelId = it },
+            )
+        }
     }
 
     editingOnline?.let { stream ->
-        StreamMessageDialog(
+        StreamMessageEditor(
             title = "Online message",
             initial = EmbedMessage.parse(stream.onlineMessage),
             onDismiss = { editingOnline = null },
@@ -385,7 +375,7 @@ fun StreamsScreen(
     }
 
     editingOffline?.let { stream ->
-        StreamMessageDialog(
+        StreamMessageEditor(
             title = "Offline message",
             initial = EmbedMessage.parse(stream.offlineMessage),
             onDismiss = { editingOffline = null },
@@ -414,24 +404,24 @@ fun StreamsScreen(
     }
 }
 
+/** Full screen editor for one follow's online or offline message, with its preview. */
 @Composable
-private fun StreamMessageDialog(
+private fun StreamMessageEditor(
     title: String,
     initial: EmbedMessage,
     onDismiss: () -> Unit,
     onSave: (EmbedMessage) -> Unit,
 ) {
     var draft by remember { mutableStateOf(initial) }
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text(title) },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                EmbedMessageEditor(message = draft, onMessageChange = { draft = it })
-                StreamPlaceholderReference()
-            }
-        },
-        confirmButton = { Button(onClick = { onSave(draft) }) { Text("Save") } },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
-    )
+    FullScreenEditor(
+        title = title,
+        onClose = onDismiss,
+        confirmLabel = "Save",
+        confirmEnabled = true,
+        onConfirm = { onSave(draft) },
+        hasUnsavedChanges = draft != initial,
+    ) {
+        EmbedMessageEditor(message = draft, onMessageChange = { draft = it })
+        StreamPlaceholderReference()
+    }
 }

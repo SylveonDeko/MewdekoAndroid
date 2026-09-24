@@ -2,7 +2,7 @@ package dev.mewdeko.mobile.feature.minecraft
 
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Chat
+import androidx.compose.material.icons.automirrored.filled.Chat
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
@@ -87,7 +87,7 @@ fun MinecraftEventTemplatesCard(server: MinecraftServer, onSave: (McEventTemplat
     }
 
     SectionCard {
-        SectionCardHeader("Bridge event templates", Icons.Default.Chat)
+        SectionCardHeader("Bridge event templates", Icons.AutoMirrored.Filled.Chat)
         Text(
             text = "Requires the companion plugin. Leave a field empty for its default. $EventPlaceholdersCaption",
             style = MaterialTheme.typography.bodySmall,

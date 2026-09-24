@@ -39,6 +39,7 @@ import dev.mewdeko.mobile.core.ui.guildBorder
 import dev.mewdeko.mobile.feature.giveaways.GiveawayRecord
 import dev.mewdeko.mobile.feature.guilddetail.GuildOverviewState
 import dev.mewdeko.mobile.feature.guilddetail.formatted
+import dev.mewdeko.mobile.navigation.FeatureCategory
 import dev.mewdeko.mobile.util.relativeToNow
 import java.time.Instant
 
@@ -58,11 +59,13 @@ fun EntertainmentBand(
     loaded: Boolean,
     roles: HomeRoles,
     onOpenFeature: (String) -> Unit,
+    onOpenCategory: (FeatureCategory) -> Unit,
 ) {
     val role = roles.entertainment
     val badge = ScallopShape(8, 0.10f)
+    val onSeeAll = { onOpenCategory(FeatureCategory.ENTERTAINMENT) }
     if (!loaded) {
-        SkeletonBand("Entertainment", Icons.Default.Celebration, role, badge, "giveaways", onOpenFeature)
+        SkeletonBand("Entertainment", Icons.Default.Celebration, role, badge, onSeeAll, onOpenFeature)
         return
     }
 
@@ -96,7 +99,7 @@ fun EntertainmentBand(
         icon = Icons.Default.Celebration,
         role = role,
         badgeShape = badge,
-        seeAllId = "giveaways",
+        onSeeAll = onSeeAll,
         headline = if (active.isNotEmpty()) active.size.toLong() else voice.toLong(),
         descriptor = if (active.isNotEmpty()) "giveaways running" else "voice rooms open",
         headlineLoading = false,
@@ -197,6 +200,7 @@ fun AutomationBand(
     roles: HomeRoles,
     onEnsureLoaded: (HomeSection) -> Unit,
     onOpenFeature: (String) -> Unit,
+    onOpenCategory: (FeatureCategory) -> Unit,
 ) {
     LaunchedEffect(Unit) {
         onEnsureLoaded(HomeSection.ACTIONS)
@@ -257,7 +261,7 @@ fun AutomationBand(
         icon = Icons.Default.Bolt,
         role = role,
         badgeShape = ScallopShape(6, 0.12f),
-        seeAllId = "rolegreets",
+        onSeeAll = { onOpenCategory(FeatureCategory.ACTIONS) },
         headline = roleStats?.roleGreets?.toLong(),
         descriptor = "role greets active",
         headlineLoading = roleStats == null,

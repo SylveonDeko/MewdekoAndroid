@@ -7,14 +7,8 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.imePadding
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
@@ -22,18 +16,13 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -47,7 +36,7 @@ import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.mewdeko.mobile.core.model.EmbedFooter
 import dev.mewdeko.mobile.core.model.EmbedMessage
@@ -61,6 +50,9 @@ import dev.mewdeko.mobile.core.ui.DiscordSelector
 import dev.mewdeko.mobile.core.ui.DiscordSelectorSingle
 import dev.mewdeko.mobile.core.ui.EmptyState
 import dev.mewdeko.mobile.core.ui.FeatureScaffold
+import dev.mewdeko.mobile.core.ui.FormSheet
+import dev.mewdeko.mobile.core.ui.FullScreenEditor
+import dev.mewdeko.mobile.core.ui.NewItemFab
 import dev.mewdeko.mobile.core.ui.MewdekoTextField
 import dev.mewdeko.mobile.core.ui.SearchField
 import dev.mewdeko.mobile.core.ui.SectionCard
@@ -96,6 +88,7 @@ fun ChatTriggersScreen(
     var pendingDelete by remember { mutableStateOf<ChatTriggerModel?>(null) }
     var editingCounter by remember { mutableStateOf<TriggerCounter?>(null) }
     var pendingCounterDelete by remember { mutableStateOf<TriggerCounter?>(null) }
+    val startNew = { editing = ChatTriggerModel.blank(guild.id) }
 
     FeatureScaffold(
         title = "Chat Triggers",
@@ -107,11 +100,7 @@ fun ChatTriggersScreen(
         onRefresh = { viewModel.load(refreshing = true) },
         onRetry = { viewModel.load() },
         floatingActionButton = {
-            ExtendedFloatingActionButton(
-                onClick = { editing = ChatTriggerModel.blank(guild.id) },
-                icon = { Icon(Icons.Default.Add, contentDescription = null) },
-                text = { Text("New trigger") },
-            )
+            NewItemFab(label = "New trigger", onClick = startNew)
         },
     ) {
         SectionCard {
@@ -231,6 +220,8 @@ fun ChatTriggersScreen(
                     message = if (state.query.isBlank()) "No chat triggers configured yet."
                     else "No triggers match \"${state.query}\".",
                     icon = Icons.Default.Bolt,
+                    actionLabel = if (state.query.isBlank()) "New trigger" else null,
+                    onAction = if (state.query.isBlank()) startNew else null,
                 )
             }
         } else {
@@ -349,7 +340,7 @@ fun ChatTriggersScreen(
 }
 
 /**
- * Dialog for creating a counter or changing an existing one's value.
+ * Sheet for creating a counter or changing an existing one's value.
  */
 @Composable
 private fun CounterEditor(
@@ -359,35 +350,29 @@ private fun CounterEditor(
 ) {
     var name by remember(initial.id) { mutableStateOf(initial.name) }
     var value by remember(initial.id) { mutableStateOf(initial.value.toString()) }
+    val isNew = initial.name.isEmpty()
 
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text(if (initial.name.isEmpty()) "New counter" else initial.name) },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                if (initial.name.isEmpty()) {
-                    MewdekoTextField(
-                        value = name,
-                        onValueChange = { name = it },
-                        label = "Name",
-                    )
-                }
-                MewdekoTextField(
-                    value = value,
-                    onValueChange = { value = it.filter { char -> char.isDigit() || char == '-' } },
-                    label = "Value",
-                    numeric = true,
-                )
-            }
-        },
-        confirmButton = {
-            Button(
-                onClick = { onSave(name.trim(), value.toLongOrNull() ?: 0L) },
-                enabled = name.isNotBlank(),
-            ) { Text("Save") }
-        },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
-    )
+    FormSheet(
+        title = if (isNew) "New counter" else initial.name,
+        confirmLabel = if (isNew) "Add counter" else "Save",
+        confirmEnabled = name.isNotBlank(),
+        onConfirm = { onSave(name.trim(), value.toLongOrNull() ?: 0L) },
+        onDismiss = onDismiss,
+    ) {
+        if (isNew) {
+            MewdekoTextField(
+                value = name,
+                onValueChange = { name = it },
+                label = "Name",
+            )
+        }
+        MewdekoTextField(
+            value = value,
+            onValueChange = { value = it.filter { char -> char.isDigit() || char == '-' } },
+            label = "Value",
+            numeric = true,
+        )
+    }
 }
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
@@ -408,538 +393,514 @@ private fun ChatTriggerEditor(
     var sample by remember(initial.id) { mutableStateOf("") }
     var regexSample by remember(initial.id) { mutableStateOf("") }
 
-    ModalBottomSheet(
-        onDismissRequest = onDismiss,
-        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+    FullScreenEditor(
+        title = if (initial.id == 0) "New trigger" else "Edit trigger",
+        onClose = onDismiss,
+        confirmLabel = if (initial.id == 0) "Create" else "Save",
+        confirmEnabled = draft.trigger.isNotBlank(),
+        onConfirm = { onSave(draft.validated()) },
+        hasUnsavedChanges = draft != initial,
     ) {
-        Column(modifier = Modifier.fillMaxSize().imePadding()) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
+        SectionCard {
+            SectionCardHeader("Trigger", Icons.Default.Bolt)
+            if (initial.id == 0) {
                 Text(
-                    text = if (initial.id == 0) "New trigger" else "Edit trigger",
-                    style = MaterialTheme.typography.titleLarge,
-                    modifier = Modifier.weight(1f),
+                    text = "Or start from a template:",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-                TextButton(onClick = onDismiss) { Text("Cancel") }
-                Button(
-                    onClick = { onSave(draft.validated()) },
-                    enabled = draft.trigger.isNotBlank(),
-                ) { Text("Save") }
-            }
-
-            Column(
-                modifier = Modifier
-                    .weight(1f)
-                    .verticalScroll(rememberScrollState())
-                    .padding(16.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
-                SectionCard {
-                    SectionCardHeader("Trigger", Icons.Default.Bolt)
-                    if (initial.id == 0) {
-                        Text(
-                            text = "Or start from a template:",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                        FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            QuickTemplate.entries.forEach { template ->
-                                TagChip(
-                                    label = template.label,
-                                    onClick = { draft = template.instantiate(initial.guildId.orEmpty()) },
-                                )
-                            }
-                        }
-                    }
-                    MewdekoTextField(
-                        value = draft.trigger,
-                        onValueChange = { draft = draft.copy(trigger = it) },
-                        label = "Trigger text",
-                    )
-                    LabelledEmbedField(
-                        label = "Response",
-                        raw = draft.response,
-                        onRawChange = { draft = draft.copy(response = it) },
-                    )
-                    DiscordSelectorSingle(
-                        kind = SelectorKind.Custom(Icons.Default.Bolt),
-                        options = ChatTriggerPrefixType.entries.map {
-                            SelectorOption(it.raw.toString(), it.label)
-                        },
-                        placeholder = "Guild prefix",
-                        label = "Prefix mode",
-                        selectedId = draft.prefixType.toString(),
-                        onSelect = { draft = draft.copy(prefixType = it?.toIntOrNull() ?: 0) },
-                    )
-                    if (draft.prefix == ChatTriggerPrefixType.CUSTOM) {
-                        MewdekoTextField(
-                            value = draft.customPrefix.orEmpty(),
-                            onValueChange = { draft = draft.copy(customPrefix = it) },
-                            label = "Custom prefix",
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    QuickTemplate.entries.forEach { template ->
+                        TagChip(
+                            label = template.label,
+                            onClick = { draft = template.instantiate(initial.guildId.orEmpty()) },
                         )
                     }
                 }
+            }
+            MewdekoTextField(
+                value = draft.trigger,
+                onValueChange = { draft = draft.copy(trigger = it) },
+                label = "Trigger text",
+            )
+            LabelledEmbedField(
+                label = "Response",
+                raw = draft.response,
+                onRawChange = { draft = draft.copy(response = it) },
+            )
+            DiscordSelectorSingle(
+                kind = SelectorKind.Custom(Icons.Default.Bolt),
+                options = ChatTriggerPrefixType.entries.map {
+                    SelectorOption(it.raw.toString(), it.label)
+                },
+                placeholder = "Guild prefix",
+                label = "Prefix mode",
+                selectedId = draft.prefixType.toString(),
+                onSelect = { draft = draft.copy(prefixType = it?.toIntOrNull() ?: 0) },
+            )
+            if (draft.prefix == ChatTriggerPrefixType.CUSTOM) {
+                MewdekoTextField(
+                    value = draft.customPrefix.orEmpty(),
+                    onValueChange = { draft = draft.copy(customPrefix = it) },
+                    label = "Custom prefix",
+                )
+            }
+        }
 
-                SectionCard {
-                    SectionCardHeader("How it fires", Icons.Default.Bolt)
+        SectionCard {
+            SectionCardHeader("How it fires", Icons.Default.Bolt)
+            Text(
+                text = "At least one must stay on.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            ChatTriggerFireType.entries.forEach { type ->
+                SwitchRow(
+                    title = type.label,
+                    checked = draft.hasFireType(type),
+                    onCheckedChange = { draft = draft.withFireType(type, it) },
+                )
+            }
+            if (draft.hasFireType(ChatTriggerFireType.INTERACTION)) {
+                DiscordSelectorSingle(
+                    kind = SelectorKind.Custom(Icons.Default.Bolt),
+                    options = ChatTriggerApplicationCommandType.entries.map {
+                        SelectorOption(it.raw.toString(), it.label)
+                    },
+                    placeholder = "Not a command",
+                    label = "Register as a command",
+                    selectedId = draft.applicationCommandType.toString(),
+                    onSelect = { draft = draft.copy(applicationCommandType = it?.toIntOrNull() ?: 0) },
+                )
+                if (draft.commandType != ChatTriggerApplicationCommandType.NONE) {
+                    MewdekoTextField(
+                        value = draft.applicationCommandName.orEmpty(),
+                        onValueChange = {
+                            draft = draft.copy(applicationCommandName = it.takeIf(String::isNotBlank))
+                        },
+                        label = "Command name",
+                    )
+                    if (draft.commandType == ChatTriggerApplicationCommandType.SLASH) {
+                        MewdekoTextField(
+                            value = draft.applicationCommandDescription.orEmpty(),
+                            onValueChange = {
+                                draft = draft.copy(
+                                    applicationCommandDescription = it.takeIf(String::isNotBlank),
+                                )
+                            },
+                            label = "Command description",
+                        )
+                    }
+                }
+            }
+        }
+
+        SectionCard {
+            SectionCardHeader("Matching", Icons.Default.Bolt)
+            SwitchRow(
+                title = "Regular expression",
+                subtitle = "Treat the trigger text as a regex pattern",
+                checked = draft.isRegex,
+                onCheckedChange = { draft = draft.copy(isRegex = it) },
+            )
+            if (draft.isRegex) {
+                RegexTester(
+                    pattern = draft.trigger,
+                    sample = regexSample,
+                    onSampleChange = { regexSample = it },
+                )
+            }
+            SwitchRow(
+                title = "Match anywhere",
+                subtitle = "Fire when the trigger appears anywhere in a message",
+                checked = draft.containsAnywhere,
+                onCheckedChange = { draft = draft.copy(containsAnywhere = it) },
+            )
+            SwitchRow(
+                title = "Owner only",
+                subtitle = "Only the bot owner can invoke this trigger",
+                checked = draft.ownerOnly,
+                onCheckedChange = { draft = draft.copy(ownerOnly = it) },
+            )
+            SwitchRow(
+                title = "Allow targeting",
+                subtitle = "Let the invoker mention someone to target them",
+                checked = draft.allowTarget,
+                onCheckedChange = { draft = draft.copy(allowTarget = it) },
+            )
+        }
+
+        SectionCard {
+            SectionCardHeader("Response behaviour", Icons.Default.Bolt)
+            SwitchRow(
+                title = "Reply in DM",
+                checked = draft.dmResponse,
+                onCheckedChange = { draft = draft.copy(dmResponse = it) },
+            )
+            SwitchRow(
+                title = "Delete the triggering message",
+                subtitle = if (draft.reactToTrigger) {
+                    "Unavailable while reacting to the message, since there would be " +
+                        "nothing left to react to."
+                } else null,
+                checked = draft.autoDeleteTrigger,
+                enabled = !draft.reactToTrigger,
+                onCheckedChange = { draft = draft.copy(autoDeleteTrigger = it) },
+            )
+            SwitchRow(
+                title = "React instead of replying",
+                subtitle = if (draft.autoDeleteTrigger) {
+                    "Unavailable while deleting the triggering message."
+                } else null,
+                checked = draft.reactToTrigger,
+                enabled = !draft.autoDeleteTrigger,
+                onCheckedChange = { draft = draft.copy(reactToTrigger = it) },
+            )
+            SwitchRow(
+                title = "Send no message",
+                subtitle = "Apply role changes without posting a response",
+                checked = draft.noRespond,
+                onCheckedChange = { draft = draft.copy(noRespond = it) },
+            )
+            SwitchRow(
+                title = "Ephemeral slash response",
+                checked = draft.ephemeralResponse,
+                onCheckedChange = { draft = draft.copy(ephemeralResponse = it) },
+            )
+            SwitchRow(
+                title = "Reply to the message",
+                subtitle = "Shows the response as a reply so it is clear what it answered",
+                checked = draft.replyToTrigger,
+                onCheckedChange = { draft = draft.copy(replyToTrigger = it) },
+            )
+            NumberField(
+                value = draft.deleteResponseAfter,
+                onValueChange = { draft = draft.copy(deleteResponseAfter = it) },
+                label = "Delete the response after (seconds)",
+                supportingText = "0 keeps the response.",
+            )
+            MewdekoTextField(
+                value = draft.additionalResponses.orEmpty().replace("@@@", "\n"),
+                onValueChange = {
+                    draft = draft.copy(
+                        additionalResponses = it.replace("\n", "@@@").takeIf(String::isNotBlank),
+                    )
+                },
+                label = "Extra responses",
+                singleLine = false,
+                minLines = 2,
+                supportingText = "One per line. Repeat one to make it more likely.",
+            )
+            if (draft.extraResponses.isNotEmpty()) {
+                DiscordSelectorSingle(
+                    kind = SelectorKind.Custom(Icons.Default.Bolt),
+                    options = ChatTriggerResponseMode.entries.map {
+                        SelectorOption(it.raw.toString(), it.label)
+                    },
+                    placeholder = "Always the first response",
+                    label = "When there are several responses",
+                    selectedId = draft.responseMode.toString(),
+                    onSelect = { draft = draft.copy(responseMode = it?.toIntOrNull() ?: 0) },
+                )
+            }
+            MewdekoTextField(
+                value = draft.reactions.orEmpty().replace("@@@", " "),
+                onValueChange = {
+                    draft = draft.copy(
+                        reactions = it.replace(Regex("\\s+"), "@@@").takeIf(String::isNotEmpty),
+                    )
+                },
+                label = "Reactions",
+                placeholder = "🎉 👍",
+                supportingText = "Space-separated emoji added to the triggering message.",
+            )
+        }
+
+        SectionCard {
+            SectionCardHeader("Roles", Icons.Default.Bolt)
+            DiscordSelector(
+                kind = SelectorKind.Role,
+                options = roleOptions,
+                placeholder = "No roles granted",
+                label = "Grant roles",
+                multiple = true,
+                selection = draft.grantedRoleIds,
+                onSelectionChange = {
+                    draft = draft.copy(grantedRoles = it.joinToString("@@@"))
+                },
+            )
+            DiscordSelector(
+                kind = SelectorKind.Role,
+                options = roleOptions,
+                placeholder = "No roles removed",
+                label = "Remove roles",
+                multiple = true,
+                selection = draft.removedRoleIds,
+                onSelectionChange = {
+                    draft = draft.copy(removedRoles = it.joinToString("@@@"))
+                },
+            )
+            DiscordSelectorSingle(
+                kind = SelectorKind.Custom(Icons.Default.Bolt),
+                options = ChatTriggerRoleGrantType.entries.map {
+                    SelectorOption(it.raw.toString(), it.label)
+                },
+                placeholder = "Sender",
+                label = "Apply roles to",
+                selectedId = draft.roleGrantType.toString(),
+                onSelect = { draft = draft.copy(roleGrantType = it?.toIntOrNull() ?: 0) },
+            )
+        }
+
+        SectionCard {
+            SectionCardHeader("Limits", Icons.Default.Bolt)
+            NumberField(
+                value = draft.cooldownSeconds,
+                onValueChange = { draft = draft.copy(cooldownSeconds = it) },
+                label = "Cooldown (seconds)",
+                supportingText = "0 means no cooldown of its own.",
+            )
+            if (draft.cooldownSeconds > 0) {
+                DiscordSelectorSingle(
+                    kind = SelectorKind.Custom(Icons.Default.Bolt),
+                    options = ChatTriggerCooldownScope.entries.map {
+                        SelectorOption(it.raw.toString(), it.label)
+                    },
+                    placeholder = "Each member separately",
+                    label = "Cooldown applies to",
+                    selectedId = draft.cooldownScope.toString(),
+                    onSelect = { draft = draft.copy(cooldownScope = it?.toIntOrNull() ?: 0) },
+                )
+            }
+            NumberField(
+                value = draft.maxUses ?: 0,
+                onValueChange = { draft = draft.copy(maxUses = it.takeIf { v -> v > 0 }) },
+                label = "Stop after this many uses",
+                supportingText = "Used ${draft.uses} times so far. 0 means no limit.",
+            )
+            ExpiryField(
+                value = draft.expiresAt,
+                onChange = { draft = draft.copy(expiresAt = it) },
+            )
+            NumberField(
+                value = draft.minAccountAgeMinutes,
+                onValueChange = { draft = draft.copy(minAccountAgeMinutes = it) },
+                label = "Minimum account age (minutes)",
+            )
+            NumberField(
+                value = draft.minServerMembershipMinutes,
+                onValueChange = { draft = draft.copy(minServerMembershipMinutes = it) },
+                label = "Minimum time in server (minutes)",
+                supportingText = "These keep brand new accounts from using the trigger.",
+            )
+            ActiveHoursSection(
+                window = draft.activeWindow,
+                onChange = { window ->
+                    draft = draft.copy(
+                        timeConditions = window?.let {
+                            MewdekoJson.encodeToString(
+                                ListSerializer(ActiveWindow.serializer()),
+                                listOf(it),
+                            )
+                        },
+                    )
+                },
+            )
+        }
+
+        SectionCard {
+            SectionCardHeader("Costs and rewards", Icons.Default.Bolt)
+            NumberField(
+                value = draft.currencyCost.toInt(),
+                onValueChange = { draft = draft.copy(currencyCost = it.toLong()) },
+                label = "Costs the user",
+            )
+            NumberField(
+                value = draft.currencyReward.toInt(),
+                onValueChange = { draft = draft.copy(currencyReward = it.toLong()) },
+                label = "Pays the user",
+            )
+            NumberField(
+                value = draft.xpReward,
+                onValueChange = { draft = draft.copy(xpReward = it) },
+                label = "Grants XP",
+            )
+            NumberField(
+                value = draft.requiredXpLevel,
+                onValueChange = { draft = draft.copy(requiredXpLevel = it) },
+                label = "Requires level",
+            )
+            MewdekoTextField(
+                value = draft.requirementFailMessage.orEmpty(),
+                onValueChange = {
+                    draft = draft.copy(requirementFailMessage = it.takeIf(String::isNotBlank))
+                },
+                label = "Message when they cannot use it",
+                supportingText = "Leave empty to say nothing.",
+            )
+        }
+
+        SectionCard {
+            SectionCardHeader("Counter requirement", Icons.Default.Bolt)
+            MewdekoTextField(
+                value = draft.counterName.orEmpty(),
+                onValueChange = { draft = draft.copy(counterName = it.takeIf(String::isNotBlank)) },
+                label = "Counter name",
+                supportingText = "Read or change one from a response with %counter:name%.",
+            )
+            if (!draft.counterName.isNullOrBlank()) {
+                NullableNumberField(
+                    value = draft.counterMin,
+                    onValueChange = { draft = draft.copy(counterMin = it) },
+                    label = "At least",
+                    supportingText = "Leave blank for no lower bound. Negative values are allowed.",
+                )
+                NullableNumberField(
+                    value = draft.counterMax,
+                    onValueChange = { draft = draft.copy(counterMax = it) },
+                    label = "At most",
+                    supportingText = "Leave blank for no upper bound. Negative values are allowed.",
+                )
+            }
+        }
+
+        SectionCard {
+            SectionCardHeader("Fire on an event", Icons.Default.Bolt)
+            DiscordSelectorSingle(
+                kind = SelectorKind.Custom(Icons.Default.Bolt),
+                options = ChatTriggerEventType.entries.map {
+                    SelectorOption(it.raw.toString(), it.label)
+                },
+                placeholder = "Not an event trigger",
+                label = "Fire when",
+                selectedId = draft.eventType.toString(),
+                onSelect = { draft = draft.copy(eventType = it?.toIntOrNull() ?: 0) },
+            )
+            if (draft.event != ChatTriggerEventType.NONE) {
+                DiscordSelectorSingle(
+                    kind = SelectorKind.Channel,
+                    options = channelOptions,
+                    placeholder = "Where the event happened",
+                    label = "Respond in",
+                    selectedId = draft.eventChannelId,
+                    onSelect = { draft = draft.copy(eventChannelId = it) },
+                )
+                Text(
+                    text = "Joins and boosts have no channel of their own, so pick one here " +
+                        "or the trigger will not respond.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+
+        SectionCard {
+            SectionCardHeader("Organisation", Icons.Default.Bolt)
+            MewdekoTextField(
+                value = draft.category.orEmpty(),
+                onValueChange = { draft = draft.copy(category = it.takeIf(String::isNotBlank)) },
+                label = "Category",
+                supportingText = "Group related triggers so you can pause them together.",
+            )
+            if (categoryOptions.isNotEmpty()) {
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    categoryOptions.forEach { category ->
+                        TagChip(
+                            label = category,
+                            icon = if (draft.category == category) Icons.Default.Check else null,
+                            onClick = { draft = draft.copy(category = category) },
+                        )
+                    }
+                }
+            }
+            NumberField(
+                value = draft.nextTriggerId ?: 0,
+                onValueChange = { draft = draft.copy(nextTriggerId = it.takeIf { v -> v > 0 }) },
+                label = "Then run trigger",
+                supportingText = "Runs a second trigger by ID afterwards. It still checks its own rules.",
+            )
+            SwitchRow(
+                title = "Respond to bots instead of people",
+                subtitle = "Only matches messages from other bots and webhooks. Never its own.",
+                checked = draft.allowBots,
+                onCheckedChange = { draft = draft.copy(allowBots = it) },
+            )
+            SwitchRow(
+                title = "Paused",
+                subtitle = "Keeps the trigger without letting it fire",
+                checked = draft.isDisabled,
+                onCheckedChange = { draft = draft.copy(isDisabled = it) },
+            )
+        }
+
+        if (draft.id != 0) {
+            SectionCard {
+                SectionCardHeader("Test this trigger", Icons.Default.Bolt)
+                Text(
+                    text = "Checks whether a message would fire this trigger, as you. " +
+                        "Nothing is sent, charged or counted.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                MewdekoTextField(
+                    value = sample,
+                    onValueChange = { sample = it },
+                    label = "Sample message",
+                )
+                TextButton(
+                    onClick = { onTest(sample) },
+                    enabled = sample.isNotBlank(),
+                ) { Text("Run test") }
+
+                testResult?.let { result ->
                     Text(
-                        text = "At least one must stay on.",
+                        text = when {
+                            result.wouldFire -> "This message would fire the trigger."
+                            !result.matched ->
+                                "The message does not match this trigger's text, prefix or pattern."
+                            else -> "Matched, but blocked: ${result.blocker.orEmpty()}"
+                        },
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = if (result.wouldFire) MaterialTheme.colorScheme.primary
+                        else MaterialTheme.colorScheme.error,
+                    )
+                }
+
+                TextButton(onClick = onLoadStats) { Text("Show recent activity") }
+
+                stats?.let { history ->
+                    Text(
+                        text = "Fired ${history.total} time(s) in total.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
-                    ChatTriggerFireType.entries.forEach { type ->
-                        SwitchRow(
-                            title = type.label,
-                            checked = draft.hasFireType(type),
-                            onCheckedChange = { draft = draft.withFireType(type, it) },
-                        )
-                    }
-                    if (draft.hasFireType(ChatTriggerFireType.INTERACTION)) {
-                        DiscordSelectorSingle(
-                            kind = SelectorKind.Custom(Icons.Default.Bolt),
-                            options = ChatTriggerApplicationCommandType.entries.map {
-                                SelectorOption(it.raw.toString(), it.label)
-                            },
-                            placeholder = "Not a command",
-                            label = "Register as a command",
-                            selectedId = draft.applicationCommandType.toString(),
-                            onSelect = { draft = draft.copy(applicationCommandType = it?.toIntOrNull() ?: 0) },
-                        )
-                        if (draft.commandType != ChatTriggerApplicationCommandType.NONE) {
-                            MewdekoTextField(
-                                value = draft.applicationCommandName.orEmpty(),
-                                onValueChange = {
-                                    draft = draft.copy(applicationCommandName = it.takeIf(String::isNotBlank))
-                                },
-                                label = "Command name",
-                            )
-                            if (draft.commandType == ChatTriggerApplicationCommandType.SLASH) {
-                                MewdekoTextField(
-                                    value = draft.applicationCommandDescription.orEmpty(),
-                                    onValueChange = {
-                                        draft = draft.copy(
-                                            applicationCommandDescription = it.takeIf(String::isNotBlank),
-                                        )
-                                    },
-                                    label = "Command description",
-                                )
-                            }
-                        }
-                    }
-                }
-
-                SectionCard {
-                    SectionCardHeader("Matching", Icons.Default.Bolt)
-                    SwitchRow(
-                        title = "Regular expression",
-                        subtitle = "Treat the trigger text as a regex pattern",
-                        checked = draft.isRegex,
-                        onCheckedChange = { draft = draft.copy(isRegex = it) },
-                    )
-                    if (draft.isRegex) {
-                        RegexTester(
-                            pattern = draft.trigger,
-                            sample = regexSample,
-                            onSampleChange = { regexSample = it },
-                        )
-                    }
-                    SwitchRow(
-                        title = "Match anywhere",
-                        subtitle = "Fire when the trigger appears anywhere in a message",
-                        checked = draft.containsAnywhere,
-                        onCheckedChange = { draft = draft.copy(containsAnywhere = it) },
-                    )
-                    SwitchRow(
-                        title = "Owner only",
-                        subtitle = "Only the bot owner can invoke this trigger",
-                        checked = draft.ownerOnly,
-                        onCheckedChange = { draft = draft.copy(ownerOnly = it) },
-                    )
-                    SwitchRow(
-                        title = "Allow targeting",
-                        subtitle = "Let the invoker mention someone to target them",
-                        checked = draft.allowTarget,
-                        onCheckedChange = { draft = draft.copy(allowTarget = it) },
-                    )
-                }
-
-                SectionCard {
-                    SectionCardHeader("Response behaviour", Icons.Default.Bolt)
-                    SwitchRow(
-                        title = "Reply in DM",
-                        checked = draft.dmResponse,
-                        onCheckedChange = { draft = draft.copy(dmResponse = it) },
-                    )
-                    SwitchRow(
-                        title = "Delete the triggering message",
-                        subtitle = if (draft.reactToTrigger) {
-                            "Unavailable while reacting to the message, since there would be " +
-                                "nothing left to react to."
-                        } else null,
-                        checked = draft.autoDeleteTrigger,
-                        enabled = !draft.reactToTrigger,
-                        onCheckedChange = { draft = draft.copy(autoDeleteTrigger = it) },
-                    )
-                    SwitchRow(
-                        title = "React instead of replying",
-                        subtitle = if (draft.autoDeleteTrigger) {
-                            "Unavailable while deleting the triggering message."
-                        } else null,
-                        checked = draft.reactToTrigger,
-                        enabled = !draft.autoDeleteTrigger,
-                        onCheckedChange = { draft = draft.copy(reactToTrigger = it) },
-                    )
-                    SwitchRow(
-                        title = "Send no message",
-                        subtitle = "Apply role changes without posting a response",
-                        checked = draft.noRespond,
-                        onCheckedChange = { draft = draft.copy(noRespond = it) },
-                    )
-                    SwitchRow(
-                        title = "Ephemeral slash response",
-                        checked = draft.ephemeralResponse,
-                        onCheckedChange = { draft = draft.copy(ephemeralResponse = it) },
-                    )
-                    SwitchRow(
-                        title = "Reply to the message",
-                        subtitle = "Shows the response as a reply so it is clear what it answered",
-                        checked = draft.replyToTrigger,
-                        onCheckedChange = { draft = draft.copy(replyToTrigger = it) },
-                    )
-                    NumberField(
-                        value = draft.deleteResponseAfter,
-                        onValueChange = { draft = draft.copy(deleteResponseAfter = it) },
-                        label = "Delete the response after (seconds)",
-                        supportingText = "0 keeps the response.",
-                    )
-                    MewdekoTextField(
-                        value = draft.additionalResponses.orEmpty().replace("@@@", "\n"),
-                        onValueChange = {
-                            draft = draft.copy(
-                                additionalResponses = it.replace("\n", "@@@").takeIf(String::isNotBlank),
-                            )
-                        },
-                        label = "Extra responses",
-                        singleLine = false,
-                        minLines = 2,
-                        supportingText = "One per line. Repeat one to make it more likely.",
-                    )
-                    if (draft.extraResponses.isNotEmpty()) {
-                        DiscordSelectorSingle(
-                            kind = SelectorKind.Custom(Icons.Default.Bolt),
-                            options = ChatTriggerResponseMode.entries.map {
-                                SelectorOption(it.raw.toString(), it.label)
-                            },
-                            placeholder = "Always the first response",
-                            label = "When there are several responses",
-                            selectedId = draft.responseMode.toString(),
-                            onSelect = { draft = draft.copy(responseMode = it?.toIntOrNull() ?: 0) },
-                        )
-                    }
-                    MewdekoTextField(
-                        value = draft.reactions.orEmpty().replace("@@@", " "),
-                        onValueChange = {
-                            draft = draft.copy(
-                                reactions = it.replace(Regex("\\s+"), "@@@").takeIf(String::isNotEmpty),
-                            )
-                        },
-                        label = "Reactions",
-                        placeholder = "🎉 👍",
-                        supportingText = "Space-separated emoji added to the triggering message.",
-                    )
-                }
-
-                SectionCard {
-                    SectionCardHeader("Roles", Icons.Default.Bolt)
-                    DiscordSelector(
-                        kind = SelectorKind.Role,
-                        options = roleOptions,
-                        placeholder = "No roles granted",
-                        label = "Grant roles",
-                        multiple = true,
-                        selection = draft.grantedRoleIds,
-                        onSelectionChange = {
-                            draft = draft.copy(grantedRoles = it.joinToString("@@@"))
-                        },
-                    )
-                    DiscordSelector(
-                        kind = SelectorKind.Role,
-                        options = roleOptions,
-                        placeholder = "No roles removed",
-                        label = "Remove roles",
-                        multiple = true,
-                        selection = draft.removedRoleIds,
-                        onSelectionChange = {
-                            draft = draft.copy(removedRoles = it.joinToString("@@@"))
-                        },
-                    )
-                    DiscordSelectorSingle(
-                        kind = SelectorKind.Custom(Icons.Default.Bolt),
-                        options = ChatTriggerRoleGrantType.entries.map {
-                            SelectorOption(it.raw.toString(), it.label)
-                        },
-                        placeholder = "Sender",
-                        label = "Apply roles to",
-                        selectedId = draft.roleGrantType.toString(),
-                        onSelect = { draft = draft.copy(roleGrantType = it?.toIntOrNull() ?: 0) },
-                    )
-                }
-
-                SectionCard {
-                    SectionCardHeader("Limits", Icons.Default.Bolt)
-                    NumberField(
-                        value = draft.cooldownSeconds,
-                        onValueChange = { draft = draft.copy(cooldownSeconds = it) },
-                        label = "Cooldown (seconds)",
-                        supportingText = "0 means no cooldown of its own.",
-                    )
-                    if (draft.cooldownSeconds > 0) {
-                        DiscordSelectorSingle(
-                            kind = SelectorKind.Custom(Icons.Default.Bolt),
-                            options = ChatTriggerCooldownScope.entries.map {
-                                SelectorOption(it.raw.toString(), it.label)
-                            },
-                            placeholder = "Each member separately",
-                            label = "Cooldown applies to",
-                            selectedId = draft.cooldownScope.toString(),
-                            onSelect = { draft = draft.copy(cooldownScope = it?.toIntOrNull() ?: 0) },
-                        )
-                    }
-                    NumberField(
-                        value = draft.maxUses ?: 0,
-                        onValueChange = { draft = draft.copy(maxUses = it.takeIf { v -> v > 0 }) },
-                        label = "Stop after this many uses",
-                        supportingText = "Used ${draft.uses} times so far. 0 means no limit.",
-                    )
-                    ExpiryField(
-                        value = draft.expiresAt,
-                        onChange = { draft = draft.copy(expiresAt = it) },
-                    )
-                    NumberField(
-                        value = draft.minAccountAgeMinutes,
-                        onValueChange = { draft = draft.copy(minAccountAgeMinutes = it) },
-                        label = "Minimum account age (minutes)",
-                    )
-                    NumberField(
-                        value = draft.minServerMembershipMinutes,
-                        onValueChange = { draft = draft.copy(minServerMembershipMinutes = it) },
-                        label = "Minimum time in server (minutes)",
-                        supportingText = "These keep brand new accounts from using the trigger.",
-                    )
-                    ActiveHoursSection(
-                        window = draft.activeWindow,
-                        onChange = { window ->
-                            draft = draft.copy(
-                                timeConditions = window?.let {
-                                    MewdekoJson.encodeToString(
-                                        ListSerializer(ActiveWindow.serializer()),
-                                        listOf(it),
-                                    )
-                                },
-                            )
-                        },
-                    )
-                }
-
-                SectionCard {
-                    SectionCardHeader("Costs and rewards", Icons.Default.Bolt)
-                    NumberField(
-                        value = draft.currencyCost.toInt(),
-                        onValueChange = { draft = draft.copy(currencyCost = it.toLong()) },
-                        label = "Costs the user",
-                    )
-                    NumberField(
-                        value = draft.currencyReward.toInt(),
-                        onValueChange = { draft = draft.copy(currencyReward = it.toLong()) },
-                        label = "Pays the user",
-                    )
-                    NumberField(
-                        value = draft.xpReward,
-                        onValueChange = { draft = draft.copy(xpReward = it) },
-                        label = "Grants XP",
-                    )
-                    NumberField(
-                        value = draft.requiredXpLevel,
-                        onValueChange = { draft = draft.copy(requiredXpLevel = it) },
-                        label = "Requires level",
-                    )
-                    MewdekoTextField(
-                        value = draft.requirementFailMessage.orEmpty(),
-                        onValueChange = {
-                            draft = draft.copy(requirementFailMessage = it.takeIf(String::isNotBlank))
-                        },
-                        label = "Message when they cannot use it",
-                        supportingText = "Leave empty to say nothing.",
-                    )
-                }
-
-                SectionCard {
-                    SectionCardHeader("Counter requirement", Icons.Default.Bolt)
-                    MewdekoTextField(
-                        value = draft.counterName.orEmpty(),
-                        onValueChange = { draft = draft.copy(counterName = it.takeIf(String::isNotBlank)) },
-                        label = "Counter name",
-                        supportingText = "Read or change one from a response with %counter:name%.",
-                    )
-                    if (!draft.counterName.isNullOrBlank()) {
-                        NullableNumberField(
-                            value = draft.counterMin,
-                            onValueChange = { draft = draft.copy(counterMin = it) },
-                            label = "At least",
-                            supportingText = "Leave blank for no lower bound. Negative values are allowed.",
-                        )
-                        NullableNumberField(
-                            value = draft.counterMax,
-                            onValueChange = { draft = draft.copy(counterMax = it) },
-                            label = "At most",
-                            supportingText = "Leave blank for no upper bound. Negative values are allowed.",
-                        )
-                    }
-                }
-
-                SectionCard {
-                    SectionCardHeader("Fire on an event", Icons.Default.Bolt)
-                    DiscordSelectorSingle(
-                        kind = SelectorKind.Custom(Icons.Default.Bolt),
-                        options = ChatTriggerEventType.entries.map {
-                            SelectorOption(it.raw.toString(), it.label)
-                        },
-                        placeholder = "Not an event trigger",
-                        label = "Fire when",
-                        selectedId = draft.eventType.toString(),
-                        onSelect = { draft = draft.copy(eventType = it?.toIntOrNull() ?: 0) },
-                    )
-                    if (draft.event != ChatTriggerEventType.NONE) {
-                        DiscordSelectorSingle(
-                            kind = SelectorKind.Channel,
-                            options = channelOptions,
-                            placeholder = "Where the event happened",
-                            label = "Respond in",
-                            selectedId = draft.eventChannelId,
-                            onSelect = { draft = draft.copy(eventChannelId = it) },
-                        )
+                    history.recent.forEach { fire ->
                         Text(
-                            text = "Joins and boosts have no channel of their own, so pick one here " +
-                                "or the trigger will not respond.",
+                            text = "<@${fire.userId.orEmpty()}> in <#${fire.channelId.orEmpty()}> " +
+                                fire.dateAdded.orEmpty(),
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
-                }
-
-                SectionCard {
-                    SectionCardHeader("Organisation", Icons.Default.Bolt)
-                    MewdekoTextField(
-                        value = draft.category.orEmpty(),
-                        onValueChange = { draft = draft.copy(category = it.takeIf(String::isNotBlank)) },
-                        label = "Category",
-                        supportingText = "Group related triggers so you can pause them together.",
-                    )
-                    if (categoryOptions.isNotEmpty()) {
-                        FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            categoryOptions.forEach { category ->
-                                TagChip(
-                                    label = category,
-                                    icon = if (draft.category == category) Icons.Default.Check else null,
-                                    onClick = { draft = draft.copy(category = category) },
-                                )
-                            }
-                        }
-                    }
-                    NumberField(
-                        value = draft.nextTriggerId ?: 0,
-                        onValueChange = { draft = draft.copy(nextTriggerId = it.takeIf { v -> v > 0 }) },
-                        label = "Then run trigger",
-                        supportingText = "Runs a second trigger by ID afterwards. It still checks its own rules.",
-                    )
-                    SwitchRow(
-                        title = "Respond to bots instead of people",
-                        subtitle = "Only matches messages from other bots and webhooks. Never its own.",
-                        checked = draft.allowBots,
-                        onCheckedChange = { draft = draft.copy(allowBots = it) },
-                    )
-                    SwitchRow(
-                        title = "Paused",
-                        subtitle = "Keeps the trigger without letting it fire",
-                        checked = draft.isDisabled,
-                        onCheckedChange = { draft = draft.copy(isDisabled = it) },
-                    )
-                }
-
-                if (draft.id != 0) {
-                    SectionCard {
-                        SectionCardHeader("Test this trigger", Icons.Default.Bolt)
-                        Text(
-                            text = "Checks whether a message would fire this trigger, as you. " +
-                                "Nothing is sent, charged or counted.",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                        MewdekoTextField(
-                            value = sample,
-                            onValueChange = { sample = it },
-                            label = "Sample message",
-                        )
-                        TextButton(
-                            onClick = { onTest(sample) },
-                            enabled = sample.isNotBlank(),
-                        ) { Text("Run test") }
-
-                        testResult?.let { result ->
-                            Text(
-                                text = when {
-                                    result.wouldFire -> "This message would fire the trigger."
-                                    !result.matched ->
-                                        "The message does not match this trigger's text, prefix or pattern."
-                                    else -> "Matched, but blocked: ${result.blocker.orEmpty()}"
-                                },
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = if (result.wouldFire) MaterialTheme.colorScheme.primary
-                                else MaterialTheme.colorScheme.error,
-                            )
-                        }
-
-                        TextButton(onClick = onLoadStats) { Text("Show recent activity") }
-
-                        stats?.let { history ->
-                            Text(
-                                text = "Fired ${history.total} time(s) in total.",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                            history.recent.forEach { fire ->
-                                Text(
-                                    text = "<@${fire.userId.orEmpty()}> in <#${fire.channelId.orEmpty()}> " +
-                                        fire.dateAdded.orEmpty(),
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                )
-                            }
-                        }
-                    }
-                }
-
-                SectionCard {
-                    SectionCardHeader("Crossposting", Icons.Default.Bolt)
-                    DiscordSelectorSingle(
-                        kind = SelectorKind.Channel,
-                        options = channelOptions,
-                        placeholder = "No crossposting",
-                        label = "Also post to",
-                        selectedId = draft.crosspostingChannelId,
-                        onSelect = { draft = draft.copy(crosspostingChannelId = it) },
-                    )
-                    MewdekoTextField(
-                        value = draft.crosspostingWebhookUrl.orEmpty(),
-                        onValueChange = { draft = draft.copy(crosspostingWebhookUrl = it) },
-                        label = "Webhook URL",
-                    )
                 }
             }
+        }
+
+        SectionCard {
+            SectionCardHeader("Crossposting", Icons.Default.Bolt)
+            DiscordSelectorSingle(
+                kind = SelectorKind.Channel,
+                options = channelOptions,
+                placeholder = "No crossposting",
+                label = "Also post to",
+                selectedId = draft.crosspostingChannelId,
+                onSelect = { draft = draft.copy(crosspostingChannelId = it) },
+            )
+            MewdekoTextField(
+                value = draft.crosspostingWebhookUrl.orEmpty(),
+                onValueChange = { draft = draft.copy(crosspostingWebhookUrl = it) },
+                label = "Webhook URL",
+            )
         }
     }
 }

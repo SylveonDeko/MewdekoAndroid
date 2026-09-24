@@ -30,6 +30,7 @@ import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonPrimitive
 import java.net.URLEncoder
 import javax.inject.Inject
+import kotlin.time.Duration.Companion.milliseconds
 
 /** Utilities screen state across all seven sections. */
 data class UtilityState(
@@ -308,7 +309,7 @@ class UtilityViewModel @Inject constructor(
         _state.update { it.copy(quoteSearch = value) }
         quoteSearchJob?.cancel()
         quoteSearchJob = viewModelScope.launch {
-            delay(350)
+            delay(350.milliseconds)
             runCatching { fetchQuotes(1) }.onFailure {
                 if (it !is CancellationException) postError("Failed to search quotes: ${it.userFacingMessage}")
             }

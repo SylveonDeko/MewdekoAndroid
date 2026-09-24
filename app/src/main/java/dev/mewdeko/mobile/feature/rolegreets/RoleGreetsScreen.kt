@@ -1,17 +1,12 @@
 package dev.mewdeko.mobile.feature.rolegreets
 
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.PersonAddAlt
 import androidx.compose.material.icons.filled.Tag
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
-import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -26,13 +21,15 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
-import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.mewdeko.mobile.core.model.EmbedMessage
 import dev.mewdeko.mobile.core.ui.ConfirmDialog
 import dev.mewdeko.mobile.core.ui.DiscordSelectorSingle
 import dev.mewdeko.mobile.core.ui.EmptyState
 import dev.mewdeko.mobile.core.ui.FeatureScaffold
+import dev.mewdeko.mobile.core.ui.FormSheet
+import dev.mewdeko.mobile.core.ui.NewItemFab
 import dev.mewdeko.mobile.core.ui.MewdekoTextField
 import dev.mewdeko.mobile.core.ui.SectionCard
 import dev.mewdeko.mobile.core.ui.SectionCardHeader
@@ -80,11 +77,7 @@ fun RoleGreetsScreen(
         onRefresh = { viewModel.load(refreshing = true) },
         onRetry = { viewModel.load() },
         floatingActionButton = {
-            ExtendedFloatingActionButton(
-                onClick = { showAdd = true },
-                icon = { Icon(Icons.Default.Add, contentDescription = null) },
-                text = { Text("Add greet") },
-            )
+            NewItemFab(label = "Add greet", onClick = { showAdd = true })
         },
     ) {
         SectionCard {
@@ -100,6 +93,8 @@ fun RoleGreetsScreen(
                 EmptyState(
                     message = "No role greets configured yet.",
                     icon = Icons.Default.PersonAddAlt,
+                    actionLabel = "Add greet",
+                    onAction = { showAdd = true },
                 )
             }
         } else {
@@ -202,42 +197,35 @@ fun RoleGreetsScreen(
     if (showAdd) {
         var roleId by remember { mutableStateOf<String?>(null) }
         var channelId by remember { mutableStateOf<String?>(null) }
-        AlertDialog(
-            onDismissRequest = { showAdd = false },
-            title = { Text("Add role greet") },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    DiscordSelectorSingle(
-                        kind = SelectorKind.Role,
-                        options = state.availableRoles.map { SelectorOption(it.id, it.name) },
-                        placeholder = "Pick a role",
-                        label = "Trigger role",
-                        selectedId = roleId,
-                        onSelect = { roleId = it },
-                    )
-                    DiscordSelectorSingle(
-                        kind = SelectorKind.Channel,
-                        options = state.availableChannels.map { SelectorOption(it.id, it.name) },
-                        placeholder = "Pick a channel",
-                        label = "Post to",
-                        selectedId = channelId,
-                        onSelect = { channelId = it },
-                    )
-                }
+        FormSheet(
+            title = "Add role greet",
+            confirmLabel = "Add",
+            confirmEnabled = roleId != null && channelId != null,
+            onConfirm = {
+                val role = roleId
+                val channel = channelId
+                if (role != null && channel != null) viewModel.add(role, channel)
+                showAdd = false
             },
-            confirmButton = {
-                Button(
-                    onClick = {
-                        val role = roleId
-                        val channel = channelId
-                        if (role != null && channel != null) viewModel.add(role, channel)
-                        showAdd = false
-                    },
-                    enabled = roleId != null && channelId != null,
-                ) { Text("Add") }
-            },
-            dismissButton = { TextButton(onClick = { showAdd = false }) { Text("Cancel") } },
-        )
+            onDismiss = { showAdd = false },
+        ) {
+            DiscordSelectorSingle(
+                kind = SelectorKind.Role,
+                options = state.availableRoles.map { SelectorOption(it.id, it.name) },
+                placeholder = "Pick a role",
+                label = "Trigger role",
+                selectedId = roleId,
+                onSelect = { roleId = it },
+            )
+            DiscordSelectorSingle(
+                kind = SelectorKind.Channel,
+                options = state.availableChannels.map { SelectorOption(it.id, it.name) },
+                placeholder = "Pick a channel",
+                label = "Post to",
+                selectedId = channelId,
+                onSelect = { channelId = it },
+            )
+        }
     }
 
     pendingDelete?.let { greet ->

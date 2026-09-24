@@ -1,75 +1,122 @@
 package dev.mewdeko.mobile.feature.account
 
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.gestures.animateScrollBy
+import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.automirrored.filled.Logout
-import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.AlternateEmail
-import androidx.compose.material.icons.filled.Cake
-import androidx.compose.material.icons.filled.CardGiftcard
-import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.DarkMode
+import androidx.compose.material.icons.filled.DeleteForever
 import androidx.compose.material.icons.filled.Dns
-import androidx.compose.material.icons.filled.EmojiEvents
-import androidx.compose.material.icons.filled.Groups
-import androidx.compose.material.icons.filled.MarkEmailUnread
-import androidx.compose.material.icons.filled.NotificationsActive
-import androidx.compose.material.icons.filled.Paid
-import androidx.compose.material.icons.filled.Person
-import androidx.compose.material.icons.filled.Notifications
+import androidx.compose.material.icons.filled.ErrorOutline
+import androidx.compose.material.icons.filled.Gavel
+import androidx.compose.material.icons.filled.MoreHoriz
+import androidx.compose.material.icons.filled.Policy
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material.icons.filled.SmartToy
-import androidx.compose.material.icons.filled.Star
-import androidx.compose.material.icons.filled.TipsAndUpdates
+import androidx.compose.material.icons.filled.SwapHoriz
+import androidx.compose.material.icons.filled.WorkspacePremium
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.ListItem
-import androidx.compose.material3.ListItemDefaults
-import androidx.compose.material.icons.filled.DeleteForever
-import androidx.compose.material.icons.filled.Shield
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
-import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.layout.LayoutCoordinates
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInRoot
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.platform.LocalUriHandler
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import dev.mewdeko.mobile.core.auth.OwnerAccess
+import dev.mewdeko.mobile.core.model.Guild
 import dev.mewdeko.mobile.core.model.MobileInstance
 import dev.mewdeko.mobile.core.model.MobileUser
+import dev.mewdeko.mobile.core.model.Snowflake
+import dev.mewdeko.mobile.core.theme.DashAlpha
+import dev.mewdeko.mobile.core.theme.LocalGuildPalette
 import dev.mewdeko.mobile.core.ui.Avatar
 import dev.mewdeko.mobile.core.ui.ConfirmDialog
-import dev.mewdeko.mobile.core.ui.DiscordSelectorSingle
-import dev.mewdeko.mobile.core.ui.EmptyState
+import dev.mewdeko.mobile.core.ui.DiscordSelectorSheet
+import dev.mewdeko.mobile.core.ui.FeatureContentPadding
 import dev.mewdeko.mobile.core.ui.FeatureScaffold
-import dev.mewdeko.mobile.core.ui.MewdekoTextField
-import dev.mewdeko.mobile.core.ui.SectionCard
-import dev.mewdeko.mobile.core.ui.SectionCardHeader
+import dev.mewdeko.mobile.core.ui.GlyphOrb
+import dev.mewdeko.mobile.core.ui.LoadState
 import dev.mewdeko.mobile.core.ui.SelectorKind
 import dev.mewdeko.mobile.core.ui.SelectorOption
-import dev.mewdeko.mobile.core.ui.StatTile
-import dev.mewdeko.mobile.core.ui.SwitchRow
-import dev.mewdeko.mobile.core.ui.TagChip
-import dev.mewdeko.mobile.util.compact
-import dev.mewdeko.mobile.util.relativeToNow
-import dev.mewdeko.mobile.util.shortDate
-import dev.mewdeko.mobile.util.withSeparators
+import dev.mewdeko.mobile.core.ui.guildBorder
+import dev.mewdeko.mobile.core.ui.readableInk
+import dev.mewdeko.mobile.feature.guilddetail.home.EnteredKeys
+import dev.mewdeko.mobile.feature.guilddetail.home.rememberReducedMotion
+import dev.mewdeko.mobile.feature.guilddetail.home.riseOnce
+import dev.mewdeko.mobile.feature.owner.OwnerAccessViewModel
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
 
-/** The signed-in user's cross-guild profile, stats, and preferences. */
+/**
+ * The Me tab: the profile hero, a carousel of server orbs that picks the
+ * server context, the per-server sections, then session and privacy.
+ *
+ * While on screen the app is themed from the user's avatar, as on iOS, so the
+ * tab carries the user's own identity colors rather than the house default.
+ */
 @Composable
 fun AccountScreen(
     user: MobileUser,
@@ -78,173 +125,142 @@ fun AccountScreen(
     onSwitchServer: () -> Unit,
     onSignOut: () -> Unit,
     onDeleteData: () -> Unit,
+    onOpenOwnerPanel: () -> Unit,
     viewModel: MeViewModel = hiltViewModel(),
+    ownerAccess: OwnerAccessViewModel = hiltViewModel(),
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val status by viewModel.status.collectAsStateWithLifecycle()
+    val access by ownerAccess.access.collectAsStateWithLifecycle()
 
     var pendingSignOut by remember { mutableStateOf(false) }
     var pendingDelete by remember { mutableStateOf(false) }
+    var editingAfk by remember { mutableStateOf(false) }
     val uriHandler = LocalUriHandler.current
-    var newHighlight by remember { mutableStateOf("") }
-    var afkDraft by remember { mutableStateOf("") }
+    val scroll = rememberScrollState()
+    val scope = rememberCoroutineScope()
+    val density = LocalDensity.current
+    val reduced = rememberReducedMotion()
+    val anchors = remember { ScrollAnchors() }
+    val entered = remember { EnteredKeys() }
+
+    DisposableEffect(user.avatarUrl) {
+        viewModel.applyUserPalette(user.avatarUrl)
+        onDispose { viewModel.releaseUserPalette(user.avatarUrl) }
+    }
+
+    LifecycleEventEffect(Lifecycle.Event.ON_START) {
+        viewModel.onAppear()
+    }
+
+    val scrollToSession: () -> Unit = {
+        val viewport = anchors.viewport?.takeIf { it.isAttached }
+        val session = anchors.session?.takeIf { it.isAttached }
+        if (viewport != null && session != null) {
+            val margin = with(density) { 12.dp.toPx() }
+            val delta = session.positionInRoot().y - viewport.positionInRoot().y - margin
+            scope.launch { if (reduced) scroll.scrollBy(delta) else scroll.animateScrollBy(delta) }
+        }
+    }
 
     FeatureScaffold(
-        title = user.displayName,
-        subtitle = "@${user.username}",
+        title = "Me",
         onBack = null,
-        loadState = state.load,
+        loadState = LoadState(hasLoaded = true, isRefreshing = state.isRefreshing),
         status = status,
         onStatusShown = viewModel::clearStatus,
-        onRefresh = { viewModel.load(refreshing = true) },
-        onRetry = { viewModel.loadGuilds() },
+        onRefresh = {
+            viewModel.refresh()
+            ownerAccess.refresh()
+        },
+        scrollable = false,
+        actions = {
+            IconButton(onClick = scrollToSession) {
+                Icon(Icons.Default.Settings, contentDescription = "Session settings")
+            }
+        },
     ) {
-        SectionCard {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
-                Avatar(url = user.avatarUrl, contentDescription = user.displayName, size = 64)
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(user.displayName, style = MaterialTheme.typography.titleLarge)
-                    Text(
-                        text = "@${user.username}",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    if (instance != null) {
-                        Text(
-                            text = "Connected to ${instance.botName}",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                }
-            }
-            state.profile?.let { profile ->
-                if (profile.bio.isNotBlank()) {
-                    Text(profile.bio, style = MaterialTheme.typography.bodyMedium)
-                }
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    profile.pronouns.takeIf { it.isNotBlank() }?.let {
-                        TagChip(it, icon = Icons.Default.AlternateEmail)
-                    }
-                    profile.zodiacSign.takeIf { it.isNotBlank() }?.let {
-                        TagChip(it, icon = Icons.Default.Star)
-                    }
-                    profile.birthday?.let {
-                        TagChip(it.shortDate(), icon = Icons.Default.Cake)
-                    }
-                }
-            }
-        }
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .onGloballyPositioned { anchors.viewport = it }
+                .verticalScroll(scroll)
+                .padding(FeatureContentPadding)
+                .padding(bottom = 24.dp),
+            verticalArrangement = Arrangement.spacedBy(28.dp),
+        ) {
+            MeHero(user = user, instance = instance, reduced = reduced)
 
-        SectionCard {
-            SectionCardHeader("Server context", Icons.Default.Groups)
-            DiscordSelectorSingle(
-                kind = SelectorKind.Custom(Icons.Default.Groups),
-                options = state.guilds.map { SelectorOption(it.id, it.name) },
-                placeholder = "Pick a server",
-                selectedId = state.selectedGuild?.id,
-                onSelect = { id ->
-                    state.guilds.firstOrNull { it.id == id }?.let(viewModel::selectGuild)
-                },
-            )
-            Text(
-                text = "Stats and preferences below are scoped to the selected server.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
-
-        if (state.selectedGuild == null) {
-            SectionCard {
-                EmptyState(
-                    message = "Choose a server above to view your stats and preferences.",
-                    icon = Icons.Default.Groups,
-                )
-            }
-        } else {
-            AccountStats(state)
-            AccountAfk(
+            MeGuildPicker(
                 state = state,
-                draft = afkDraft,
-                onDraftChange = { afkDraft = it },
-                onSet = { viewModel.setAfk(afkDraft); afkDraft = "" },
-                onClear = viewModel::clearAfk,
+                reduced = reduced,
+                onSelect = viewModel::selectGuild,
+                onRetry = viewModel::retryGuilds,
             )
-            AccountHighlights(
-                state = state,
-                draft = newHighlight,
-                onDraftChange = { newHighlight = it },
-                onAdd = { viewModel.addHighlight(newHighlight); newHighlight = "" },
-                onRemove = viewModel::removeHighlight,
-                onToggleEnabled = viewModel::setHighlightsEnabled,
-            )
-            AccountPreferences(state = state, viewModel = viewModel)
-            AccountActivity(state)
-        }
 
-        SectionCard {
-            SectionCardHeader("Session", Icons.Default.SmartToy)
-            OutlinedButton(onClick = onSwitchInstance, modifier = Modifier.fillMaxWidth()) {
-                Icon(Icons.Default.SmartToy, contentDescription = null, modifier = Modifier.size(18.dp))
-                Text("Switch bot instance", modifier = Modifier.padding(start = 8.dp))
-            }
-            OutlinedButton(onClick = onSwitchServer, modifier = Modifier.fillMaxWidth()) {
-                Icon(Icons.Default.Dns, contentDescription = null, modifier = Modifier.size(18.dp))
-                Text("Switch dashboard", modifier = Modifier.padding(start = 8.dp))
-            }
-            OutlinedButton(
-                onClick = { pendingSignOut = true },
-                modifier = Modifier.fillMaxWidth(),
-            ) {
-                Icon(
-                    Icons.AutoMirrored.Filled.Logout,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.error,
-                    modifier = Modifier.size(18.dp),
+            if (state.selectedGuild != null) {
+                MeNumbersSection(state, Modifier.riseOnce("numbers", entered))
+                MeChannelsSection(state, Modifier.riseOnce("channels", entered))
+                MeAfkSection(
+                    state = state,
+                    onEdit = { editingAfk = true },
+                    onClear = viewModel::clearAfk,
+                    modifier = Modifier.riseOnce("afk", entered),
                 )
-                Text(
-                    text = "Sign out",
-                    color = MaterialTheme.colorScheme.error,
-                    modifier = Modifier.padding(start = 8.dp),
+                MeWatchingSection(
+                    state = state,
+                    onToggleHighlights = viewModel::setHighlightsEnabled,
+                    onAddHighlight = viewModel::addHighlight,
+                    onRemoveHighlight = viewModel::removeHighlight,
+                    modifier = Modifier.riseOnce("watching", entered),
+                )
+                MeActivitySection(state, Modifier.riseOnce("activity", entered))
+                MeProfileSection(state, Modifier.riseOnce("profile", entered))
+                MePreferencesSection(
+                    state = state,
+                    actions = PreferenceActions(
+                        levelUpPings = viewModel::toggleLevelUpPings,
+                        pronouns = viewModel::togglePronouns,
+                        guidedSetup = viewModel::toggleGuidedSetup,
+                        greetDms = viewModel::toggleGreetDms,
+                        stats = viewModel::toggleStats,
+                        birthdayAnnouncements = viewModel::toggleBirthdayAnnouncements,
+                    ),
+                    modifier = Modifier.riseOnce("preferences", entered),
                 )
             }
-        }
 
-        SectionCard {
-            SectionCardHeader("Privacy", Icons.Default.Shield)
-            Text(
-                text = "Mewdeko stores your Discord id, username, and avatar so the dashboard " +
-                    "can identify you, and keeps your sign-in tokens encrypted on this device.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            OutlinedButton(
-                onClick = { uriHandler.openUri(PrivacyPolicyUrl) },
-                modifier = Modifier.fillMaxWidth(),
-            ) { Text("Privacy policy") }
-            OutlinedButton(
-                onClick = { uriHandler.openUri(TermsUrl) },
-                modifier = Modifier.fillMaxWidth(),
-            ) { Text("Terms of service") }
-            Button(
-                onClick = { pendingDelete = true },
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = MaterialTheme.colorScheme.errorContainer,
-                    contentColor = MaterialTheme.colorScheme.onErrorContainer,
-                ),
-                modifier = Modifier.fillMaxWidth(),
-            ) {
-                Icon(
-                    Icons.Default.DeleteForever,
-                    contentDescription = null,
-                    modifier = Modifier.size(18.dp),
+            if (access == OwnerAccess.Owner) {
+                MeOwnerSection(
+                    instance = instance,
+                    onOpen = onOpenOwnerPanel,
+                    modifier = Modifier.riseOnce("owner", entered),
                 )
-                Text("Delete my data", modifier = Modifier.padding(start = 8.dp))
             }
+
+            MeSessionSection(
+                instance = instance,
+                dashboardHost = state.dashboardHost,
+                onSwitchInstance = onSwitchInstance,
+                onSwitchServer = onSwitchServer,
+                onSignOut = { pendingSignOut = true },
+                modifier = Modifier.onGloballyPositioned { anchors.session = it },
+            )
+
+            MePrivacySection(
+                onOpenPolicy = { uriHandler.openUri(PrivacyPolicyUrl) },
+                onOpenTerms = { uriHandler.openUri(TermsUrl) },
+                onDeleteData = { pendingDelete = true },
+            )
         }
+    }
+
+    if (editingAfk) {
+        AfkEditorSheet(
+            initial = state.afk?.message.orEmpty(),
+            onSave = viewModel::setAfk,
+            onDismiss = { editingAfk = false },
+        )
     }
 
     if (pendingDelete) {
@@ -269,294 +285,467 @@ fun AccountScreen(
     }
 }
 
+/**
+ * Layout handles for the settings action: the scroll viewport and the
+ * session section. Plain fields, not state, so layout never recomposes.
+ */
+private class ScrollAnchors {
+    /** The scrolling column's viewport. */
+    var viewport: LayoutCoordinates? = null
+
+    /** The session section. */
+    var session: LayoutCoordinates? = null
+}
+
+/**
+ * The profile hero: the avatar in a sweep ring of the palette gradient, the
+ * display name, the username, and a chip naming the connected bot.
+ */
 @Composable
-private fun AccountStats(state: MeState) {
-    SectionCard {
-        SectionCardHeader("Your stats", Icons.Default.EmojiEvents)
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            StatTile(
-                label = "Reputation",
-                value = state.reputation?.totalRep?.withSeparators() ?: "-",
-                modifier = Modifier.weight(1f),
-            )
-            StatTile(
-                label = "Rank",
-                value = state.reputation?.rank?.let { "#$it" } ?: "-",
-                modifier = Modifier.weight(1f),
-            )
-            StatTile(
-                label = "Streak",
-                value = state.reputation?.currentStreak?.toString() ?: "-",
-                modifier = Modifier.weight(1f),
-            )
+private fun MeHero(user: MobileUser, instance: MobileInstance?, reduced: Boolean) {
+    val palette = LocalGuildPalette.current
+    val ring = remember(palette) { Brush.sweepGradient(palette.gradient + palette.gradientStart.color) }
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = 4.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Avatar(
+            url = user.avatarUrl,
+            contentDescription = user.displayName,
+            size = 96,
+            ring = BorderStroke(3.dp, ring),
+            fallbackText = user.displayName,
+            modifier = Modifier.padding(bottom = 6.dp),
+        )
+        Text(
+            text = user.displayName,
+            style = MaterialTheme.typography.headlineMedium,
+            color = MaterialTheme.colorScheme.onSurface,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.semantics { heading() },
+        )
+        Text(
+            text = "@${user.username}",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        if (instance != null) {
+            BotChip(instance, reduced, Modifier.padding(top = 4.dp))
         }
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            StatTile(
-                label = "Balance",
-                value = state.currency?.balance?.compact() ?: "-",
-                icon = Icons.Default.Paid,
-                modifier = Modifier.weight(1f),
+    }
+}
+
+/** A capsule with the bot's avatar, a breathing status dot, and its name. */
+@Composable
+private fun BotChip(instance: MobileInstance, reduced: Boolean, modifier: Modifier = Modifier) {
+    val primary = MaterialTheme.colorScheme.primary
+    val breath = if (reduced) {
+        remember { mutableStateOf(1f) }
+    } else {
+        rememberInfiniteTransition(label = "botDot").animateFloat(
+            initialValue = 1f,
+            targetValue = 0.35f,
+            animationSpec = infiniteRepeatable(tween(1100), RepeatMode.Reverse),
+            label = "botDotAlpha",
+        )
+    }
+    Surface(
+        shape = CircleShape,
+        color = primary.copy(alpha = DashAlpha.Hex20),
+        contentColor = MaterialTheme.colorScheme.onSurface,
+        border = guildBorder(),
+        modifier = modifier.semantics(mergeDescendants = true) {
+            contentDescription = "Connected to ${instance.botName}"
+        },
+    ) {
+        Row(
+            modifier = Modifier.padding(start = 5.dp, end = 12.dp, top = 5.dp, bottom = 5.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            Avatar(
+                url = instance.avatarUrl,
+                contentDescription = null,
+                size = 18,
+                fallbackIcon = Icons.Default.SmartToy,
+                fallbackText = instance.botName,
             )
-            StatTile(
-                label = "Messages",
-                value = state.messages?.totalMessages?.compact() ?: "-",
-                icon = Icons.Default.MarkEmailUnread,
-                modifier = Modifier.weight(1f),
-            )
-            StatTile(
-                label = "Invites",
-                value = state.invites?.inviteCount?.toString() ?: "-",
-                icon = Icons.Default.Groups,
-                modifier = Modifier.weight(1f),
-            )
-        }
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            StatTile(
-                label = "Stars given",
-                value = state.starboard?.starsGiven?.toString() ?: "-",
-                icon = Icons.Default.Star,
-                modifier = Modifier.weight(1f),
-            )
-            StatTile(
-                label = "Stars received",
-                value = state.starboard?.starsReceived?.toString() ?: "-",
-                modifier = Modifier.weight(1f),
-            )
-            StatTile(
-                label = "Servers",
-                value = state.analytics?.totalServers?.toString() ?: "-",
-                modifier = Modifier.weight(1f),
+            Canvas(modifier = Modifier.size(8.dp)) {
+                drawCircle(color = primary, alpha = breath.value)
+            }
+            Text(
+                text = "Connected to ${instance.botName}",
+                style = MaterialTheme.typography.labelMedium,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
             )
         }
     }
 }
 
+/**
+ * The server picker: an overline, a carousel of guild icon orbs where the
+ * selected one grows and wears a primary ring, a trailing orb that opens a
+ * searchable sheet of every guild, and the selected server's name.
+ */
 @Composable
-private fun AccountAfk(
+private fun MeGuildPicker(
     state: MeState,
-    draft: String,
-    onDraftChange: (String) -> Unit,
-    onSet: () -> Unit,
-    onClear: () -> Unit,
+    reduced: Boolean,
+    onSelect: (Snowflake) -> Unit,
+    onRetry: () -> Unit,
 ) {
-    SectionCard {
-        SectionCardHeader("AFK", Icons.Default.DarkMode)
-        val afk = state.afk
-        if (afk?.isAfk == true) {
-            Text(afk.message.ifBlank { "You are marked AFK." })
-            afk.`when`?.let {
+    val guilds = state.guilds
+    var showingAll by remember { mutableStateOf(false) }
+
+    Column(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        MeOverline("Server", modifier = Modifier.padding(horizontal = 2.dp))
+        when {
+            guilds.isNullOrEmpty() && state.guildsError != null -> GuildsError(state.guildsError, onRetry)
+            guilds == null -> Row(
+                modifier = Modifier.padding(vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                CircularProgressIndicator(
+                    modifier = Modifier.size(16.dp),
+                    strokeWidth = 2.dp,
+                    color = MaterialTheme.colorScheme.primary,
+                )
                 Text(
-                    text = "Since ${it.relativeToNow()}",
+                    text = "Loading servers",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
-            OutlinedButton(onClick = onClear, modifier = Modifier.fillMaxWidth()) {
-                Text("Clear AFK")
+
+            guilds.isEmpty() -> MeEmptyLine("No servers shared with this bot.")
+            else -> {
+                GuildOrbRow(
+                    guilds = guilds,
+                    selectedId = state.selectedGuildId,
+                    reduced = reduced,
+                    onSelect = onSelect,
+                    onShowAll = { showingAll = true },
+                )
+                state.selectedGuild?.let { SelectedGuildLine(it, Modifier.padding(horizontal = 2.dp)) }
             }
-        } else {
-            MewdekoTextField(
-                value = draft,
-                onValueChange = onDraftChange,
-                label = "AFK message",
-                placeholder = "Back in a bit",
+        }
+    }
+
+    if (showingAll && !guilds.isNullOrEmpty()) {
+        DiscordSelectorSheet(
+            kind = SelectorKind.Custom(Icons.Default.Dns),
+            options = guilds.map { guild ->
+                SelectorOption(
+                    id = guild.id,
+                    name = guild.name,
+                    subtitle = if (guild.owner) "Owner" else null,
+                    imageUrl = guild.iconUrl,
+                )
+            },
+            selection = listOfNotNull(state.selectedGuildId),
+            onSelectionChange = { ids -> ids.firstOrNull()?.let(onSelect) },
+            onDismiss = { showingAll = false },
+        )
+    }
+}
+
+/** The horizontal orb carousel, keeping the selected orb near the center. */
+@Composable
+private fun GuildOrbRow(
+    guilds: List<Guild>,
+    selectedId: Snowflake?,
+    reduced: Boolean,
+    onSelect: (Snowflake) -> Unit,
+    onShowAll: () -> Unit,
+) {
+    val listState = rememberLazyListState()
+    val haptics = LocalHapticFeedback.current
+    val selectedIndex = guilds.indexOfFirst { it.id == selectedId }
+
+    LaunchedEffect(selectedIndex) {
+        if (selectedIndex < 0) return@LaunchedEffect
+        val visible = snapshotFlow { listState.layoutInfo.visibleItemsInfo.size }.first { it > 0 }
+        val target = (selectedIndex - visible / 2).coerceAtLeast(0)
+        if (reduced) listState.scrollToItem(target) else listState.animateScrollToItem(target)
+    }
+
+    LazyRow(
+        state = listState,
+        contentPadding = PaddingValues(vertical = 4.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        items(guilds, key = { it.id }) { guild ->
+            GuildOrb(
+                guild = guild,
+                selected = guild.id == selectedId,
+                reduced = reduced,
+                onClick = {
+                    if (guild.id != selectedId) {
+                        haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                        onSelect(guild.id)
+                    }
+                },
             )
-            OutlinedButton(
-                onClick = onSet,
-                enabled = draft.isNotBlank(),
-                modifier = Modifier.fillMaxWidth(),
-            ) { Text("Set AFK") }
+        }
+        item(key = "all") {
+            val primary = MaterialTheme.colorScheme.primary
+            Box(
+                modifier = Modifier
+                    .size(OrbSlot)
+                    .padding(OrbInset)
+                    .clip(CircleShape)
+                    .background(primary.copy(alpha = DashAlpha.Hex20))
+                    .border(guildBorder(), CircleShape)
+                    .clickable(onClickLabel = "All servers", role = Role.Button, onClick = onShowAll)
+                    .semantics { contentDescription = "All servers" },
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(Icons.Default.MoreHoriz, contentDescription = null, tint = primary)
+            }
         }
     }
 }
 
+/** One guild icon orb: grows and wears a primary ring while selected. */
 @Composable
-private fun AccountHighlights(
-    state: MeState,
-    draft: String,
-    onDraftChange: (String) -> Unit,
-    onAdd: () -> Unit,
-    onRemove: (Int) -> Unit,
-    onToggleEnabled: (Boolean) -> Unit,
-) {
-    SectionCard {
-        SectionCardHeader("Highlights", Icons.Default.NotificationsActive)
-        SwitchRow(
-            title = "Notify me",
-            subtitle = "Ping me when one of my words is used",
-            checked = state.highlightSettings?.highlightsEnabled == true,
-            onCheckedChange = onToggleEnabled,
+private fun GuildOrb(guild: Guild, selected: Boolean, reduced: Boolean, onClick: () -> Unit) {
+    val primary = MaterialTheme.colorScheme.primary
+    val scale by animateFloatAsState(
+        targetValue = if (selected && !reduced) 1.12f else 1f,
+        animationSpec = spring(dampingRatio = 0.7f, stiffness = 500f),
+        label = "orbScale",
+    )
+    Box(
+        modifier = Modifier
+            .size(OrbSlot)
+            .graphicsLayer {
+                scaleX = scale
+                scaleY = scale
+            }
+            .border(2.dp, if (selected) primary else Color.Transparent, CircleShape)
+            .clip(CircleShape)
+            .clickable(onClickLabel = "Show stats for ${guild.name}", role = Role.Tab, onClick = onClick)
+            .semantics {
+                this.selected = selected
+                contentDescription = guild.name
+            },
+        contentAlignment = Alignment.Center,
+    ) {
+        Avatar(
+            url = guild.iconUrl,
+            contentDescription = null,
+            size = 44,
+            fallbackText = guild.name,
         )
+    }
+}
+
+/** The outer slot of a guild orb: the 44dp icon plus room for its ring. */
+private val OrbSlot = 52.dp
+
+/** The gap between a guild orb's icon and its ring. */
+private val OrbInset = 4.dp
+
+/** A failed guild list, inline, with a retry action. */
+@Composable
+private fun GuildsError(message: String, onRetry: () -> Unit) {
+    val error = MaterialTheme.colorScheme.error
+    Surface(
+        shape = MaterialTheme.shapes.medium,
+        color = error.copy(alpha = DashAlpha.Hex10),
+        border = guildBorder(error),
+        modifier = Modifier.fillMaxWidth(),
+    ) {
         Row(
+            modifier = Modifier.padding(start = 12.dp, end = 4.dp, top = 4.dp, bottom = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            MewdekoTextField(
-                value = draft,
-                onValueChange = onDraftChange,
-                label = "New word",
+            Icon(Icons.Default.ErrorOutline, contentDescription = null, tint = error, modifier = Modifier.size(18.dp))
+            Text(
+                text = message,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurface,
                 modifier = Modifier.weight(1f),
             )
-            IconButton(onClick = onAdd, enabled = draft.isNotBlank()) {
-                Icon(Icons.Default.Add, contentDescription = "Add highlight")
-            }
-        }
-        if (state.highlights.isEmpty()) {
-            EmptyState("No highlight words yet.", icon = Icons.Default.NotificationsActive)
-        } else {
-            state.highlights.forEach { highlight ->
-                ListItem(
-                    headlineContent = { Text(highlight.word) },
-                    supportingContent = highlight.dateAdded?.let {
-                        { Text("Added ${it.relativeToNow()}") }
-                    },
-                    trailingContent = {
-                        IconButton(onClick = { onRemove(highlight.id) }) {
-                            Icon(
-                                Icons.Default.Close,
-                                contentDescription = "Remove ${highlight.word}",
-                                tint = MaterialTheme.colorScheme.error,
-                            )
-                        }
-                    },
-                    colors = ListItemDefaults.colors(containerColor = Color.Transparent),
-                )
-            }
+            TextButton(onClick = onRetry) { Text("Retry") }
         }
     }
 }
 
+/**
+ * "Owner": the way into the owner panel. Only composed once the selected bot
+ * has confirmed the user owns it, so non-owners never see it.
+ */
 @Composable
-private fun AccountPreferences(state: MeState, viewModel: MeViewModel) {
-    SectionCard {
-        SectionCardHeader("Preferences", Icons.Default.Notifications)
-        SwitchRow(
-            title = "Level-up pings",
-            subtitle = "Get pinged when you level up",
-            checked = state.preferences?.levelUpPingsDisabled == false,
-            onCheckedChange = { viewModel.toggleLevelUpPings() },
-        )
-        SwitchRow(
-            title = "Show pronouns",
-            subtitle = "Display your pronouns on your profile",
-            checked = state.preferences?.pronounsDisabled == false,
-            onCheckedChange = { viewModel.togglePronouns() },
-        )
-        SwitchRow(
-            title = "Guided setup",
-            subtitle = "Prefer step-by-step configuration flows",
-            checked = state.preferences?.prefersGuidedSetup == true,
-            onCheckedChange = { viewModel.toggleGuidedSetup() },
-        )
-        SwitchRow(
-            title = "Greet DMs",
-            subtitle = "Receive welcome messages by direct message",
-            checked = state.profile?.greetDmsOptOut == false,
-            onCheckedChange = { viewModel.toggleGreetDms() },
-        )
-        SwitchRow(
-            title = "Stats collection",
-            subtitle = "Include my activity in server statistics",
-            checked = state.profile?.statsOptOut == false,
-            onCheckedChange = { viewModel.toggleStats() },
-        )
-        SwitchRow(
-            title = "Birthday announcements",
-            subtitle = "Let the bot announce my birthday",
-            checked = state.profile?.birthdayAnnouncementsEnabled == true,
-            onCheckedChange = { viewModel.toggleBirthdayAnnouncements() },
-        )
+private fun MeOwnerSection(
+    instance: MobileInstance?,
+    onOpen: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val primary = MaterialTheme.colorScheme.primary
+    Column(modifier = modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        MeSectionHeader("Owner", Icons.Default.WorkspacePremium, tint = primary)
+        MeCard(tint = primary) {
+            SessionRow(
+                title = "Owner panel",
+                subtitle = "Fleet and host tools for ${instance?.botName?.takeIf { it.isNotEmpty() } ?: "this bot"}",
+                icon = Icons.Default.WorkspacePremium,
+                tone = primary,
+                onClick = onOpen,
+            )
+        }
     }
 }
 
+/** "Session": switch bot, switch dashboard, and sign out. */
 @Composable
-private fun AccountActivity(state: MeState) {
-    if (state.suggestions.isNotEmpty()) {
-        SectionCard {
-            SectionCardHeader("My suggestions", Icons.Default.TipsAndUpdates)
-            state.suggestions.take(10).forEach { suggestion ->
-                ListItem(
-                    headlineContent = {
-                        Text(
-                            text = suggestion.suggestion1.orEmpty().ifBlank { "Suggestion" },
-                            maxLines = 2,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                    },
-                    supportingContent = {
-                        Text(
-                            buildString {
-                                append(suggestion.stateName.ifBlank { "Pending" })
-                                suggestion.dateAdded?.let { append(" · ${it.relativeToNow()}") }
-                            }
-                        )
-                    },
-                    colors = ListItemDefaults.colors(containerColor = Color.Transparent),
-                )
-            }
-        }
-    }
-
-    if (state.reminders.isNotEmpty()) {
-        SectionCard {
-            SectionCardHeader("Reminders", Icons.Default.Notifications)
-            state.reminders.take(10).forEach { reminder ->
-                ListItem(
-                    headlineContent = {
-                        Text(
-                            text = reminder.message.orEmpty().ifBlank { "Reminder" },
-                            maxLines = 2,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                    },
-                    supportingContent = reminder.`when`?.let { { Text(it.relativeToNow()) } },
-                    trailingContent = {
-                        if (reminder.isExpired) TagChip("Expired")
-                    },
-                    colors = ListItemDefaults.colors(containerColor = Color.Transparent),
-                )
-            }
-        }
-    }
-
-    if (state.giveaways.isNotEmpty()) {
-        SectionCard {
-            SectionCardHeader("Giveaways entered", Icons.Default.CardGiftcard)
-            state.giveaways.take(10).forEach { entry ->
-                ListItem(
-                    headlineContent = { Text(entry.item.orEmpty().ifBlank { "Giveaway" }) },
-                    supportingContent = {
-                        Text(
-                            buildString {
-                                append(if (entry.isEnded) "Ended" else "Running")
-                                append(" · ${entry.winnerCount} winner")
-                                if (entry.winnerCount != 1) append("s")
-                            }
-                        )
-                    },
-                    colors = ListItemDefaults.colors(containerColor = Color.Transparent),
-                )
-            }
-        }
-    }
-
-    state.analytics?.xpData?.takeIf { it.isNotEmpty() }?.let { xp ->
-        SectionCard {
-            SectionCardHeader("XP across servers", Icons.Default.Star)
-            xp.sortedByDescending { it.totalXp }.take(10).forEach { entry ->
-                ListItem(
-                    headlineContent = {
-                        Text(entry.guildName, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    },
-                    supportingContent = {
-                        Text("Level ${entry.level} · ${entry.totalXp.compact()} XP")
-                    },
-                    colors = ListItemDefaults.colors(containerColor = Color.Transparent),
-                )
-            }
+private fun MeSessionSection(
+    instance: MobileInstance?,
+    dashboardHost: String?,
+    onSwitchInstance: () -> Unit,
+    onSwitchServer: () -> Unit,
+    onSignOut: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val scheme = MaterialTheme.colorScheme
+    val muted = LocalGuildPalette.current.muted.color
+    Column(modifier = modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        MeSectionHeader("Session", Icons.Default.Settings, tint = muted)
+        MeCard(tint = muted) {
+            SessionRow(
+                title = "Switch bot",
+                subtitle = instance?.let { "Connected to ${it.botName}" },
+                icon = Icons.Default.SwapHoriz,
+                tone = scheme.primary,
+                onClick = onSwitchInstance,
+            )
+            MeDivider(inset = SessionDividerInset)
+            SessionRow(
+                title = "Switch dashboard",
+                subtitle = dashboardHost,
+                icon = Icons.Default.Dns,
+                tone = scheme.secondary,
+                onClick = onSwitchServer,
+            )
+            MeDivider(inset = SessionDividerInset)
+            SessionRow(
+                title = "Sign out",
+                subtitle = null,
+                icon = Icons.AutoMirrored.Filled.Logout,
+                tone = scheme.error,
+                destructive = true,
+                onClick = onSignOut,
+            )
         }
     }
 }
+
+/** Privacy: the published policies and deleting the user's data. */
+@Composable
+private fun MePrivacySection(
+    onOpenPolicy: () -> Unit,
+    onOpenTerms: () -> Unit,
+    onDeleteData: () -> Unit,
+) {
+    val scheme = MaterialTheme.colorScheme
+    val muted = LocalGuildPalette.current.muted.color
+    Column(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        MeSectionHeader("Privacy", Icons.Default.Shield, tint = muted)
+        MeCard(tint = muted) {
+            Text(
+                text = "Mewdeko stores your Discord id, username, and avatar so the dashboard " +
+                    "can identify you, and keeps your sign-in tokens encrypted on this device.",
+                style = MaterialTheme.typography.bodySmall,
+                color = scheme.onSurfaceVariant,
+                modifier = Modifier.padding(vertical = 12.dp),
+            )
+            MeDivider()
+            SessionRow(
+                title = "Privacy policy",
+                subtitle = null,
+                icon = Icons.Default.Policy,
+                tone = scheme.primary,
+                onClick = onOpenPolicy,
+            )
+            MeDivider(inset = SessionDividerInset)
+            SessionRow(
+                title = "Terms of service",
+                subtitle = null,
+                icon = Icons.Default.Gavel,
+                tone = scheme.secondary,
+                onClick = onOpenTerms,
+            )
+            MeDivider(inset = SessionDividerInset)
+            SessionRow(
+                title = "Delete my data",
+                subtitle = "Revokes this session and forgets this device",
+                icon = Icons.Default.DeleteForever,
+                tone = scheme.error,
+                destructive = true,
+                onClick = onDeleteData,
+            )
+        }
+    }
+}
+
+/**
+ * One session action: a small orb in [tone], a title and optional caption,
+ * and a chevron. [destructive] colors the title in the tone.
+ */
+@Composable
+private fun SessionRow(
+    title: String,
+    subtitle: String?,
+    icon: ImageVector,
+    tone: Color,
+    onClick: () -> Unit,
+    destructive: Boolean = false,
+) {
+    val scheme = MaterialTheme.colorScheme
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(min = 56.dp)
+            .clip(MaterialTheme.shapes.small)
+            .clickable(role = Role.Button, onClick = onClick)
+            .padding(vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        GlyphOrb(icon, tint = tone)
+        Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Text(
+                text = title,
+                style = MaterialTheme.typography.bodyLarge,
+                color = if (destructive) readableInk(tone) else scheme.onSurface,
+            )
+            if (subtitle != null) {
+                Text(
+                    text = subtitle,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = scheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
+        Icon(
+            Icons.AutoMirrored.Filled.KeyboardArrowRight,
+            contentDescription = null,
+            tint = scheme.outline,
+        )
+    }
+}
+
+/** Divider inset past a session row's 28dp orb and its gap. */
+private const val SessionDividerInset = 40
 
 /** Where the published privacy policy lives. */
 private const val PrivacyPolicyUrl = "https://mewdeko.tech/privacy"

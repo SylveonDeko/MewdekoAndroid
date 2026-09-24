@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.CleaningServices
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Lock
@@ -16,7 +17,6 @@ import androidx.compose.material.icons.filled.PushPin
 import androidx.compose.material.icons.filled.Save
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Tune
-import androidx.compose.material.icons.filled.VolumeUp
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ExtendedFloatingActionButton
@@ -35,7 +35,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.mewdeko.mobile.core.theme.MonospaceStyle
 import dev.mewdeko.mobile.core.ui.ConfirmDialog
@@ -73,7 +73,7 @@ fun CustomVoiceScreen(
 
     val tabs = listOf(
         SectionTab("settings", "Settings", Icons.Default.Tune),
-        SectionTab("channels", "Live (${state.channels.size})", Icons.Default.VolumeUp),
+        SectionTab("channels", "Live (${state.channels.size})", Icons.AutoMirrored.Filled.VolumeUp),
         SectionTab("preferences", "Preferences", Icons.Default.Person),
     )
 
@@ -108,7 +108,7 @@ fun CustomVoiceScreen(
                 trailing = {
                     TagChip(
                         label = if (state.isEnabled) "Enabled" else "Not configured",
-                        icon = if (state.isEnabled) Icons.Default.VolumeUp else Icons.Default.Tune,
+                        icon = if (state.isEnabled) Icons.AutoMirrored.Filled.VolumeUp else Icons.Default.Tune,
                     )
                 },
             )
@@ -142,9 +142,9 @@ fun CustomVoiceScreen(
 
         if (state.section == "channels") {
             SectionCard {
-                SectionCardHeader("Live channels", Icons.Default.VolumeUp)
+                SectionCardHeader("Live channels", Icons.AutoMirrored.Filled.VolumeUp)
                 if (state.channels.isEmpty()) {
-                    EmptyState("No temporary channels right now.", icon = Icons.Default.VolumeUp)
+                    EmptyState("No temporary channels right now.", icon = Icons.AutoMirrored.Filled.VolumeUp)
                 } else {
                     state.channels.forEach { channel ->
                         Column(modifier = Modifier.fillMaxWidth()) {
@@ -300,7 +300,7 @@ fun CustomVoiceScreen(
         SectionCard {
             SectionCardHeader("Hub", Icons.Default.Mic)
             DiscordSelectorSingle(
-                kind = SelectorKind.Custom(Icons.Default.VolumeUp),
+                kind = SelectorKind.Custom(Icons.AutoMirrored.Filled.VolumeUp),
                 options = state.voiceChannels.map { SelectorOption(it.id, it.name) },
                 placeholder = "Pick the hub channel",
                 label = "Join-to-create channel",
@@ -308,7 +308,7 @@ fun CustomVoiceScreen(
                 onSelect = { id -> viewModel.edit { it.copy(hubVoiceChannelId = id ?: "0") } },
             )
             DiscordSelectorSingle(
-                kind = SelectorKind.Custom(Icons.Default.VolumeUp),
+                kind = SelectorKind.Custom(Icons.AutoMirrored.Filled.VolumeUp),
                 options = state.categories.map { SelectorOption(it.id, it.name) },
                 placeholder = "Same category as hub",
                 label = "Create channels in",

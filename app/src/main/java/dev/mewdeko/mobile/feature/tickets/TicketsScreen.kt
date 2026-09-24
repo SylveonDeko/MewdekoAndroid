@@ -7,13 +7,14 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.Label
+import androidx.compose.material.icons.automirrored.filled.NoteAdd
+import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Archive
 import androidx.compose.material.icons.filled.Block
@@ -26,10 +27,7 @@ import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Flag
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Insights
-import androidx.compose.material.icons.filled.Label
 import androidx.compose.material.icons.filled.MoreVert
-import androidx.compose.material.icons.filled.NoteAdd
-import androidx.compose.material.icons.filled.OpenInNew
 import androidx.compose.material.icons.filled.PanTool
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.SmartButton
@@ -39,13 +37,10 @@ import androidx.compose.material.icons.filled.ViewCarousel
 import androidx.compose.material3.Button
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -63,7 +58,7 @@ import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.mewdeko.mobile.core.model.EmbedFooter
 import dev.mewdeko.mobile.core.model.EmbedMessage
@@ -75,8 +70,13 @@ import dev.mewdeko.mobile.core.ui.ConfirmDialog
 import dev.mewdeko.mobile.core.ui.DiscordSelector
 import dev.mewdeko.mobile.core.ui.DiscordSelectorSingle
 import dev.mewdeko.mobile.core.ui.EmptyState
+import dev.mewdeko.mobile.core.ui.EnumOption
+import dev.mewdeko.mobile.core.ui.EnumPicker
 import dev.mewdeko.mobile.core.ui.FeatureLinkCard
 import dev.mewdeko.mobile.core.ui.FeatureScaffold
+import dev.mewdeko.mobile.core.ui.FormSheet
+import dev.mewdeko.mobile.core.ui.FullScreenEditor
+import dev.mewdeko.mobile.core.ui.NewItemFab
 import dev.mewdeko.mobile.core.ui.InfoRow
 import dev.mewdeko.mobile.core.ui.MewdekoTextField
 import dev.mewdeko.mobile.core.ui.SectionCard
@@ -198,7 +198,7 @@ fun TicketsScreen(
 
     val screenTitle = when {
         menu != null -> menu.menu.placeholder ?: "Menu #${menu.menu.id}"
-        panel != null -> "Panel #${panel.panel.id}"
+        panel != null -> panel.panel.displayLabel
         caseDetail != null -> caseDetail.detail.title.ifEmpty { "Case #${caseDetail.detail.id}" }
         else -> "Tickets"
     }
@@ -228,30 +228,29 @@ fun TicketsScreen(
         onRetry = { viewModel.load() },
         actions = {
             if (!drilledDown && state.section == TicketSection.PANELS) {
-                PanelsOverflow(
-                    onCreate = { sheet = TicketSheet.CreatePanel },
-                    onRepostAll = viewModel::recreateAllPanels,
-                )
+                PanelsOverflow(onRepostAll = viewModel::recreateAllPanels)
             }
         },
         floatingActionButton = {
             when {
-                menu != null -> ExtendedFloatingActionButton(
+                menu != null -> NewItemFab(
+                    label = "Add option",
                     onClick = { sheet = TicketSheet.AddMenuOption(menu.menu) },
-                    icon = { Icon(Icons.Default.Add, contentDescription = null) },
-                    text = { Text("Add option") },
                 )
 
-                panel != null -> ExtendedFloatingActionButton(
+                panel != null -> NewItemFab(
+                    label = "Add button",
                     onClick = { sheet = TicketSheet.AddButton(panel.panel) },
-                    icon = { Icon(Icons.Default.Add, contentDescription = null) },
-                    text = { Text("Add button") },
                 )
 
-                caseDetail == null && state.section == TicketSection.CASES -> ExtendedFloatingActionButton(
+                caseDetail == null && state.section == TicketSection.CASES -> NewItemFab(
+                    label = "New case",
                     onClick = { sheet = TicketSheet.CreateCase },
-                    icon = { Icon(Icons.Default.Add, contentDescription = null) },
-                    text = { Text("New case") },
+                )
+
+                caseDetail == null && state.section == TicketSection.PANELS -> NewItemFab(
+                    label = "New panel",
+                    onClick = { sheet = TicketSheet.CreatePanel },
                 )
             }
         },
@@ -355,7 +354,7 @@ fun TicketsScreen(
     pendingDeletePanel?.let { target ->
         ConfirmDialog(
             title = "Delete panel?",
-            message = "Panel #${target.id} and its message will be removed.",
+            message = "${target.displayLabel} and its message will be removed.",
             onConfirm = { pendingDeletePanel = null; viewModel.deletePanel(target) },
             onDismiss = { pendingDeletePanel = null },
         )
@@ -542,18 +541,13 @@ fun TicketsScreen(
 }
 
 @Composable
-private fun PanelsOverflow(onCreate: () -> Unit, onRepostAll: () -> Unit) {
+private fun PanelsOverflow(onRepostAll: () -> Unit) {
     var open by remember { mutableStateOf(false) }
     Box {
         IconButton(onClick = { open = true }) {
             Icon(Icons.Default.MoreVert, contentDescription = "Panel actions")
         }
         DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
-            DropdownMenuItem(
-                text = { Text("New panel") },
-                leadingIcon = { Icon(Icons.Default.Add, contentDescription = null) },
-                onClick = { open = false; onCreate() },
-            )
             DropdownMenuItem(
                 text = { Text("Repost all") },
                 leadingIcon = { Icon(Icons.Default.Refresh, contentDescription = null) },
@@ -745,7 +739,7 @@ private fun TicketsSection(
                 }
                 ticket.source?.let { TagChip(it, icon = Icons.Default.SmartButton) }
                 ticket.caseId?.let { TagChip("Case #$it", icon = Icons.Default.Folder) }
-                ticket.tags.forEach { TagChip(it, icon = Icons.Default.Label) }
+                ticket.tags.forEach { TagChip(it, icon = Icons.AutoMirrored.Filled.Label) }
             }
             Row(
                 modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
@@ -757,7 +751,7 @@ private fun TicketsSection(
                     },
                 ) {
                     Icon(
-                        Icons.Default.OpenInNew,
+                        Icons.AutoMirrored.Filled.OpenInNew,
                         contentDescription = null,
                         modifier = Modifier.size(16.dp),
                     )
@@ -781,7 +775,7 @@ private fun TicketsSection(
                     }
                     TextButton(onClick = { onNote(ticket) }) {
                         Icon(
-                            Icons.Default.NoteAdd,
+                            Icons.AutoMirrored.Filled.NoteAdd,
                             contentDescription = null,
                             modifier = Modifier.size(16.dp),
                         )
@@ -852,11 +846,12 @@ private fun PanelsSection(
 ) {
     if (state.panels.isEmpty()) {
         SectionCard {
-            EmptyState(message = "No ticket panels yet.", icon = Icons.Default.ViewCarousel)
-            Button(onClick = onCreate, modifier = Modifier.fillMaxWidth()) {
-                Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp))
-                Text("Create panel", modifier = Modifier.padding(start = 8.dp))
-            }
+            EmptyState(
+                message = "No ticket panels yet.",
+                icon = Icons.Default.ViewCarousel,
+                actionLabel = "New panel",
+                onAction = onCreate,
+            )
         }
         return
     }
@@ -875,14 +870,9 @@ private fun PanelsSection(
                 )
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        "Panel #${panel.id}",
+                        panel.displayLabel,
                         style = MaterialTheme.typography.titleSmall,
                         fontWeight = FontWeight.SemiBold,
-                    )
-                    Text(
-                        "#${panel.channelName ?: panel.channelId}",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
                 var menuOpen by remember { mutableStateOf(false) }
@@ -939,7 +929,7 @@ private fun PanelDetailSection(
 ) {
     SectionCard {
         SectionCardHeader(
-            title = "Panel #${detail.panel.id}",
+            title = detail.panel.displayLabel,
             icon = Icons.Default.ViewCarousel,
             trailing = {
                 var open by remember { mutableStateOf(false) }
@@ -1092,9 +1082,9 @@ private fun MenuDetailSection(
     }
 
     SectionCard {
-        SectionCardHeader("Options", Icons.Default.Label)
+        SectionCardHeader("Options", Icons.AutoMirrored.Filled.Label)
         if (detail.menu.options.isEmpty()) {
-            EmptyState(message = "No options yet.", icon = Icons.Default.Label)
+            EmptyState(message = "No options yet.", icon = Icons.AutoMirrored.Filled.Label)
         }
         detail.menu.options.forEach { option ->
             Row(
@@ -1213,7 +1203,7 @@ private fun CaseDetailSection(
 
     if (case.notes.isNotEmpty()) {
         SectionCard {
-            SectionCardHeader("Notes", Icons.Default.NoteAdd)
+            SectionCardHeader("Notes", Icons.AutoMirrored.Filled.NoteAdd)
             case.notes.forEach { note ->
                 Text(note.content, style = MaterialTheme.typography.bodyMedium)
             }
@@ -1312,7 +1302,7 @@ private fun ConfigurationSection(
     SectionCard {
         SectionCardHeader(
             title = "Tags",
-            icon = Icons.Default.Label,
+            icon = Icons.AutoMirrored.Filled.Label,
             trailing = {
                 IconButton(onClick = onAddTag) {
                     Icon(Icons.Default.Add, contentDescription = "Add tag")
@@ -1320,7 +1310,7 @@ private fun ConfigurationSection(
             },
         )
         if (state.tags.isEmpty()) {
-            EmptyState(message = "No tags defined.", icon = Icons.Default.Label)
+            EmptyState(message = "No tags defined.", icon = Icons.AutoMirrored.Filled.Label)
         }
         state.tags.forEach { tag ->
             Row(
@@ -1360,11 +1350,12 @@ private fun ConfigurationSection(
 private fun CasesSection(state: TicketsState, onOpen: (TicketCase) -> Unit, onCreate: () -> Unit) {
     if (state.cases.isEmpty()) {
         SectionCard {
-            EmptyState(message = "No cases yet.", icon = Icons.Default.Folder)
-            Button(onClick = onCreate, modifier = Modifier.fillMaxWidth()) {
-                Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp))
-                Text("Create case", modifier = Modifier.padding(start = 8.dp))
-            }
+            EmptyState(
+                message = "No cases yet.",
+                icon = Icons.Default.Folder,
+                actionLabel = "New case",
+                onAction = onCreate,
+            )
         }
         return
     }
@@ -1494,42 +1485,40 @@ private fun AdvancedSection(
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
+/**
+ * Hosts every ticket form with the app wide rule for create and edit flows:
+ * short forms open in a [FormSheet], while forms with an embed builder, a
+ * nested list, or more than five inputs pass [long] and open in a
+ * [FullScreenEditor].
+ */
 @Composable
-private fun SheetBody(
+private fun TicketForm(
     title: String,
-    onDismiss: () -> Unit,
-    content: @Composable androidx.compose.foundation.layout.ColumnScope.() -> Unit,
-) {
-    ModalBottomSheet(onDismissRequest = onDismiss) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .imePadding()
-                .verticalScroll(rememberScrollState())
-                .padding(horizontal = 16.dp)
-                .padding(bottom = 32.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-            content = {
-                Text(title, style = MaterialTheme.typography.titleMedium)
-                content()
-            },
-        )
-    }
-}
-
-@Composable
-private fun SheetActions(
     confirmLabel: String,
-    enabled: Boolean,
+    confirmEnabled: Boolean,
     onDismiss: () -> Unit,
     onConfirm: () -> Unit,
+    long: Boolean = false,
+    content: @Composable androidx.compose.foundation.layout.ColumnScope.() -> Unit,
 ) {
-    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        OutlinedButton(onClick = onDismiss, modifier = Modifier.weight(1f)) { Text("Cancel") }
-        Button(onClick = onConfirm, enabled = enabled, modifier = Modifier.weight(1f)) {
-            Text(confirmLabel)
-        }
+    if (long) {
+        FullScreenEditor(
+            title = title,
+            onClose = onDismiss,
+            confirmLabel = confirmLabel,
+            confirmEnabled = confirmEnabled,
+            onConfirm = onConfirm,
+            content = content,
+        )
+    } else {
+        FormSheet(
+            title = title,
+            confirmLabel = confirmLabel,
+            confirmEnabled = confirmEnabled,
+            onConfirm = onConfirm,
+            onDismiss = onDismiss,
+            content = content,
+        )
     }
 }
 
@@ -1544,7 +1533,7 @@ private fun TextEntrySheet(
     initial: String = "",
 ) {
     var text by remember { mutableStateOf(initial) }
-    SheetBody(title, onDismiss) {
+    TicketForm(title, confirmLabel, text.isNotBlank(), onDismiss, { onConfirm(text) }) {
         MewdekoTextField(
             value = text,
             onValueChange = { text = it },
@@ -1552,7 +1541,6 @@ private fun TextEntrySheet(
             singleLine = false,
             minLines = minLines,
         )
-        SheetActions(confirmLabel, text.isNotBlank(), onDismiss) { onConfirm(text) }
     }
 }
 
@@ -1563,7 +1551,13 @@ private fun CloseTicketSheet(
     onConfirm: (String?) -> Unit,
 ) {
     var reason by remember { mutableStateOf("") }
-    SheetBody("Close #${ticket.channelName}", onDismiss) {
+    TicketForm(
+        title = "Close #${ticket.channelName}",
+        confirmLabel = "Close ticket",
+        confirmEnabled = true,
+        onDismiss = onDismiss,
+        onConfirm = { onConfirm(reason.trim().takeIf { it.isNotBlank() }) },
+    ) {
         Text(
             "A transcript will be saved and the ticket marked closed.",
             style = MaterialTheme.typography.bodySmall,
@@ -1577,9 +1571,6 @@ private fun CloseTicketSheet(
             singleLine = false,
             minLines = 3,
         )
-        SheetActions("Close ticket", true, onDismiss) {
-            onConfirm(reason.trim().takeIf { it.isNotBlank() })
-        }
     }
 }
 
@@ -1595,15 +1586,21 @@ private fun TagPickerSheet(
             .map { it.id }
     }
     var selection by remember { mutableStateOf(originalIds) }
-    SheetBody("Tags for #${ticket.channelName}", onDismiss) {
+    TicketForm(
+        title = "Tags for #${ticket.channelName}",
+        confirmLabel = "Apply",
+        confirmEnabled = true,
+        onDismiss = onDismiss,
+        onConfirm = { onConfirm(originalIds, selection) },
+    ) {
         if (tags.isEmpty()) {
             EmptyState(
                 message = "No tags defined yet. Add some under Config.",
-                icon = Icons.Default.Label,
+                icon = Icons.AutoMirrored.Filled.Label,
             )
         } else {
             DiscordSelector(
-                kind = SelectorKind.Custom(Icons.Default.Label),
+                kind = SelectorKind.Custom(Icons.AutoMirrored.Filled.Label),
                 options = tags.map { SelectorOption(it.id, it.name, it.description) },
                 placeholder = "Pick tags",
                 multiple = true,
@@ -1611,7 +1608,6 @@ private fun TagPickerSheet(
                 onSelectionChange = { selection = it },
             )
         }
-        SheetActions("Apply", true, onDismiss) { onConfirm(originalIds, selection) }
     }
 }
 
@@ -1623,7 +1619,13 @@ private fun PriorityPickerSheet(
     onConfirm: (String) -> Unit,
 ) {
     var selected by remember { mutableStateOf<String?>(null) }
-    SheetBody("Priority for #${ticket.channelName}", onDismiss) {
+    TicketForm(
+        title = "Priority for #${ticket.channelName}",
+        confirmLabel = "Set priority",
+        confirmEnabled = selected != null,
+        onDismiss = onDismiss,
+        onConfirm = { selected?.let(onConfirm) },
+    ) {
         if (priorities.isEmpty()) {
             EmptyState(
                 message = "No priorities defined yet. Add some under Config.",
@@ -1639,9 +1641,6 @@ private fun PriorityPickerSheet(
                 selectedId = selected,
                 onSelect = { selected = it },
             )
-        }
-        SheetActions("Set priority", selected != null, onDismiss) {
-            selected?.let(onConfirm)
         }
     }
 }
@@ -1666,7 +1665,31 @@ private fun EmbedBuilderSheet(
     var useRaw by remember { mutableStateOf(false) }
     var rawJson by remember { mutableStateOf(initialJson.orEmpty()) }
 
-    SheetBody(title, onDismiss) {
+    TicketForm(
+        title = title,
+        confirmLabel = confirmLabel,
+        confirmEnabled = if (useRaw) rawJson.isNotBlank() else true,
+        onDismiss = onDismiss,
+        onConfirm = {
+            val json = if (useRaw) {
+                rawJson.trim()
+            } else {
+                EmbedMessage(
+                    content = content,
+                    embeds = listOf(
+                        EmbedSpec(
+                            title = embedTitle,
+                            description = description,
+                            color = color,
+                            footer = EmbedFooter(text = footerText),
+                        ).withImage(imageUrl).withThumbnail(thumbnailUrl),
+                    ),
+                ).serialize()
+            }
+            onConfirm(json)
+        },
+        long = true,
+    ) {
         SwitchRow(
             title = "Raw JSON",
             subtitle = "Paste a dashboard-style embed JSON payload instead",
@@ -1695,24 +1718,6 @@ private fun EmbedBuilderSheet(
             MewdekoTextField(value = footerText, onValueChange = { footerText = it }, label = "Footer text", placeholder = "Optional")
             MewdekoTextField(value = imageUrl, onValueChange = { imageUrl = it }, label = "Image URL", placeholder = "Optional")
             MewdekoTextField(value = thumbnailUrl, onValueChange = { thumbnailUrl = it }, label = "Thumbnail URL", placeholder = "Optional")
-        }
-        SheetActions(confirmLabel, if (useRaw) rawJson.isNotBlank() else true, onDismiss) {
-            val json = if (useRaw) {
-                rawJson.trim()
-            } else {
-                EmbedMessage(
-                    content = content,
-                    embeds = listOf(
-                        EmbedSpec(
-                            title = embedTitle,
-                            description = description,
-                            color = color,
-                            footer = EmbedFooter(text = footerText),
-                        ).withImage(imageUrl).withThumbnail(thumbnailUrl),
-                    ),
-                ).serialize()
-            }
-            onConfirm(json)
         }
     }
 }
@@ -1789,7 +1794,14 @@ private fun ModalBuilderSheet(
     }
     var enabled by remember { mutableStateOf(!initialJson.isNullOrBlank()) }
 
-    SheetBody("Ticket form", onDismiss) {
+    TicketForm(
+        title = "Ticket form",
+        confirmLabel = "Save",
+        confirmEnabled = true,
+        onDismiss = onDismiss,
+        onConfirm = { onConfirm(if (enabled) buildModalJson(title, fields) else null) },
+        long = true,
+    ) {
         SwitchRow(
             title = "Custom form",
             subtitle = "Ask up to 5 questions before the ticket opens",
@@ -1827,10 +1839,11 @@ private fun ModalBuilderSheet(
                         label = "Placeholder",
                         placeholder = "Optional",
                     )
-                    SectionTabs(
-                        tabs = listOf(SectionTab("1", "Short"), SectionTab("2", "Paragraph")),
-                        selectedId = field.style.toString(),
-                        onSelect = { v -> fields = fields.toMutableList().also { it[index] = field.copy(style = v.toIntOrNull() ?: 1) } },
+                    EnumPicker(
+                        label = "Answer style",
+                        options = ModalFieldStyleOptions,
+                        selected = field.style,
+                        onSelect = { v -> fields = fields.toMutableList().also { it[index] = field.copy(style = v) } },
                     )
                     SwitchRow(
                         title = "Required",
@@ -1849,9 +1862,6 @@ private fun ModalBuilderSheet(
                 }
             }
         }
-        SheetActions("Save", true, onDismiss) {
-            onConfirm(if (enabled) buildModalJson(title, fields) else null)
-        }
     }
 }
 
@@ -1865,7 +1875,18 @@ private fun CreatePanelSheet(
     var embedJson by remember { mutableStateOf<String?>(null) }
     var showEmbed by remember { mutableStateOf(false) }
 
-    SheetBody("New panel", onDismiss) {
+    TicketForm(
+        title = "New panel",
+        confirmLabel = "Create",
+        confirmEnabled = channelId != null && !embedJson.isNullOrBlank(),
+        onDismiss = onDismiss,
+        onConfirm = {
+            val id = channelId
+            val json = embedJson
+            if (id != null && json != null) onConfirm(id, json)
+        },
+        long = true,
+    ) {
         DiscordSelectorSingle(
             kind = SelectorKind.Channel,
             options = channels,
@@ -1882,11 +1903,6 @@ private fun CreatePanelSheet(
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
-        SheetActions("Create", channelId != null && !embedJson.isNullOrBlank(), onDismiss) {
-            val id = channelId
-            val json = embedJson
-            if (id != null && json != null) onConfirm(id, json)
-        }
     }
 
     if (showEmbed) {
@@ -1910,7 +1926,13 @@ private fun CreateCaseSheet(
     var description by remember { mutableStateOf("") }
     var selection by remember { mutableStateOf(emptyList<String>()) }
 
-    SheetBody("New case", onDismiss) {
+    TicketForm(
+        title = "New case",
+        confirmLabel = "Create",
+        confirmEnabled = title.isNotBlank(),
+        onDismiss = onDismiss,
+        onConfirm = { onConfirm(title, description, selection.mapNotNull { it.toIntOrNull() }) },
+    ) {
         MewdekoTextField(value = title, onValueChange = { title = it }, label = "Title")
         MewdekoTextField(
             value = description,
@@ -1930,9 +1952,6 @@ private fun CreateCaseSheet(
                 onSelectionChange = { selection = it },
             )
         }
-        SheetActions("Create", title.isNotBlank(), onDismiss) {
-            onConfirm(title, description, selection.mapNotNull { it.toIntOrNull() })
-        }
     }
 }
 
@@ -1943,7 +1962,13 @@ private fun LinkTicketsSheet(
     onConfirm: (List<Int>) -> Unit,
 ) {
     var selection by remember { mutableStateOf(emptyList<String>()) }
-    SheetBody("Link tickets", onDismiss) {
+    TicketForm(
+        title = "Link tickets",
+        confirmLabel = "Link",
+        confirmEnabled = selection.isNotEmpty(),
+        onDismiss = onDismiss,
+        onConfirm = { onConfirm(selection.mapNotNull { it.toIntOrNull() }) },
+    ) {
         if (unlinkedTickets.isEmpty()) {
             EmptyState(message = "Every ticket is already linked to a case.", icon = Icons.Default.ConfirmationNumber)
         } else {
@@ -1955,9 +1980,6 @@ private fun LinkTicketsSheet(
                 selection = selection,
                 onSelectionChange = { selection = it },
             )
-        }
-        SheetActions("Link", selection.isNotEmpty(), onDismiss) {
-            onConfirm(selection.mapNotNull { it.toIntOrNull() })
         }
     }
 }
@@ -1974,7 +1996,14 @@ private fun CreatePrioritySheet(
     var pingStaff by remember { mutableStateOf(false) }
     var responseMinutes by remember { mutableStateOf(60f) }
 
-    SheetBody("New priority", onDismiss) {
+    TicketForm(
+        title = "New priority",
+        confirmLabel = "Create",
+        confirmEnabled = id.isNotBlank() && name.isNotBlank(),
+        onDismiss = onDismiss,
+        onConfirm = { onConfirm(id, name, emoji, level.toInt(), pingStaff, responseMinutes.toInt()) },
+        long = true,
+    ) {
         MewdekoTextField(
             value = id,
             onValueChange = { id = it },
@@ -2009,9 +2038,6 @@ private fun CreatePrioritySheet(
             valueRange = 5f..1440f,
             valueLabel = "${responseMinutes.toInt()}m",
         )
-        SheetActions("Create", id.isNotBlank() && name.isNotBlank(), onDismiss) {
-            onConfirm(id, name, emoji, level.toInt(), pingStaff, responseMinutes.toInt())
-        }
     }
 }
 
@@ -2021,7 +2047,13 @@ private fun CreateTagSheet(onDismiss: () -> Unit, onConfirm: (String, String, St
     var name by remember { mutableStateOf("") }
     var description by remember { mutableStateOf("") }
 
-    SheetBody("New tag", onDismiss) {
+    TicketForm(
+        title = "New tag",
+        confirmLabel = "Create",
+        confirmEnabled = id.isNotBlank() && name.isNotBlank(),
+        onDismiss = onDismiss,
+        onConfirm = { onConfirm(id, name, description) },
+    ) {
         MewdekoTextField(
             value = id,
             onValueChange = { id = it },
@@ -2035,9 +2067,6 @@ private fun CreateTagSheet(onDismiss: () -> Unit, onConfirm: (String, String, St
             onValueChange = { description = it },
             label = "Description",
         )
-        SheetActions("Create", id.isNotBlank() && name.isNotBlank(), onDismiss) {
-            onConfirm(id, name, description)
-        }
     }
 }
 
@@ -2051,7 +2080,15 @@ private fun CreateMenuSheet(
     var description by remember { mutableStateOf("") }
     var emoji by remember { mutableStateOf("") }
 
-    SheetBody("New select menu", onDismiss) {
+    TicketForm(
+        title = "New select menu",
+        confirmLabel = "Create",
+        confirmEnabled = placeholder.isNotBlank() && label.isNotBlank(),
+        onDismiss = onDismiss,
+        onConfirm = {
+            onConfirm(placeholder, label, description.takeIf { it.isNotBlank() }, emoji.takeIf { it.isNotBlank() })
+        },
+    ) {
         MewdekoTextField(value = placeholder, onValueChange = { placeholder = it }, label = "Placeholder text")
         MewdekoTextField(value = label, onValueChange = { label = it }, label = "First option label")
         MewdekoTextField(
@@ -2061,9 +2098,6 @@ private fun CreateMenuSheet(
             placeholder = "Optional",
         )
         MewdekoTextField(value = emoji, onValueChange = { emoji = it }, label = "First option emoji", placeholder = "Optional")
-        SheetActions("Create", placeholder.isNotBlank() && label.isNotBlank(), onDismiss) {
-            onConfirm(placeholder, label, description.takeIf { it.isNotBlank() }, emoji.takeIf { it.isNotBlank() })
-        }
     }
 }
 
@@ -2214,6 +2248,20 @@ private class ComponentDraft(
     }
 }
 
+/** Discord's button styles, keyed by the numeric value the bot stores. */
+private val ButtonStyleOptions = listOf(
+    EnumOption(1, "Primary", "Blurple, the default call to action."),
+    EnumOption(2, "Secondary", "Grey, for a quieter button."),
+    EnumOption(3, "Success", "Green."),
+    EnumOption(4, "Danger", "Red."),
+)
+
+/** Discord's modal text input styles, keyed by the numeric value the bot stores. */
+private val ModalFieldStyleOptions = listOf(
+    EnumOption(1, "Short", "A single line answer."),
+    EnumOption(2, "Paragraph", "A multi line answer."),
+)
+
 @Composable
 private fun ComponentFormFields(
     draft: ComponentDraft,
@@ -2237,15 +2285,11 @@ private fun ComponentFormFields(
     }
     MewdekoTextField(value = draft.emoji, onValueChange = { draft.emoji = it }, label = "Emoji", placeholder = "Optional")
     if (showStyle) {
-        SectionTabs(
-            tabs = listOf(
-                SectionTab("1", "Primary"),
-                SectionTab("2", "Secondary"),
-                SectionTab("3", "Success"),
-                SectionTab("4", "Danger"),
-            ),
-            selectedId = draft.style.toString(),
-            onSelect = { draft.style = it.toIntOrNull() ?: 1 },
+        EnumPicker(
+            label = "Button style",
+            options = ButtonStyleOptions,
+            selected = draft.style,
+            onSelect = { draft.style = it },
         )
     }
     MewdekoTextField(
@@ -2388,7 +2432,14 @@ private fun AddButtonSheet(
     var showEmbed by remember { mutableStateOf(false) }
     var showModal by remember { mutableStateOf(false) }
 
-    SheetBody("Add button", onDismiss) {
+    TicketForm(
+        title = "Add button",
+        confirmLabel = "Add",
+        confirmEnabled = draft.label.isNotBlank(),
+        onDismiss = onDismiss,
+        onConfirm = { onConfirm(draft.toSubmission()) },
+        long = true,
+    ) {
         ComponentFormFields(
             draft = draft,
             showStyle = true,
@@ -2400,7 +2451,6 @@ private fun AddButtonSheet(
             onEditOpenMessage = { showEmbed = true },
             onEditModal = { showModal = true },
         )
-        SheetActions("Add", draft.label.isNotBlank(), onDismiss) { onConfirm(draft.toSubmission()) }
     }
 
     if (showEmbed) {
@@ -2434,7 +2484,14 @@ private fun EditButtonSheet(
     var showEmbed by remember { mutableStateOf(false) }
     var showModal by remember { mutableStateOf(false) }
 
-    SheetBody("Edit button", onDismiss) {
+    TicketForm(
+        title = "Edit button",
+        confirmLabel = "Save",
+        confirmEnabled = draft.label.isNotBlank(),
+        onDismiss = onDismiss,
+        onConfirm = { onConfirm(draft.toSubmission()) },
+        long = true,
+    ) {
         ComponentFormFields(
             draft = draft,
             showStyle = true,
@@ -2446,7 +2503,6 @@ private fun EditButtonSheet(
             onEditOpenMessage = { showEmbed = true },
             onEditModal = { showModal = true },
         )
-        SheetActions("Save", draft.label.isNotBlank(), onDismiss) { onConfirm(draft.toSubmission()) }
     }
 
     if (showEmbed) {
@@ -2479,7 +2535,14 @@ private fun AddMenuOptionSheet(
     var showEmbed by remember { mutableStateOf(false) }
     var showModal by remember { mutableStateOf(false) }
 
-    SheetBody("Add option", onDismiss) {
+    TicketForm(
+        title = "Add option",
+        confirmLabel = "Add",
+        confirmEnabled = draft.label.isNotBlank(),
+        onDismiss = onDismiss,
+        onConfirm = { onConfirm(draft.toSubmission()) },
+        long = true,
+    ) {
         ComponentFormFields(
             draft = draft,
             showStyle = false,
@@ -2491,7 +2554,6 @@ private fun AddMenuOptionSheet(
             onEditOpenMessage = { showEmbed = true },
             onEditModal = { showModal = true },
         )
-        SheetActions("Add", draft.label.isNotBlank(), onDismiss) { onConfirm(draft.toSubmission()) }
     }
 
     if (showEmbed) {
@@ -2525,7 +2587,14 @@ private fun EditMenuOptionSheet(
     var showEmbed by remember { mutableStateOf(false) }
     var showModal by remember { mutableStateOf(false) }
 
-    SheetBody("Edit option", onDismiss) {
+    TicketForm(
+        title = "Edit option",
+        confirmLabel = "Save",
+        confirmEnabled = draft.label.isNotBlank(),
+        onDismiss = onDismiss,
+        onConfirm = { onConfirm(draft.toSubmission()) },
+        long = true,
+    ) {
         ComponentFormFields(
             draft = draft,
             showStyle = false,
@@ -2537,7 +2606,6 @@ private fun EditMenuOptionSheet(
             onEditOpenMessage = { showEmbed = true },
             onEditModal = { showModal = true },
         )
-        SheetActions("Save", draft.label.isNotBlank(), onDismiss) { onConfirm(draft.toSubmission()) }
     }
 
     if (showEmbed) {

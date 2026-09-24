@@ -36,6 +36,8 @@ import javax.inject.Inject
 /** Polls screen state. */
 data class PollsState(
     val section: String = PollsSection.POLLS,
+    /** True while the new poll editor is open over the current section. */
+    val composing: Boolean = false,
     val polls: List<Poll> = emptyList(),
     val includeInactive: Boolean = false,
     val isLoadingPolls: Boolean = false,
@@ -69,7 +71,6 @@ data class PollsState(
 /** Section ids for the polls screen. */
 object PollsSection {
     const val POLLS = "polls"
-    const val CREATE = "create"
     const val SCHEDULED = "scheduled"
     const val TEMPLATES = "templates"
     const val ANALYTICS = "analytics"
@@ -151,8 +152,13 @@ class PollsViewModel @Inject constructor(
         if (id == PollsSection.ANALYTICS) loadAnalytics()
     }
 
-    /** Opens the create form. */
-    fun startNewPoll() = setSection(PollsSection.CREATE)
+    /** Opens the new poll editor. */
+    fun startNewPoll() = _state.update { it.copy(composing = true) }
+
+    /** Closes the new poll editor and drops the unsent draft. */
+    fun closeComposer() = _state.update {
+        it.copy(composing = false, draft = PollDraft(), draftError = null)
+    }
 
     /** Toggles whether closed polls are listed, then reloads the list. */
     fun setIncludeInactive(value: Boolean) {
@@ -261,7 +267,7 @@ class PollsViewModel @Inject constructor(
         val settings = template.parsedSettings()
         _state.update {
             it.copy(
-                section = PollsSection.CREATE,
+                composing = true,
                 draftError = null,
                 draft = it.draft.copy(
                     question = template.question.take(PollDraft.MAX_QUESTION),
@@ -432,6 +438,7 @@ class PollsViewModel @Inject constructor(
         _state.update {
             it.copy(
                 isSubmitting = false,
+                composing = false,
                 draft = PollDraft(),
                 draftError = null,
                 section = if (scheduleFor != null) PollsSection.SCHEDULED else PollsSection.POLLS,

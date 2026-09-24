@@ -1,7 +1,9 @@
 package dev.mewdeko.mobile.feature.dashboardaccess
 
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ManageSearch
 import androidx.compose.material.icons.automirrored.filled.MenuBook
+import androidx.compose.material.icons.automirrored.filled.PlaylistAddCheck
 import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.AdminPanelSettings
 import androidx.compose.material.icons.filled.Bolt
@@ -24,7 +26,6 @@ import androidx.compose.material.icons.filled.Leaderboard
 import androidx.compose.material.icons.filled.LiveTv
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.LockOpen
-import androidx.compose.material.icons.filled.ManageSearch
 import androidx.compose.material.icons.filled.MarkEmailUnread
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.MusicNote
@@ -174,7 +175,7 @@ object DashboardAccessSections {
         DashboardAccessGroup("Activity Stats", AccessCategory.ANALYTICS, Icons.Default.QueryStats, listOf("ServerStats")),
         DashboardAccessGroup("Stat Roles", AccessCategory.COMMUNITY, Icons.Default.Leaderboard, listOf("StatRoles")),
         DashboardAccessGroup("Live Boards", AccessCategory.COMMUNITY, Icons.Default.Dashboard, listOf("LiveBoards")),
-        DashboardAccessGroup("Logging", AccessCategory.SECURITY, Icons.Default.ManageSearch, listOf("Logging")),
+        DashboardAccessGroup("Logging", AccessCategory.SECURITY, Icons.AutoMirrored.Filled.ManageSearch, listOf("Logging")),
         DashboardAccessGroup("Message Stats", AccessCategory.ANALYTICS, Icons.Default.MarkEmailUnread, listOf("MessageCount")),
         DashboardAccessGroup("Message Filters", AccessCategory.SECURITY, Icons.Default.FilterAlt, listOf("Filter")),
         DashboardAccessGroup("Polls", AccessCategory.COMMUNITY, Icons.Default.Poll, listOf("Poll")),
@@ -185,6 +186,7 @@ object DashboardAccessSections {
         DashboardAccessGroup("Repeaters", AccessCategory.ACTIONS, Icons.Default.Repeat, listOf("Repeaters")),
         DashboardAccessGroup("Reputation", AccessCategory.COMMUNITY, Icons.Default.EmojiEvents, listOf("Reputation")),
         DashboardAccessGroup("Role Greets", AccessCategory.ACTIONS, Icons.Default.PersonAddAlt, listOf("RoleGreet")),
+        DashboardAccessGroup("Role Menus", AccessCategory.ACTIONS, Icons.AutoMirrored.Filled.PlaylistAddCheck, listOf("RoleMenus")),
         DashboardAccessGroup("Role States", AccessCategory.ACTIONS, Icons.Default.Sync, listOf("RoleStates")),
         DashboardAccessGroup("Settings", AccessCategory.SETTINGS, Icons.Default.Tune, listOf("Guild")),
         DashboardAccessGroup("Starboard", AccessCategory.COMMUNITY, Icons.Default.Star, listOf("Starboard")),

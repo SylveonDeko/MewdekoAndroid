@@ -58,7 +58,7 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.mewdeko.mobile.core.model.Snowflake
 import dev.mewdeko.mobile.core.ui.ConfirmDialog
@@ -595,7 +595,7 @@ private fun StreamRoleSection(state: UtilityState, viewModel: UtilityViewModel, 
             trailing = { TagChip(if (enabled) "Enabled" else "Disabled") },
         )
         Hint(
-            if (enabled && settings != null) {
+            if (enabled) {
                 "@${state.roleName(settings.fromRoleId)} streamers get @${state.roleName(settings.addRoleId)}"
             } else {
                 "Give members a role automatically while they are live on Discord."

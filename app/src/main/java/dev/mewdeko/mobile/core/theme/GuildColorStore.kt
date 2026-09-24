@@ -35,6 +35,7 @@ class GuildColorStore @Inject constructor(
 
     private val cache = LruCache<String, GuildPalette>(32)
     private var loadedIconUrl: String? = null
+    private var requestedIconUrl: String? = null
     private var loadJob: Job? = null
     private val imageLoader by lazy { ImageLoader.Builder(context).build() }
 
@@ -44,6 +45,7 @@ class GuildColorStore @Inject constructor(
      */
     fun update(iconUrl: String?) {
         loadJob?.cancel()
+        requestedIconUrl = iconUrl?.takeIf { it.isNotEmpty() }
         if (iconUrl.isNullOrEmpty()) {
             apply(GuildPalette.Default, null)
             return
@@ -54,21 +56,51 @@ class GuildColorStore @Inject constructor(
             return
         }
         loadJob = scope.launch {
-            val result = runCatching {
-                val request = ImageRequest.Builder(context)
-                    .data(dashboardSourceUrl(iconUrl))
-                    .size(Size.ORIGINAL)
-                    .allowHardware(false)
-                    .build()
-                val drawable = (imageLoader.execute(request) as? SuccessResult)?.drawable
-                val bitmap = (drawable as? android.graphics.drawable.BitmapDrawable)?.bitmap
-                    ?: return@runCatching GuildPalette.Default
-                withContext(Dispatchers.Default) { PaletteExtractor.extract(bitmap) }
-            }.getOrDefault(GuildPalette.Default)
-
+            val result = extract(iconUrl)
             cache.put(iconUrl, result)
             apply(result, iconUrl)
         }
+    }
+
+    /**
+     * The palette for the image at [iconUrl], without applying it to the
+     * shared store.
+     *
+     * For screens that theme themselves locally through `MewdekoTheme`, such
+     * as the fleet level owner pages, so leaving or entering them never races
+     * another screen's [update] and [release] pair. Shares the memoised cache
+     * with [update].
+     */
+    suspend fun paletteFor(iconUrl: String?): GuildPalette {
+        val url = iconUrl?.takeIf { it.isNotEmpty() } ?: return GuildPalette.Default
+        cache.get(url)?.let { return it }
+        val result = extract(url)
+        cache.put(url, result)
+        return result
+    }
+
+    private suspend fun extract(iconUrl: String): GuildPalette = runCatching {
+        val request = ImageRequest.Builder(context)
+            .data(dashboardSourceUrl(iconUrl))
+            .size(Size.ORIGINAL)
+            .allowHardware(false)
+            .build()
+        val drawable = (imageLoader.execute(request) as? SuccessResult)?.drawable
+        val bitmap = (drawable as? android.graphics.drawable.BitmapDrawable)?.bitmap
+            ?: return@runCatching GuildPalette.Default
+        withContext(Dispatchers.Default) { PaletteExtractor.extract(bitmap) }
+    }.getOrDefault(GuildPalette.Default)
+
+    /**
+     * Resets to the default palette, but only while [iconUrl] is still the
+     * image the store was last asked for.
+     *
+     * A screen that themed the app from its own image calls this when it
+     * leaves, so it never clobbers a palette another screen has since
+     * requested during the navigation transition.
+     */
+    fun release(iconUrl: String?) {
+        if (requestedIconUrl == iconUrl?.takeIf { it.isNotEmpty() }) update(null)
     }
 
     /**

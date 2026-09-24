@@ -22,8 +22,6 @@ import androidx.compose.material.icons.filled.ThumbUp
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
-import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
 import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -33,7 +31,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -48,13 +45,14 @@ import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.mewdeko.mobile.core.theme.MonospaceStyle
 import dev.mewdeko.mobile.core.ui.ConfirmDialog
 import dev.mewdeko.mobile.core.ui.DiscordSelectorSingle
 import dev.mewdeko.mobile.core.ui.EmptyState
 import dev.mewdeko.mobile.core.ui.FeatureScaffold
+import dev.mewdeko.mobile.core.ui.FormSheet
 import dev.mewdeko.mobile.core.ui.MewdekoTextField
 import dev.mewdeko.mobile.core.ui.SectionCard
 import dev.mewdeko.mobile.core.ui.SectionCardHeader
@@ -300,7 +298,11 @@ fun VotesScreen(
                         },
                     )
                     if (state.voteRoles.isEmpty()) {
-                        EmptyState("No reward roles configured.")
+                        EmptyState(
+                            message = "No reward roles configured.",
+                            actionLabel = "Add reward role",
+                            onAction = { showAddRole = true },
+                        )
                     } else {
                         state.voteRoles.forEach { entry ->
                             Row(
@@ -334,13 +336,13 @@ fun VotesScreen(
                                 }
                             }
                         }
-                    }
-                    OutlinedButton(
-                        onClick = { showAddRole = true },
-                        modifier = Modifier.fillMaxWidth(),
-                    ) {
-                        Icon(Icons.Default.Add, contentDescription = null)
-                        Text("Add reward role", modifier = Modifier.padding(start = 6.dp))
+                        OutlinedButton(
+                            onClick = { showAddRole = true },
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            Icon(Icons.Default.Add, contentDescription = null)
+                            Text("Add reward role", modifier = Modifier.padding(start = 6.dp))
+                        }
                     }
                 }
             }
@@ -351,38 +353,31 @@ fun VotesScreen(
         var roleId by remember { mutableStateOf<String?>(null) }
         var amount by remember { mutableStateOf("12") }
         var unit by remember { mutableStateOf(VoteDurationUnit.HOURS) }
-        AlertDialog(
-            onDismissRequest = { showAddRole = false },
-            title = { Text("Add reward role") },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    DiscordSelectorSingle(
-                        kind = SelectorKind.Role,
-                        options = state.availableRoles.map { SelectorOption(it.id, it.name) },
-                        placeholder = "Pick a role",
-                        label = "Role",
-                        selectedId = roleId,
-                        onSelect = { roleId = it },
-                    )
-                    DurationAmountUnitFields(
-                        amount = amount,
-                        onAmountChange = { amount = it },
-                        unit = unit,
-                        onUnitChange = { unit = it },
-                    )
-                }
+        FormSheet(
+            title = "Add reward role",
+            confirmLabel = "Add",
+            confirmEnabled = roleId != null,
+            onConfirm = {
+                roleId?.let { viewModel.addVoteRole(it, unit.toSeconds(amount)) }
+                showAddRole = false
             },
-            confirmButton = {
-                Button(
-                    onClick = {
-                        roleId?.let { viewModel.addVoteRole(it, unit.toSeconds(amount)) }
-                        showAddRole = false
-                    },
-                    enabled = roleId != null,
-                ) { Text("Add") }
-            },
-            dismissButton = { TextButton(onClick = { showAddRole = false }) { Text("Cancel") } },
-        )
+            onDismiss = { showAddRole = false },
+        ) {
+            DiscordSelectorSingle(
+                kind = SelectorKind.Role,
+                options = state.availableRoles.map { SelectorOption(it.id, it.name) },
+                placeholder = "Pick a role",
+                label = "Role",
+                selectedId = roleId,
+                onSelect = { roleId = it },
+            )
+            DurationAmountUnitFields(
+                amount = amount,
+                onAmountChange = { amount = it },
+                unit = unit,
+                onUnitChange = { unit = it },
+            )
+        }
     }
 
     editingRole?.let { role ->
@@ -391,33 +386,27 @@ fun VotesScreen(
             mutableStateOf(if (role.timer <= 0) "0" else (role.timer / initialUnit.seconds).toString())
         }
         var unit by remember(role.id) { mutableStateOf(initialUnit) }
-        AlertDialog(
-            onDismissRequest = { editingRole = null },
-            title = { Text("Edit duration") },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Text(
-                        text = "@${state.roleName(role.roleId)}",
-                        style = MaterialTheme.typography.titleSmall,
-                    )
-                    DurationAmountUnitFields(
-                        amount = amount,
-                        onAmountChange = { amount = it },
-                        unit = unit,
-                        onUnitChange = { unit = it },
-                    )
-                }
+        FormSheet(
+            title = "Edit duration",
+            confirmLabel = "Save",
+            confirmEnabled = true,
+            onConfirm = {
+                viewModel.updateTimer(role.roleId, unit.toSeconds(amount))
+                editingRole = null
             },
-            confirmButton = {
-                Button(
-                    onClick = {
-                        viewModel.updateTimer(role.roleId, unit.toSeconds(amount))
-                        editingRole = null
-                    },
-                ) { Text("Save") }
-            },
-            dismissButton = { TextButton(onClick = { editingRole = null }) { Text("Cancel") } },
-        )
+            onDismiss = { editingRole = null },
+        ) {
+            Text(
+                text = "@${state.roleName(role.roleId)}",
+                style = MaterialTheme.typography.titleSmall,
+            )
+            DurationAmountUnitFields(
+                amount = amount,
+                onAmountChange = { amount = it },
+                unit = unit,
+                onUnitChange = { unit = it },
+            )
+        }
     }
 
     if (pendingClear) {

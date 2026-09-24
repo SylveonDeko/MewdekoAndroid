@@ -1,8 +1,8 @@
 package dev.mewdeko.mobile.feature.streams
 
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.HelpOutline
 import androidx.compose.material.icons.filled.Bolt
-import androidx.compose.material.icons.filled.HelpOutline
 import androidx.compose.material.icons.filled.LiveTv
 import androidx.compose.material.icons.filled.OndemandVideo
 import androidx.compose.material.icons.filled.Palette
@@ -13,7 +13,6 @@ import androidx.lifecycle.SavedStateHandle
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dev.mewdeko.mobile.core.auth.SessionHolder
 import dev.mewdeko.mobile.core.model.EmbedMessage
-import dev.mewdeko.mobile.core.model.ScalarString
 import dev.mewdeko.mobile.core.model.Snowflake
 import dev.mewdeko.mobile.core.model.SnowflakeSerializer
 import dev.mewdeko.mobile.core.model.TextChannelLite
@@ -23,6 +22,7 @@ import dev.mewdeko.mobile.core.net.HttpMethod
 import dev.mewdeko.mobile.core.net.InstantSerializer
 import dev.mewdeko.mobile.core.net.jsonBody
 import dev.mewdeko.mobile.core.net.jsonString
+import dev.mewdeko.mobile.core.net.scalarText
 import dev.mewdeko.mobile.core.ui.FeatureViewModel
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
@@ -52,7 +52,7 @@ enum class StreamPlatform(val raw: Int, val label: String, val icon: ImageVector
     FACEBOOK(5, "Facebook", Icons.Default.OndemandVideo),
     TROVO(6, "Trovo", Icons.Default.Videocam),
     KICK(7, "Kick", Icons.Default.Bolt),
-    UNKNOWN(-1, "Unknown", Icons.Default.HelpOutline);
+    UNKNOWN(-1, "Unknown", Icons.AutoMirrored.Filled.HelpOutline);
 
     companion object {
         /** Maps a wire value onto a platform, falling back to [UNKNOWN] rather than guessing. */
@@ -211,10 +211,7 @@ class StreamsViewModel @Inject constructor(
             }
             val custom = async {
                 runCatching {
-                    api.send(
-                        Endpoint("api/StreamNotifications/$guildId/customMessage"),
-                        ScalarString.serializer(),
-                    ).value
+                    api.sendRaw(Endpoint("api/StreamNotifications/$guildId/customMessage")).scalarText()
                 }.getOrNull()
             }
             val offline = async {

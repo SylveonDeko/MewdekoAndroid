@@ -21,6 +21,8 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.builtins.ListSerializer
 import javax.inject.Inject
@@ -110,6 +112,13 @@ class StarboardViewModel @Inject constructor(
 
     private val _state = MutableStateFlow(StarboardState())
 
+    /**
+     * Runs channel toggles one after another. The bot stores a board's
+     * channel list as one space-separated value, so overlapping toggles from
+     * a multi-select change could otherwise drop an edit.
+     */
+    private val channelToggleLock = Mutex()
+
     /** Observable screen state. */
     val state: StateFlow<StarboardState> = _state.asStateFlow()
 
@@ -139,7 +148,7 @@ class StarboardViewModel @Inject constructor(
             val highlights = async {
                 runCatching {
                     api.send(
-                        Endpoint("api/Starboard/$guildId/highlights"),
+                        Endpoint("api/Starboard/$guildId/highlights?sort=top&limit=10"),
                         ListSerializer(StarboardHighlight.serializer()),
                     )
                 }.getOrDefault(emptyList())
@@ -230,14 +239,25 @@ class StarboardViewModel @Inject constructor(
     /** Adds or removes a channel from the board's watch list. */
     fun toggleChannel(boardId: Int, channelId: Snowflake) =
         launchAction("Failed to update channels.") {
-            api.sendIgnoringBody(
-                Endpoint(
-                    "api/Starboard/$guildId/$boardId/toggle-channel",
-                    HttpMethod.POST,
-                    (channelId.toLongOrNull() ?: 0L).toString(),
+            channelToggleLock.withLock {
+                api.sendIgnoringBody(
+                    Endpoint(
+                        "api/Starboard/$guildId/$boardId/toggle-channel",
+                        HttpMethod.POST,
+                        (channelId.toLongOrNull() ?: 0L).toString(),
+                    )
                 )
-            )
-            load(refreshing = true)
+                _state.update { current ->
+                    current.copy(
+                        boards = current.boards.map { board ->
+                            if (board.id != boardId) return@map board
+                            val ids = board.checkedChannelIds
+                            val next = if (channelId in ids) ids - channelId else ids + channelId
+                            board.copy(checkedChannels = next.joinToString(" "))
+                        },
+                    )
+                }
+            }
         }
 
     /** Adds a reaction emoji that counts toward the board. */

@@ -3,6 +3,7 @@ package dev.mewdeko.mobile.core.net
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 
@@ -49,6 +50,26 @@ fun JsonElement.firstArrayOrNull(): JsonArray? = when (this) {
     is JsonArray -> this
     is JsonObject -> values.firstNotNullOfOrNull { it as? JsonArray }
     else -> null
+}
+
+/**
+ * Reads the text out of a scalar endpoint's raw response.
+ *
+ * The bot's plain string getters serialise with ASP.NET's `StringOutputFormatter` as raw
+ * `text/plain`, not JSON. The dashboard proxy then runs a JSON parse over that: a plain string
+ * becomes `{"data": "<text>"}`, but a string that happens to itself be valid JSON (an embed
+ * template) gets parsed and forwarded as that object or array verbatim instead. This unwraps
+ * both shapes back into the original text, re-serialising an unwrapped object or array so a
+ * caller that only wants the surrounding scalar can still read it as one. Call sites that need
+ * this must fetch with [dev.mewdeko.mobile.core.net.ApiClient.sendRaw] rather than
+ * [dev.mewdeko.mobile.core.net.ApiClient.send], since key normalisation would otherwise mangle
+ * an embed template's PascalCase keys before this ever sees them.
+ */
+fun JsonElement.scalarText(): String? = when (this) {
+    is JsonNull -> null
+    is JsonPrimitive -> content
+    is JsonObject -> (this["data"] as? JsonPrimitive)?.takeIf { size == 1 }?.content ?: toString()
+    is JsonArray -> toString()
 }
 
 /**

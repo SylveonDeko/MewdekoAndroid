@@ -6,26 +6,18 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.CardGiftcard
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.EmojiEmotions
 import androidx.compose.material.icons.filled.Event
 import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.Tag
-import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
-import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -35,14 +27,16 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.mewdeko.mobile.core.ui.ConfirmDialog
 import dev.mewdeko.mobile.core.ui.DiscordSelector
 import dev.mewdeko.mobile.core.ui.DiscordSelectorSingle
 import dev.mewdeko.mobile.core.ui.EmptyState
 import dev.mewdeko.mobile.core.ui.FeatureScaffold
+import dev.mewdeko.mobile.core.ui.FullScreenEditor
 import dev.mewdeko.mobile.core.ui.MewdekoTextField
+import dev.mewdeko.mobile.core.ui.NewItemFab
 import dev.mewdeko.mobile.core.ui.SectionCard
 import dev.mewdeko.mobile.core.ui.SectionCardHeader
 import dev.mewdeko.mobile.core.ui.SectionTab
@@ -89,11 +83,7 @@ fun GiveawaysScreen(
         onRefresh = { viewModel.load(refreshing = true) },
         onRetry = { viewModel.load() },
         floatingActionButton = {
-            ExtendedFloatingActionButton(
-                onClick = { showCreate = true },
-                icon = { Icon(Icons.Default.Add, contentDescription = null) },
-                text = { Text("New giveaway") },
-            )
+            NewItemFab(label = "New giveaway", onClick = { showCreate = true })
         },
     ) {
         SectionCard {
@@ -112,8 +102,10 @@ fun GiveawaysScreen(
             SectionCard {
                 EmptyState(
                     message = if (state.section == "ended") "No finished giveaways."
-                    else "No giveaways running. Tap the button to start one.",
+                    else "No giveaways running.",
                     icon = Icons.Default.CardGiftcard,
+                    actionLabel = if (state.section == "ended") null else "New giveaway",
+                    onAction = if (state.section == "ended") null else ({ showCreate = true }),
                 )
             }
         } else {
@@ -182,7 +174,7 @@ fun GiveawaysScreen(
                 }
             }
         }
-        CreateGiveawayDialog(
+        CreateGiveawayEditor(
             channelOptions = state.availableChannels.map { SelectorOption(it.id, it.name) },
             roleOptions = state.availableRoles.map { SelectorOption(it.id, it.name) },
             emojiOptions = emojiOptions,
@@ -217,8 +209,12 @@ fun GiveawaysScreen(
     }
 }
 
+/**
+ * The full screen form for starting a giveaway. It holds a date and time
+ * picker and a role list, so it is a pushed editor rather than a sheet.
+ */
 @Composable
-private fun CreateGiveawayDialog(
+private fun CreateGiveawayEditor(
     channelOptions: List<SelectorOption>,
     roleOptions: List<SelectorOption>,
     emojiOptions: List<SelectorOption>,
@@ -245,107 +241,105 @@ private fun CreateGiveawayDialog(
     var emote by remember { mutableStateOf("🎉") }
     var restrictRoles by remember { mutableStateOf(emptyList<String>()) }
 
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("New giveaway") },
-        text = {
-            Column(
-                modifier = Modifier
-                    .heightIn(max = 560.dp)
-                    .verticalScroll(rememberScrollState()),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
-                MewdekoTextField(
-                    value = item,
-                    onValueChange = { item = it },
-                    label = "Prize",
-                    placeholder = "Nitro month",
-                )
-                DiscordSelectorSingle(
-                    kind = SelectorKind.Channel,
-                    options = channelOptions,
-                    placeholder = "Pick a channel",
-                    label = "Post in",
-                    selectedId = channelId,
-                    onSelect = { channelId = it },
-                )
-                EndTimeField(value = endsAt, onChange = { endsAt = it })
-                MewdekoTextField(
-                    value = winners,
-                    onValueChange = { winners = it.filter(Char::isDigit) },
-                    label = "Number of winners",
-                    numeric = true,
-                    supportingText = "At least 1",
-                    isError = (winners.toIntOrNull() ?: 0) < 1,
-                )
-                SwitchRow(
-                    title = "Button entry",
-                    subtitle = "Members join with a button instead of a reaction",
-                    checked = useButton,
-                    onCheckedChange = { useButton = it },
-                )
-                SwitchRow(
-                    title = "Require captcha",
-                    subtitle = "Adds a bot check before entry counts",
-                    checked = useCaptcha,
-                    onCheckedChange = { useCaptcha = it },
-                )
-                if (!useButton) {
-                    DiscordSelectorSingle(
-                        kind = SelectorKind.Custom(Icons.Default.EmojiEmotions),
-                        options = emojiOptions,
-                        placeholder = "🎉 Party popper (default)",
-                        label = "Reaction emoji",
-                        selectedId = emote.takeIf { it.isNotBlank() },
-                        onSelect = { emote = it.orEmpty() },
-                    )
-                    MewdekoTextField(
-                        value = emote,
-                        onValueChange = { emote = it },
-                        label = "Or paste a custom emoji code",
-                        placeholder = "🎉",
-                    )
-                }
-                MewdekoTextField(
-                    value = messageReq,
-                    onValueChange = { messageReq = it.filter(Char::isDigit) },
-                    label = "Minimum messages to enter",
-                    numeric = true,
-                )
-                DiscordSelector(
-                    kind = SelectorKind.Role,
-                    options = roleOptions,
-                    placeholder = "Anyone can enter",
-                    label = "Restrict to roles",
-                    multiple = true,
-                    selection = restrictRoles,
-                    onSelectionChange = { restrictRoles = it },
+    val edited = item.isNotEmpty() || channelId != null || winners != "1" || !useButton ||
+        useCaptcha || messageReq != "0" || emote != "🎉" || restrictRoles.isNotEmpty()
+
+    FullScreenEditor(
+        title = "New giveaway",
+        onClose = onDismiss,
+        confirmLabel = "Create",
+        confirmEnabled = item.isNotBlank() && channelId != null &&
+            endsAt.isAfter(Instant.now()) && (winners.toIntOrNull() ?: 0) >= 1,
+        onConfirm = {
+            channelId?.let {
+                onCreate(
+                    item.trim(),
+                    it,
+                    endsAt,
+                    winners.toIntOrNull()?.coerceAtLeast(1) ?: 1,
+                    useButton,
+                    useCaptcha,
+                    messageReq.toIntOrNull() ?: 0,
+                    emote.takeIf { value -> value.isNotBlank() },
+                    restrictRoles,
                 )
             }
         },
-        confirmButton = {
-            Button(
-                onClick = {
-                    channelId?.let {
-                        onCreate(
-                            item.trim(),
-                            it,
-                            endsAt,
-                            winners.toIntOrNull()?.coerceAtLeast(1) ?: 1,
-                            useButton,
-                            useCaptcha,
-                            messageReq.toIntOrNull() ?: 0,
-                            emote.takeIf { value -> value.isNotBlank() },
-                            restrictRoles,
-                        )
-                    }
-                },
-                enabled = item.isNotBlank() && channelId != null &&
-                    endsAt.isAfter(Instant.now()) && (winners.toIntOrNull() ?: 0) >= 1,
-            ) { Text("Create") }
-        },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
-    )
+        hasUnsavedChanges = edited,
+    ) {
+        SectionCard {
+            SectionCardHeader("Prize", Icons.Default.CardGiftcard)
+            MewdekoTextField(
+                value = item,
+                onValueChange = { item = it },
+                label = "Prize",
+                placeholder = "Nitro month",
+            )
+            DiscordSelectorSingle(
+                kind = SelectorKind.Channel,
+                options = channelOptions,
+                placeholder = "Pick a channel",
+                label = "Post in",
+                selectedId = channelId,
+                onSelect = { channelId = it },
+            )
+            EndTimeField(value = endsAt, onChange = { endsAt = it })
+            MewdekoTextField(
+                value = winners,
+                onValueChange = { winners = it.filter(Char::isDigit) },
+                label = "Number of winners",
+                numeric = true,
+                supportingText = "At least 1",
+                isError = (winners.toIntOrNull() ?: 0) < 1,
+            )
+        }
+        SectionCard {
+            SectionCardHeader("Entry", Icons.Default.EmojiEmotions)
+            SwitchRow(
+                title = "Button entry",
+                subtitle = "Members join with a button instead of a reaction",
+                checked = useButton,
+                onCheckedChange = { useButton = it },
+            )
+            SwitchRow(
+                title = "Require captcha",
+                subtitle = "Adds a bot check before entry counts",
+                checked = useCaptcha,
+                onCheckedChange = { useCaptcha = it },
+            )
+            if (!useButton) {
+                DiscordSelectorSingle(
+                    kind = SelectorKind.Custom(Icons.Default.EmojiEmotions),
+                    options = emojiOptions,
+                    placeholder = "🎉 Party popper (default)",
+                    label = "Reaction emoji",
+                    selectedId = emote.takeIf { it.isNotBlank() },
+                    onSelect = { emote = it.orEmpty() },
+                )
+                MewdekoTextField(
+                    value = emote,
+                    onValueChange = { emote = it },
+                    label = "Or paste a custom emoji code",
+                    placeholder = "🎉",
+                )
+            }
+            MewdekoTextField(
+                value = messageReq,
+                onValueChange = { messageReq = it.filter(Char::isDigit) },
+                label = "Minimum messages to enter",
+                numeric = true,
+            )
+            DiscordSelector(
+                kind = SelectorKind.Role,
+                options = roleOptions,
+                placeholder = "Anyone can enter",
+                label = "Restrict to roles",
+                multiple = true,
+                selection = restrictRoles,
+                onSelectionChange = { restrictRoles = it },
+            )
+        }
+    }
 }
 
 /**

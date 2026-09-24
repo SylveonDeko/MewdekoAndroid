@@ -21,8 +21,6 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalClipboardManager
-import androidx.compose.ui.text.AnnotatedString
 import dev.mewdeko.mobile.core.model.EmbedMessage
 import dev.mewdeko.mobile.core.model.Snowflake
 import dev.mewdeko.mobile.core.ui.ConfirmDialog
@@ -34,6 +32,7 @@ import dev.mewdeko.mobile.core.ui.SectionCardHeader
 import dev.mewdeko.mobile.core.ui.SelectorKind
 import dev.mewdeko.mobile.core.ui.SelectorOption
 import dev.mewdeko.mobile.core.ui.SliderRow
+import dev.mewdeko.mobile.core.ui.rememberTextClipboard
 import dev.mewdeko.mobile.feature.embed.EmbedMessageEditor
 
 /** The DM sent to a member when they are banned, built with the full embed editor. */
@@ -63,7 +62,7 @@ fun ServerRecoverySection(state: AdministrationState, viewModel: AdministrationV
     var showKey by remember { mutableStateOf(false) }
     var settingUp by remember { mutableStateOf(false) }
     var confirmClear by remember { mutableStateOf(false) }
-    val clipboard = LocalClipboardManager.current
+    val clipboard = rememberTextClipboard()
 
     SectionCard {
         SectionCardHeader("Server recovery", Icons.Default.Key)
@@ -83,7 +82,7 @@ fun ServerRecoverySection(state: AdministrationState, viewModel: AdministrationV
                 ) { Text(if (showKey) "Hide key" else "Show key") }
                 OutlinedButton(
                     onClick = {
-                        status.recoveryKey?.let { clipboard.setText(AnnotatedString(it)) }
+                        status.recoveryKey?.let(clipboard::copy)
                     },
                     enabled = status.recoveryKey != null,
                     modifier = Modifier.weight(1f),

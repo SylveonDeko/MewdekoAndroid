@@ -18,17 +18,21 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.Article
+import androidx.compose.material.icons.automirrored.filled.CompareArrows
+import androidx.compose.material.icons.automirrored.filled.ListAlt
+import androidx.compose.material.icons.automirrored.filled.Notes
+import androidx.compose.material.icons.automirrored.filled.Send
+import androidx.compose.material.icons.automirrored.filled.ShortText
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Alarm
 import androidx.compose.material.icons.filled.ArrowDownward
 import androidx.compose.material.icons.filled.ArrowUpward
-import androidx.compose.material.icons.filled.Article
 import androidx.compose.material.icons.filled.CheckBox
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.ChevronLeft
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.CompareArrows
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Description
@@ -41,9 +45,7 @@ import androidx.compose.material.icons.filled.Gavel
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Inbox
 import androidx.compose.material.icons.filled.Link
-import androidx.compose.material.icons.filled.ListAlt
 import androidx.compose.material.icons.filled.MoreVert
-import androidx.compose.material.icons.filled.Notes
 import androidx.compose.material.icons.filled.NotificationsActive
 import androidx.compose.material.icons.filled.Numbers
 import androidx.compose.material.icons.filled.PauseCircle
@@ -53,10 +55,8 @@ import androidx.compose.material.icons.filled.RadioButtonChecked
 import androidx.compose.material.icons.filled.Restore
 import androidx.compose.material.icons.filled.Save
 import androidx.compose.material.icons.filled.Schedule
-import androidx.compose.material.icons.filled.Send
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Share
-import androidx.compose.material.icons.filled.ShortText
 import androidx.compose.material.icons.filled.Tag
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.UnfoldMore
@@ -73,7 +73,6 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -88,15 +87,13 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalUriHandler
-import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.core.content.FileProvider
-import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.mewdeko.mobile.core.net.InstantParser
 import dev.mewdeko.mobile.core.ui.ConfirmDialog
@@ -104,7 +101,12 @@ import dev.mewdeko.mobile.core.ui.DiscordSelector
 import dev.mewdeko.mobile.core.ui.DiscordSelectorSingle
 import dev.mewdeko.mobile.core.ui.EmptyState
 import dev.mewdeko.mobile.core.ui.FeatureScaffold
+import dev.mewdeko.mobile.core.ui.FormSheet
+import dev.mewdeko.mobile.core.ui.FullScreenEditor
+import dev.mewdeko.mobile.core.ui.NewItemFab
 import dev.mewdeko.mobile.core.ui.InfoRow
+import dev.mewdeko.mobile.core.ui.LocalSheetDismiss
+import dev.mewdeko.mobile.core.ui.MewdekoBottomSheet
 import dev.mewdeko.mobile.core.ui.MewdekoTextField
 import dev.mewdeko.mobile.core.ui.SectionCard
 import dev.mewdeko.mobile.core.ui.SectionCardHeader
@@ -115,6 +117,7 @@ import dev.mewdeko.mobile.core.ui.SelectorOption
 import dev.mewdeko.mobile.core.ui.SwitchRow
 import dev.mewdeko.mobile.core.ui.TagChip
 import dev.mewdeko.mobile.core.ui.clickableRow
+import dev.mewdeko.mobile.core.ui.rememberTextClipboard
 import dev.mewdeko.mobile.navigation.GuildRouteArgs
 import dev.mewdeko.mobile.util.relativeToNow
 import kotlinx.coroutines.launch
@@ -128,8 +131,8 @@ import java.time.format.DateTimeFormatter
 /** The Material icon standing in for each question widget. */
 private val FormQuestionType.icon: ImageVector
     get() = when (this) {
-        FormQuestionType.SHORT_TEXT -> Icons.Default.ShortText
-        FormQuestionType.LONG_TEXT -> Icons.Default.Notes
+        FormQuestionType.SHORT_TEXT -> Icons.AutoMirrored.Filled.ShortText
+        FormQuestionType.LONG_TEXT -> Icons.AutoMirrored.Filled.Notes
         FormQuestionType.MULTIPLE_CHOICE -> Icons.Default.RadioButtonChecked
         FormQuestionType.CHECKBOXES -> Icons.Default.CheckBox
         FormQuestionType.DROPDOWN -> Icons.Default.UnfoldMore
@@ -143,7 +146,7 @@ private val FormQuestionType.icon: ImageVector
 private val FormSection.icon: ImageVector
     get() = when (this) {
         FormSection.SETTINGS -> Icons.Default.Settings
-        FormSection.QUESTIONS -> Icons.Default.ListAlt
+        FormSection.QUESTIONS -> Icons.AutoMirrored.Filled.ListAlt
         FormSection.RESPONSES -> Icons.Default.Inbox
         FormSection.VERSIONS -> Icons.Default.History
     }
@@ -223,10 +226,9 @@ fun FormsScreen(
         },
         floatingActionButton = {
             when {
-                selected == null -> ExtendedFloatingActionButton(
+                selected == null -> NewItemFab(
+                    label = "New form",
                     onClick = { newName = ""; newType = FormType.REGULAR; creating = true },
-                    icon = { Icon(Icons.Default.Add, contentDescription = null) },
-                    text = { Text("New form") },
                 )
 
                 (state.section == FormSection.SETTINGS || state.section == FormSection.QUESTIONS) &&
@@ -317,37 +319,28 @@ fun FormsScreen(
     }
 
     if (creating) {
-        AlertDialog(
-            onDismissRequest = { creating = false },
-            title = { Text("New form") },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    MewdekoTextField(
-                        value = newName,
-                        onValueChange = { newName = it },
-                        label = "Name",
-                        placeholder = "Application",
-                    )
-                    DiscordSelectorSingle(
-                        kind = SelectorKind.Custom(Icons.Default.Article),
-                        options = FormType.entries.map { SelectorOption(it.raw.toString(), it.label) },
-                        placeholder = "Regular",
-                        selectedId = newType.raw.toString(),
-                        onSelect = { value -> newType = FormType.from(value?.toIntOrNull() ?: 0) },
-                        label = "Type (cannot be changed later)",
-                    )
-                }
-            },
-            confirmButton = {
-                TextButton(
-                    onClick = { creating = false; viewModel.createForm(newName, newType.raw) },
-                    enabled = newName.isNotBlank(),
-                ) { Text("Create") }
-            },
-            dismissButton = {
-                TextButton(onClick = { creating = false }) { Text("Cancel") }
-            },
-        )
+        FormSheet(
+            title = "New form",
+            confirmLabel = "Create",
+            confirmEnabled = newName.isNotBlank(),
+            onConfirm = { creating = false; viewModel.createForm(newName, newType.raw) },
+            onDismiss = { creating = false },
+        ) {
+            MewdekoTextField(
+                value = newName,
+                onValueChange = { newName = it },
+                label = "Name",
+                placeholder = "Application",
+            )
+            DiscordSelectorSingle(
+                kind = SelectorKind.Custom(Icons.AutoMirrored.Filled.Article),
+                options = FormType.entries.map { SelectorOption(it.raw.toString(), it.label) },
+                placeholder = "Regular",
+                selectedId = newType.raw.toString(),
+                onSelect = { value -> newType = FormType.from(value?.toIntOrNull() ?: 0) },
+                label = "Type (cannot be changed later)",
+            )
+        }
     }
 
     pendingFormDelete?.let { form ->
@@ -405,7 +398,7 @@ fun FormsScreen(
     editingQuestionIndex?.let { index ->
         val question = state.questions.getOrNull(index)
         if (question != null) {
-            QuestionEditorSheet(
+            QuestionEditor(
                 question = question,
                 roles = state.availableRoles.map { SelectorOption(it.id, it.name) },
                 otherQuestions = state.questions.take(index)
@@ -470,11 +463,12 @@ private fun FormListSection(
 ) {
     if (state.forms.isEmpty()) {
         SectionCard {
-            EmptyState(message = "No forms yet.", icon = Icons.Default.Description)
-            Button(onClick = onCreate, modifier = Modifier.fillMaxWidth()) {
-                Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp))
-                Text("Create form", modifier = Modifier.padding(start = 8.dp))
-            }
+            EmptyState(
+                message = "No forms yet.",
+                icon = Icons.Default.Description,
+                actionLabel = "New form",
+                onAction = onCreate,
+            )
         }
         return
     }
@@ -531,7 +525,7 @@ private fun FormListSection(
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
             ) {
                 TagChip("${form.responses} responses", icon = Icons.Default.Inbox)
-                TagChip("${form.questions} questions", icon = Icons.Default.ListAlt)
+                TagChip("${form.questions} questions", icon = Icons.AutoMirrored.Filled.ListAlt)
                 if (form.reviewsResponses) {
                     TagChip(form.type.label, icon = Icons.Default.VerifiedUser)
                     if (form.pending > 0) {
@@ -590,7 +584,7 @@ private fun FormActionsMenu(
             if (form.isDraft) {
                 DropdownMenuItem(
                     text = { Text("Publish") },
-                    leadingIcon = { Icon(Icons.Default.Send, contentDescription = null) },
+                    leadingIcon = { Icon(Icons.AutoMirrored.Filled.Send, contentDescription = null) },
                     onClick = { open = false; onPublish() },
                 )
             }
@@ -645,7 +639,8 @@ private fun GuildSettingsSheet(
     var approve by remember(emotes) { mutableStateOf(emotes.approveEmote.orEmpty()) }
     var reject by remember(emotes) { mutableStateOf(emotes.rejectEmote.orEmpty()) }
 
-    ModalBottomSheet(onDismissRequest = onDismiss) {
+    MewdekoBottomSheet(onDismissRequest = onDismiss, title = "Form defaults") {
+        val dismissSheet = LocalSheetDismiss.current
         Column(
             modifier = Modifier
                 .fillMaxWidth()
@@ -655,7 +650,6 @@ private fun GuildSettingsSheet(
                 .padding(bottom = 32.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            Text("Form defaults", style = MaterialTheme.typography.titleMedium)
             Text(
                 "The review button emotes every form falls back to, unless it sets its own.",
                 style = MaterialTheme.typography.bodySmall,
@@ -679,11 +673,11 @@ private fun GuildSettingsSheet(
                 TextButton(onClick = { approve = ""; reject = "" }) { Text("Reset") }
             }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedButton(onClick = onDismiss, modifier = Modifier.weight(1f)) { Text("Cancel") }
+                OutlinedButton(onClick = dismissSheet, modifier = Modifier.weight(1f)) { Text("Cancel") }
                 Button(
                     onClick = {
                         onSave(approve.trim().ifEmpty { null }, reject.trim().ifEmpty { null })
-                        onDismiss()
+                        dismissSheet()
                     },
                     modifier = Modifier.weight(1f),
                 ) { Text("Save") }
@@ -723,7 +717,7 @@ private fun EmoteField(
 
 @Composable
 private fun ShareLinkDialog(link: String, onDismiss: () -> Unit) {
-    val clipboard = LocalClipboardManager.current
+    val clipboard = rememberTextClipboard()
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("Share link") },
@@ -732,7 +726,7 @@ private fun ShareLinkDialog(link: String, onDismiss: () -> Unit) {
         },
         confirmButton = {
             TextButton(
-                onClick = { clipboard.setText(AnnotatedString(link)); onDismiss() },
+                onClick = { clipboard.copy(link); onDismiss() },
             ) { Text("Copy") }
         },
         dismissButton = {
@@ -1256,7 +1250,7 @@ private fun FormQuestionsSection(
                 } else {
                     "No questions yet. Add one to start collecting answers."
                 },
-                icon = Icons.Default.ListAlt,
+                icon = Icons.AutoMirrored.Filled.ListAlt,
             )
         }
         return
@@ -1265,7 +1259,7 @@ private fun FormQuestionsSection(
     val pageQuestionIndices = currentPage.questionIndices
     if (pageQuestionIndices.isEmpty()) {
         SectionCard {
-            EmptyState(message = "No questions on this page yet.", icon = Icons.Default.ListAlt)
+            EmptyState(message = "No questions on this page yet.", icon = Icons.AutoMirrored.Filled.ListAlt)
         }
     }
 
@@ -1352,9 +1346,13 @@ private fun FormQuestionsSection(
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
+/**
+ * Full screen editor for one question or page break. Questions carry an
+ * option list and conditional logic, so this is a pushed editor rather than
+ * a sheet; a page break only has a title and description.
+ */
 @Composable
-private fun QuestionEditorSheet(
+private fun QuestionEditor(
     question: FormQuestion,
     roles: List<SelectorOption>,
     otherQuestions: List<FormQuestion>,
@@ -1364,43 +1362,33 @@ private fun QuestionEditorSheet(
     var working by remember(question) { mutableStateOf(question) }
     val isBreak = working.type == FormQuestionType.SECTION_BREAK
 
-    ModalBottomSheet(onDismissRequest = onDismiss) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .imePadding()
-                .verticalScroll(rememberScrollState())
-                .padding(horizontal = 16.dp)
-                .padding(bottom = 32.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            Text(if (isBreak) "Edit page" else "Edit question", style = MaterialTheme.typography.titleMedium)
+    FullScreenEditor(
+        title = if (isBreak) "Edit page" else "Edit question",
+        onClose = onDismiss,
+        confirmLabel = "Done",
+        confirmEnabled = isBreak || working.questionText.isNotBlank(),
+        onConfirm = { onSave(working) },
+        hasUnsavedChanges = working != question,
+    ) {
+        MewdekoTextField(
+            value = working.questionText,
+            onValueChange = { working = working.copy(questionText = it) },
+            label = if (isBreak) "Page title" else "Question text",
+            singleLine = false,
+            minLines = if (isBreak) 1 else 2,
+        )
 
+        if (isBreak) {
             MewdekoTextField(
-                value = working.questionText,
-                onValueChange = { working = working.copy(questionText = it) },
-                label = if (isBreak) "Page title" else "Question text",
+                value = working.placeholder.orEmpty(),
+                onValueChange = {
+                    working = working.copy(placeholder = it.takeIf { text -> text.isNotEmpty() })
+                },
+                label = "Page description",
                 singleLine = false,
-                minLines = if (isBreak) 1 else 2,
+                minLines = 2,
             )
-
-            if (isBreak) {
-                MewdekoTextField(
-                    value = working.placeholder.orEmpty(),
-                    onValueChange = {
-                        working = working.copy(placeholder = it.takeIf { text -> text.isNotEmpty() })
-                    },
-                    label = "Page description",
-                    singleLine = false,
-                    minLines = 2,
-                )
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedButton(onClick = onDismiss, modifier = Modifier.weight(1f)) { Text("Cancel") }
-                    Button(onClick = { onSave(working) }, modifier = Modifier.weight(1f)) { Text("Save") }
-                }
-                return@Column
-            }
-
+        } else {
             DiscordSelectorSingle(
                 kind = SelectorKind.Custom(working.type.icon),
                 options = FormQuestionType.entries.filter { it != FormQuestionType.SECTION_BREAK }
@@ -1477,7 +1465,7 @@ private fun QuestionEditorSheet(
 
             if (working.type.supportsOptions) {
                 SectionCard {
-                    SectionCardHeader("Options", Icons.Default.ListAlt)
+                    SectionCardHeader("Options", Icons.AutoMirrored.Filled.ListAlt)
                     working.options.forEachIndexed { index, option ->
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
@@ -1536,7 +1524,7 @@ private fun QuestionEditorSheet(
             SectionCard {
                 SectionCardHeader("Conditionally required", Icons.Default.Tune)
                 DiscordSelectorSingle(
-                    kind = SelectorKind.Custom(Icons.Default.ListAlt),
+                    kind = SelectorKind.Custom(Icons.AutoMirrored.Filled.ListAlt),
                     options = otherQuestions.map {
                         SelectorOption(it.id.toString(), it.questionText.ifEmpty { "Untitled" })
                     },
@@ -1571,15 +1559,6 @@ private fun QuestionEditorSheet(
                     onCheckedChange = { working = working.copy(enableAnswerPiping = it) },
                 )
             }
-
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedButton(onClick = onDismiss, modifier = Modifier.weight(1f)) { Text("Cancel") }
-                Button(
-                    onClick = { onSave(working) },
-                    enabled = working.questionText.isNotBlank(),
-                    modifier = Modifier.weight(1f),
-                ) { Text("Save") }
-            }
         }
     }
 }
@@ -1605,7 +1584,7 @@ private fun ConditionalLogicCard(
         when (FormConditionType.from(working.conditionalType)) {
             FormConditionType.QUESTION_BASED -> {
                 DiscordSelectorSingle(
-                    kind = SelectorKind.Custom(Icons.Default.ListAlt),
+                    kind = SelectorKind.Custom(Icons.AutoMirrored.Filled.ListAlt),
                     options = otherQuestions.map {
                         SelectorOption(it.id.toString(), it.questionText.ifEmpty { "Untitled" })
                     },
@@ -1771,7 +1750,7 @@ private fun MultiConditionEditor(
                 when (FormConditionType.from(condition.conditionType)) {
                     FormConditionType.QUESTION_BASED -> {
                         DiscordSelectorSingle(
-                            kind = SelectorKind.Custom(Icons.Default.ListAlt),
+                            kind = SelectorKind.Custom(Icons.AutoMirrored.Filled.ListAlt),
                             options = otherQuestions.map {
                                 SelectorOption(it.id.toString(), it.questionText.ifEmpty { "Untitled" })
                             },
@@ -2181,7 +2160,7 @@ private fun FormVersionsSection(
             }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedButton(onClick = { onDiff(version) }, modifier = Modifier.weight(1f)) {
-                    Icon(Icons.Default.CompareArrows, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Icon(Icons.AutoMirrored.Filled.CompareArrows, contentDescription = null, modifier = Modifier.size(18.dp))
                     Text("Compare", modifier = Modifier.padding(start = 8.dp))
                 }
                 OutlinedButton(onClick = { onRestore(version) }, modifier = Modifier.weight(1f)) {

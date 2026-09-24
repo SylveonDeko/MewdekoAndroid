@@ -7,32 +7,28 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.VolumeUp
-import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Dns
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Equalizer
 import androidx.compose.material.icons.filled.Event
 import androidx.compose.material.icons.filled.Numbers
 import androidx.compose.material.icons.filled.Rotate90DegreesCcw
 import androidx.compose.material.icons.filled.Tag
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.SegmentedButton
-import androidx.compose.material3.SegmentedButtonDefaults
-import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -47,12 +43,17 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.mewdeko.mobile.core.ui.ConfirmDialog
 import dev.mewdeko.mobile.core.ui.DiscordSelectorSingle
 import dev.mewdeko.mobile.core.ui.EmptyState
+import dev.mewdeko.mobile.core.ui.EnumOption
+import dev.mewdeko.mobile.core.ui.EnumPicker
 import dev.mewdeko.mobile.core.ui.FeatureScaffold
+import dev.mewdeko.mobile.core.ui.FormSheet
+import dev.mewdeko.mobile.core.ui.FullScreenEditor
+import dev.mewdeko.mobile.core.ui.NewItemFab
 import dev.mewdeko.mobile.core.ui.InfoRow
 import dev.mewdeko.mobile.core.ui.MewdekoTextField
 import dev.mewdeko.mobile.core.ui.SectionCard
@@ -80,12 +81,10 @@ fun StatChannelsScreen(
     val loadState by viewModel.loadState.collectAsStateWithLifecycle()
     val status by viewModel.status.collectAsStateWithLifecycle()
 
-    var showAdd by remember { mutableStateOf(false) }
+    var editorTarget by remember { mutableStateOf<StatChannelEditorTarget?>(null) }
     var showDefaults by remember { mutableStateOf(false) }
     var showCatalog by remember { mutableStateOf(false) }
     var pendingDelete by remember { mutableStateOf<StatChannel?>(null) }
-    var editingTemplate by remember { mutableStateOf<StatChannel?>(null) }
-    var editingDelivery by remember { mutableStateOf<StatChannel?>(null) }
 
     FeatureScaffold(
         title = "Stat Channels",
@@ -97,10 +96,9 @@ fun StatChannelsScreen(
         onRefresh = { viewModel.load(refreshing = true) },
         onRetry = { viewModel.load() },
         floatingActionButton = {
-            ExtendedFloatingActionButton(
-                onClick = { showAdd = true },
-                icon = { Icon(Icons.Default.Add, contentDescription = null) },
-                text = { Text("Add channel") },
+            NewItemFab(
+                label = "New stat channel",
+                onClick = { editorTarget = StatChannelEditorTarget.New },
             )
         },
     ) {
@@ -132,6 +130,8 @@ fun StatChannelsScreen(
                 EmptyState(
                     message = "No stat channels configured yet.",
                     icon = Icons.Default.Equalizer,
+                    actionLabel = "New stat channel",
+                    onAction = { editorTarget = StatChannelEditorTarget.New },
                 )
             }
         } else {
@@ -172,17 +172,21 @@ fun StatChannelsScreen(
                             overflow = TextOverflow.Ellipsis,
                         )
                     }
-                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                        TextButton(onClick = { editingTemplate = channel }) { Text("Template") }
-                        TextButton(onClick = { editingDelivery = channel }) { Text("Style & updates") }
+                    TextButton(
+                        onClick = { editorTarget = StatChannelEditorTarget.Existing(channel) },
+                    ) {
+                        Icon(Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text("Edit")
                     }
                 }
             }
         }
     }
 
-    if (showAdd) {
-        AddStatChannelDialog(
+    editorTarget?.let { target ->
+        StatChannelEditor(
+            existing = (target as? StatChannelEditorTarget.Existing)?.channel,
             metadata = state.metadata,
             settings = state.settings,
             voiceOptions = state.availableVoiceChannels.map { SelectorOption(it.id, it.name) },
@@ -205,45 +209,19 @@ fun StatChannelsScreen(
             preview = state.preview,
             previewPending = state.previewPending,
             minimumInterval = viewModel::minimumInterval,
-            onPreviewInputsChanged = { definition, template, style, roleId, countdownDate, goal, targetId, counterName ->
-                if (definition != null) {
-                    viewModel.refreshPreview(
-                        statType = definition.type,
-                        template = template,
-                        displayStyle = style,
-                        roleId = roleId.takeIf { definition.needs == StatRequirement.ROLE },
-                        countdownDate = countdownDate.takeIf { definition.needs == StatRequirement.DATE },
-                        goalTarget = goal.takeIf { definition.needs == StatRequirement.GOAL },
-                        targetId = targetId?.toLongOrNull(),
-                        targetName = counterName.takeIf {
-                            definition.needs == StatRequirement.COUNTER_NAME
-                        },
-                    )
-                }
+            onDraftChanged = { draft ->
+                if (draft != null) viewModel.refreshPreview(draft) else viewModel.clearPreview()
             },
             onDismiss = {
-                showAdd = false
+                editorTarget = null
                 viewModel.clearPreview()
             },
-            onAdd = { channelId, categoryId, definition, template, style, mechanism, interval, roleId,
-                countdownDate, goal, targetId, counterName ->
-                viewModel.add(
-                    channelId = channelId,
-                    categoryId = categoryId,
-                    statType = definition.type,
-                    template = template,
-                    displayStyle = style,
-                    mechanism = mechanism,
-                    intervalMinutes = interval,
-                    roleId = roleId.takeIf { definition.needs == StatRequirement.ROLE },
-                    countdownDate = countdownDate.takeIf { definition.needs == StatRequirement.DATE },
-                    goalTarget = goal.takeIf { definition.needs == StatRequirement.GOAL },
-                    targetId = targetId?.toLongOrNull(),
-                    targetName = counterName.takeIf {
-                        definition.needs == StatRequirement.COUNTER_NAME
-                    },
-                )
-                showAdd = false
+            onSave = { draft ->
+                when (target) {
+                    StatChannelEditorTarget.New -> viewModel.add(draft)
+                    is StatChannelEditorTarget.Existing -> viewModel.update(target.channel.channelId, draft)
+                }
+                editorTarget = null
                 viewModel.clearPreview()
             },
         )
@@ -266,90 +244,6 @@ fun StatChannelsScreen(
         )
     }
 
-    editingTemplate?.let { channel ->
-        val definition = state.metadata?.statTypes?.firstOrNull { it.type == channel.statType }
-        var draft by remember(channel.channelId) { mutableStateOf(channel.template.orEmpty()) }
-        AlertDialog(
-            onDismissRequest = { editingTemplate = null },
-            title = { Text("Channel name template") },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    MewdekoTextField(
-                        value = draft,
-                        onValueChange = { draft = it },
-                        label = "Template",
-                        placeholder = definition?.defaultTemplate ?: "Members: %count%",
-                    )
-                    PlaceholderChips(
-                        placeholders = buildList {
-                            addAll(state.metadata?.commonPlaceholders.orEmpty())
-                            addAll(definition?.placeholders.orEmpty())
-                        },
-                        onInsert = { draft += it },
-                    )
-                }
-            },
-            confirmButton = {
-                Button(
-                    onClick = {
-                        viewModel.updateTemplate(channel.channelId, draft)
-                        editingTemplate = null
-                    },
-                ) { Text("Save") }
-            },
-            dismissButton = {
-                TextButton(onClick = { editingTemplate = null }) { Text("Cancel") }
-            },
-        )
-    }
-
-    editingDelivery?.let { channel ->
-        val definition = state.metadata?.statTypes?.firstOrNull { it.type == channel.statType }
-        var style by remember(channel.channelId) { mutableIntStateOf(channel.displayStyle) }
-        var mechanism by remember(channel.channelId) { mutableStateOf(channel.mechanism) }
-        var interval by remember(channel.channelId) {
-            mutableIntStateOf(channel.updateIntervalMinutes)
-        }
-        val minimum = viewModel.minimumInterval(mechanism)
-
-        AlertDialog(
-            onDismissRequest = { editingDelivery = null },
-            title = { Text("Style & updates") },
-            text = {
-                Column(
-                    modifier = Modifier
-                        .heightIn(max = 460.dp)
-                        .verticalScroll(rememberScrollState()),
-                    verticalArrangement = Arrangement.spacedBy(12.dp),
-                ) {
-                    StylePicker(state.metadata, style, definition) { style = it }
-                    MechanismPicker(mechanism) {
-                        mechanism = it
-                        interval = interval.coerceAtLeast(viewModel.minimumInterval(it))
-                    }
-                    IntervalField(
-                        interval = interval,
-                        minimum = minimum,
-                        realtimeHint = definition?.realtime == true,
-                        onChange = { interval = it },
-                    )
-                }
-            },
-            confirmButton = {
-                Button(
-                    onClick = {
-                        viewModel.updateDelivery(channel.channelId, style, mechanism, interval)
-                        editingDelivery = null
-                    },
-                    enabled = interval >= minimum,
-                ) { Text("Save") }
-            },
-            dismissButton = {
-                TextButton(onClick = { editingDelivery = null }) { Text("Cancel") }
-            },
-        )
-    }
-
     pendingDelete?.let { channel ->
         ConfirmDialog(
             title = "Remove stat channel?",
@@ -359,6 +253,15 @@ fun StatChannelsScreen(
             onDismiss = { pendingDelete = null },
         )
     }
+}
+
+/** What the stat channel editor is working on. Creating and editing share one editor. */
+private sealed interface StatChannelEditorTarget {
+    /** A new stat channel, opened from the New stat channel button or the empty state. */
+    data object New : StatChannelEditorTarget
+
+    /** An existing stat channel, opened from its Edit button. */
+    data class Existing(val channel: StatChannel) : StatChannelEditorTarget
 }
 
 /** Shows the draft template rendered against live guild data, as the channel name will appear. */
@@ -553,6 +456,10 @@ private fun CountdownDateField(value: Instant?, onChange: (Instant?) -> Unit) {
     }
 }
 
+/**
+ * The guild wide defaults for new stat channels. Three inputs and no preview, so it is a short
+ * [FormSheet] rather than a dialog form.
+ */
 @Composable
 private fun DefaultsDialog(
     metadata: StatChannelMetadata?,
@@ -565,56 +472,52 @@ private fun DefaultsDialog(
     var mechanism by remember { mutableStateOf(StatMechanism.from(settings.defaultMechanism)) }
     var interval by remember { mutableIntStateOf(settings.defaultIntervalMinutes) }
 
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("Defaults for new channels") },
-        text = {
-            Column(
-                modifier = Modifier
-                    .heightIn(max = 460.dp)
-                    .verticalScroll(rememberScrollState()),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
-                Text(
-                    text = "Applies to stat channels created from now on. Existing channels keep " +
-                        "their own settings.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+    FormSheet(
+        title = "Defaults for new channels",
+        confirmLabel = "Save",
+        confirmEnabled = interval >= minimumInterval(mechanism),
+        onConfirm = {
+            onSave(
+                StatChannelSettings(
+                    defaultMechanism = mechanism.raw,
+                    defaultIntervalMinutes = interval,
+                    defaultDisplayStyle = style,
                 )
-                StylePicker(metadata, style, onSelect = { style = it })
-                MechanismPicker(mechanism) {
-                    mechanism = it
-                    interval = interval.coerceAtLeast(minimumInterval(it))
-                }
-                val defaultsMinimum = minimumInterval(mechanism)
-                IntervalField(
-                    interval = interval,
-                    minimum = defaultsMinimum,
-                    onChange = { interval = it },
-                )
-            }
+            )
         },
-        confirmButton = {
-            Button(
-                onClick = {
-                    onSave(
-                        StatChannelSettings(
-                            defaultMechanism = mechanism.raw,
-                            defaultIntervalMinutes = interval,
-                            defaultDisplayStyle = style,
-                        )
-                    )
-                },
-                enabled = interval >= minimumInterval(mechanism),
-            ) { Text("Save") }
-        },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
-    )
+        onDismiss = onDismiss,
+    ) {
+        Text(
+            text = "Applies to stat channels created from now on. Existing channels keep " +
+                "their own settings.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        StylePicker(metadata, style, onSelect = { style = it })
+        MechanismPicker(mechanism) {
+            mechanism = it
+            interval = interval.coerceAtLeast(minimumInterval(it))
+        }
+        IntervalField(
+            interval = interval,
+            minimum = minimumInterval(mechanism),
+            onChange = { interval = it },
+        )
+    }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
+/**
+ * The full screen editor for a stat channel, shared by creating ([existing] null) and editing so
+ * both look and behave the same. It has a live name preview and can need a date, so it is a
+ * [FullScreenEditor] rather than a sheet.
+ *
+ * [onDraftChanged] receives the current draft (or null before a counter is chosen) whenever an
+ * input that affects the preview changes. [onSave] receives the finished draft, with fields the
+ * chosen counter does not use left null.
+ */
 @Composable
-private fun AddStatChannelDialog(
+private fun StatChannelEditor(
+    existing: StatChannel?,
     metadata: StatChannelMetadata?,
     settings: StatChannelSettings,
     voiceOptions: List<SelectorOption>,
@@ -625,87 +528,114 @@ private fun AddStatChannelDialog(
     preview: String,
     previewPending: Boolean,
     minimumInterval: (StatMechanism) -> Int,
-    onPreviewInputsChanged: (
-        definition: StatTypeDefinition?,
-        template: String,
-        style: Int,
-        roleId: String?,
-        countdownDate: Instant?,
-        goal: Int,
-        targetId: String?,
-        counterName: String,
-    ) -> Unit,
+    onDraftChanged: (StatChannelDraft?) -> Unit,
     onDismiss: () -> Unit,
-    onAdd: (
-        channelId: String,
-        categoryId: String?,
-        definition: StatTypeDefinition,
-        template: String,
-        style: Int,
-        mechanism: StatMechanism,
-        interval: Int,
-        roleId: String?,
-        countdownDate: Instant?,
-        goal: Int,
-        targetId: String?,
-        counterName: String,
-    ) -> Unit,
+    onSave: (StatChannelDraft) -> Unit,
 ) {
     val definitions = metadata?.statTypes.orEmpty()
-    var createNew by remember { mutableStateOf(true) }
-    var channelId by remember { mutableStateOf<String?>(null) }
+    val initialDefinition = existing
+        ?.let { channel -> definitions.firstOrNull { it.type == channel.statType } }
+        ?: definitions.firstOrNull()
+
+    var createNew by remember { mutableStateOf(existing == null) }
+    var channelId by remember { mutableStateOf(existing?.channelId) }
     var categoryId by remember { mutableStateOf<String?>(null) }
-    var definition by remember(definitions) { mutableStateOf(definitions.firstOrNull()) }
+    var definition by remember(definitions) { mutableStateOf(initialDefinition) }
     var template by remember(definitions) {
-        mutableStateOf(definitions.firstOrNull()?.defaultTemplate.orEmpty())
+        mutableStateOf(existing?.template ?: initialDefinition?.defaultTemplate.orEmpty())
     }
-    var style by remember { mutableIntStateOf(settings.defaultDisplayStyle) }
-    var mechanism by remember { mutableStateOf(StatMechanism.from(settings.defaultMechanism)) }
-    var interval by remember { mutableIntStateOf(settings.defaultIntervalMinutes) }
-    var roleId by remember { mutableStateOf<String?>(null) }
-    var countdownDate by remember { mutableStateOf<Instant?>(null) }
-    var goal by remember { mutableStateOf("100") }
-    var counterName by remember { mutableStateOf("") }
-    var targetId by remember { mutableStateOf<String?>(null) }
+    var style by remember {
+        mutableIntStateOf(existing?.displayStyle ?: settings.defaultDisplayStyle)
+    }
+    var mechanism by remember {
+        mutableStateOf(existing?.mechanism ?: StatMechanism.from(settings.defaultMechanism))
+    }
+    var interval by remember {
+        mutableIntStateOf(existing?.updateIntervalMinutes ?: settings.defaultIntervalMinutes)
+    }
+    var roleId by remember { mutableStateOf(existing?.roleId) }
+    var countdownDate by remember { mutableStateOf(existing?.countdownDate) }
+    var goal by remember {
+        mutableStateOf(existing?.goalTarget?.takeIf { it > 0 }?.toString() ?: "100")
+    }
+    var counterName by remember(definitions) {
+        mutableStateOf(
+            existing?.targetName
+                ?.takeIf { initialDefinition?.needs == StatRequirement.COUNTER_NAME }
+                .orEmpty()
+        )
+    }
+    var targetId by remember { mutableStateOf(existing?.targetId) }
 
     val needs = definition?.needs ?: StatRequirement.NONE
     val minimum = minimumInterval(mechanism)
 
-    LaunchedEffect(definition, template, style, roleId, countdownDate, goal, targetId, counterName) {
-        onPreviewInputsChanged(
-            definition,
-            template,
-            style,
-            roleId,
-            countdownDate,
-            goal.toIntOrNull() ?: 0,
-            targetId,
-            counterName,
+    val draft = definition?.let { picked ->
+        StatChannelDraft(
+            channelId = when {
+                existing != null -> existing.channelId
+                createNew -> "0"
+                else -> channelId.orEmpty()
+            },
+            categoryId = categoryId.takeIf { existing == null && createNew },
+            statType = picked.type,
+            template = template,
+            displayStyle = style,
+            mechanism = mechanism,
+            intervalMinutes = interval,
+            roleId = roleId.takeIf { needs == StatRequirement.ROLE },
+            countdownDate = countdownDate.takeIf { needs == StatRequirement.DATE },
+            goalTarget = (goal.toIntOrNull() ?: 0).takeIf { needs == StatRequirement.GOAL },
+            targetId = targetId?.toLongOrNull()?.takeIf {
+                needs == StatRequirement.COUNTING_CHANNEL || needs == StatRequirement.MINECRAFT_SERVER
+            },
+            targetName = counterName.takeIf { needs == StatRequirement.COUNTER_NAME },
         )
     }
+    val initialDraft = remember(definitions) { draft }
 
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("Add stat channel") },
-        text = {
-            Column(
-                modifier = Modifier
-                    .heightIn(max = 460.dp)
-                    .verticalScroll(rememberScrollState()),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
-                SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
-                    SegmentedButton(
-                        selected = createNew,
-                        onClick = { createNew = true },
-                        shape = SegmentedButtonDefaults.itemShape(index = 0, count = 2),
-                    ) { Text("Create new channel") }
-                    SegmentedButton(
-                        selected = !createNew,
-                        onClick = { createNew = false },
-                        shape = SegmentedButtonDefaults.itemShape(index = 1, count = 2),
-                    ) { Text("Use existing channel") }
-                }
+    LaunchedEffect(definition, template, style, roleId, countdownDate, goal, targetId, counterName) {
+        onDraftChanged(draft)
+    }
+
+    FullScreenEditor(
+        title = if (existing == null) "New stat channel" else "Edit stat channel",
+        onClose = onDismiss,
+        confirmLabel = if (existing == null) "Add" else "Save",
+        confirmEnabled = draft != null &&
+            (existing != null || createNew || channelId != null) &&
+            template.isNotBlank() &&
+            interval >= minimum &&
+            (needs != StatRequirement.ROLE || roleId != null) &&
+            (needs != StatRequirement.DATE || countdownDate != null) &&
+            (needs != StatRequirement.COUNTER_NAME || counterName.isNotBlank()) &&
+            (needs != StatRequirement.COUNTING_CHANNEL || targetId != null) &&
+            (needs != StatRequirement.MINECRAFT_SERVER || targetId != null),
+        onConfirm = { draft?.let(onSave) },
+        hasUnsavedChanges = draft != initialDraft,
+    ) {
+        SectionCard {
+            SectionCardHeader("Channel", Icons.AutoMirrored.Filled.VolumeUp)
+            if (existing != null) {
+                InfoRow(label = "Voice channel", value = existing.channelName)
+            } else {
+                EnumPicker(
+                    label = "Channel",
+                    options = listOf(
+                        EnumOption(
+                            value = true,
+                            title = "Create new channel",
+                            description = "The bot makes a fresh voice channel for this counter.",
+                        ),
+                        EnumOption(
+                            value = false,
+                            title = "Use existing channel",
+                            description = "The bot takes over a voice channel you already have.",
+                        ),
+                    ),
+                    selected = createNew,
+                    onSelect = { createNew = it },
+                )
 
                 if (createNew) {
                     DiscordSelectorSingle(
@@ -726,177 +656,154 @@ private fun AddStatChannelDialog(
                         onSelect = { channelId = it },
                     )
                 }
+            }
+        }
 
-                if (definitions.isEmpty()) {
+        SectionCard {
+            SectionCardHeader("Counter", Icons.Default.Equalizer)
+            if (definitions.isEmpty()) {
+                Text(
+                    text = "Could not load the counter catalogue. Pull to refresh and try again.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error,
+                )
+            } else {
+                DiscordSelectorSingle(
+                    kind = SelectorKind.Custom(Icons.Default.Equalizer),
+                    options = definitions.map {
+                        SelectorOption(
+                            id = it.type.toString(),
+                            name = "${it.category} · ${it.name}",
+                            subtitle = it.example,
+                        )
+                    },
+                    placeholder = "Pick a counter",
+                    label = "Displays",
+                    selectedId = definition?.type?.toString(),
+                    onSelect = { raw ->
+                        val picked = definitions.firstOrNull { it.type == raw?.toIntOrNull() }
+                        if (picked != null) {
+                            definition = picked
+                            template = picked.defaultTemplate
+                            style = picked.recommendedStyle
+                            roleId = null
+                            counterName = ""
+                            targetId = null
+                            countdownDate = null
+                            if (picked.realtime && mechanism != StatMechanism.RENAME) {
+                                interval = minimumInterval(mechanism)
+                            }
+                        }
+                    },
+                )
+            }
+
+            definition?.let {
+                Text(
+                    text = "${it.description}\nExample: ${it.example}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+
+            if (needs == StatRequirement.ROLE) {
+                DiscordSelectorSingle(
+                    kind = SelectorKind.Role,
+                    options = roleOptions,
+                    placeholder = "Pick a role",
+                    label = "Count members with role",
+                    selectedId = roleId,
+                    onSelect = { roleId = it },
+                )
+            }
+            if (needs == StatRequirement.DATE) {
+                CountdownDateField(value = countdownDate, onChange = { countdownDate = it })
+            }
+            if (needs == StatRequirement.GOAL) {
+                MewdekoTextField(
+                    value = goal,
+                    onValueChange = { goal = it.filter(Char::isDigit) },
+                    label = "Member goal",
+                    numeric = true,
+                )
+            }
+            if (needs == StatRequirement.COUNTER_NAME) {
+                MewdekoTextField(
+                    value = counterName,
+                    onValueChange = { counterName = it },
+                    label = "Twitch counter name",
+                    placeholder = "deaths",
+                    supportingText = "The name of a counter your Twitch chat commands update.",
+                )
+            }
+            if (needs == StatRequirement.COUNTING_CHANNEL) {
+                DiscordSelectorSingle(
+                    kind = SelectorKind.Custom(Icons.Default.Tag),
+                    options = countingOptions,
+                    placeholder = "Pick a counting channel",
+                    label = "Counting channel",
+                    selectedId = targetId,
+                    onSelect = { targetId = it },
+                )
+                if (countingOptions.isEmpty()) {
                     Text(
-                        text = "Could not load the counter catalogue. Pull to refresh and try again.",
+                        text = "No counting channels are set up in this server yet.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.error,
                     )
-                } else {
-                    DiscordSelectorSingle(
-                        kind = SelectorKind.Custom(Icons.Default.Equalizer),
-                        options = definitions.map {
-                            SelectorOption(
-                                id = it.type.toString(),
-                                name = "${it.category} · ${it.name}",
-                                subtitle = it.example,
-                            )
-                        },
-                        placeholder = "Pick a counter",
-                        label = "Displays",
-                        selectedId = definition?.type?.toString(),
-                        onSelect = { raw ->
-                            val picked = definitions.firstOrNull { it.type == raw?.toIntOrNull() }
-                            if (picked != null) {
-                                definition = picked
-                                template = picked.defaultTemplate
-                                style = picked.recommendedStyle
-                                roleId = null
-                                counterName = ""
-                                targetId = null
-                                countdownDate = null
-                                if (picked.realtime && mechanism != StatMechanism.RENAME) {
-                                    interval = minimumInterval(mechanism)
-                                }
-                            }
-                        },
-                    )
-                }
-
-                definition?.let {
-                    Text(
-                        text = "${it.description}\nExample: ${it.example}",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-
-                MewdekoTextField(
-                    value = template,
-                    onValueChange = { template = it },
-                    label = "Name template",
-                )
-                PlaceholderChips(
-                    placeholders = buildList {
-                        addAll(metadata?.commonPlaceholders.orEmpty())
-                        addAll(definition?.placeholders.orEmpty())
-                    },
-                    onInsert = { template += it },
-                )
-
-                PreviewRow(preview = preview, pending = previewPending)
-
-                StylePicker(metadata, style, definition) { style = it }
-                MechanismPicker(mechanism) {
-                    mechanism = it
-                    interval = interval.coerceAtLeast(minimumInterval(it))
-                }
-                IntervalField(
-                    interval = interval,
-                    minimum = minimum,
-                    realtimeHint = definition?.realtime == true,
-                    onChange = { interval = it },
-                )
-
-                if (needs == StatRequirement.ROLE) {
-                    DiscordSelectorSingle(
-                        kind = SelectorKind.Role,
-                        options = roleOptions,
-                        placeholder = "Pick a role",
-                        label = "Count members with role",
-                        selectedId = roleId,
-                        onSelect = { roleId = it },
-                    )
-                }
-                if (needs == StatRequirement.DATE) {
-                    CountdownDateField(value = countdownDate, onChange = { countdownDate = it })
-                }
-                if (needs == StatRequirement.GOAL) {
-                    MewdekoTextField(
-                        value = goal,
-                        onValueChange = { goal = it.filter(Char::isDigit) },
-                        label = "Member goal",
-                        numeric = true,
-                    )
-                }
-                if (needs == StatRequirement.COUNTER_NAME) {
-                    MewdekoTextField(
-                        value = counterName,
-                        onValueChange = { counterName = it },
-                        label = "Twitch counter name",
-                        placeholder = "deaths",
-                        supportingText = "The name of a counter your Twitch chat commands update.",
-                    )
-                }
-                if (needs == StatRequirement.COUNTING_CHANNEL) {
-                    DiscordSelectorSingle(
-                        kind = SelectorKind.Custom(Icons.Default.Tag),
-                        options = countingOptions,
-                        placeholder = "Pick a counting channel",
-                        label = "Counting channel",
-                        selectedId = targetId,
-                        onSelect = { targetId = it },
-                    )
-                    if (countingOptions.isEmpty()) {
-                        Text(
-                            text = "No counting channels are set up in this server yet.",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.error,
-                        )
-                    }
-                }
-                if (needs == StatRequirement.MINECRAFT_SERVER) {
-                    DiscordSelectorSingle(
-                        kind = SelectorKind.Custom(Icons.Default.Dns),
-                        options = minecraftOptions,
-                        placeholder = "Pick a Minecraft server",
-                        label = "Minecraft server",
-                        selectedId = targetId,
-                        onSelect = { targetId = it },
-                    )
-                    if (minecraftOptions.isEmpty()) {
-                        Text(
-                            text = "No Minecraft servers are configured in this server yet.",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.error,
-                        )
-                    }
                 }
             }
-        },
-        confirmButton = {
-            Button(
-                onClick = {
-                    val picked = definition ?: return@Button
-                    onAdd(
-                        if (createNew) "0" else channelId.orEmpty(),
-                        if (createNew) categoryId else null,
-                        picked,
-                        template,
-                        style,
-                        mechanism,
-                        interval,
-                        roleId,
-                        countdownDate,
-                        goal.toIntOrNull() ?: 0,
-                        targetId,
-                        counterName,
+            if (needs == StatRequirement.MINECRAFT_SERVER) {
+                DiscordSelectorSingle(
+                    kind = SelectorKind.Custom(Icons.Default.Dns),
+                    options = minecraftOptions,
+                    placeholder = "Pick a Minecraft server",
+                    label = "Minecraft server",
+                    selectedId = targetId,
+                    onSelect = { targetId = it },
+                )
+                if (minecraftOptions.isEmpty()) {
+                    Text(
+                        text = "No Minecraft servers are configured in this server yet.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error,
                     )
+                }
+            }
+        }
+
+        SectionCard {
+            SectionCardHeader("Name", Icons.Default.Numbers)
+            MewdekoTextField(
+                value = template,
+                onValueChange = { template = it },
+                label = "Name template",
+            )
+            PlaceholderChips(
+                placeholders = buildList {
+                    addAll(metadata?.commonPlaceholders.orEmpty())
+                    addAll(definition?.placeholders.orEmpty())
                 },
-                enabled = (createNew || channelId != null) &&
-                    definition != null &&
-                    template.isNotBlank() &&
-                    interval >= minimum &&
-                    (needs != StatRequirement.ROLE || roleId != null) &&
-                    (needs != StatRequirement.DATE || countdownDate != null) &&
-                    (needs != StatRequirement.COUNTER_NAME || counterName.isNotBlank()) &&
-                    (needs != StatRequirement.COUNTING_CHANNEL || targetId != null) &&
-                    (needs != StatRequirement.MINECRAFT_SERVER || targetId != null),
-            ) { Text("Add") }
-        },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
-    )
+                onInsert = { template += it },
+            )
+            PreviewRow(preview = preview, pending = previewPending)
+            StylePicker(metadata, style, definition) { style = it }
+        }
+
+        SectionCard {
+            SectionCardHeader("Updates", Icons.Default.Rotate90DegreesCcw)
+            MechanismPicker(mechanism) {
+                mechanism = it
+                interval = interval.coerceAtLeast(minimumInterval(it))
+            }
+            IntervalField(
+                interval = interval,
+                minimum = minimum,
+                realtimeHint = definition?.realtime == true,
+                onChange = { interval = it },
+            )
+        }
+    }
 }
 
 /** Read-only reference: how each counter style renders, and every counter grouped by category. */

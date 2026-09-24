@@ -6,14 +6,10 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.BarChart
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.RssFeed
 import androidx.compose.material.icons.filled.Tag
-import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
-import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -28,13 +24,16 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.mewdeko.mobile.core.model.EmbedMessage
 import dev.mewdeko.mobile.core.ui.ConfirmDialog
 import dev.mewdeko.mobile.core.ui.DiscordSelectorSingle
 import dev.mewdeko.mobile.core.ui.EmptyState
 import dev.mewdeko.mobile.core.ui.FeatureScaffold
+import dev.mewdeko.mobile.core.ui.FormSheet
+import dev.mewdeko.mobile.core.ui.FullScreenEditor
+import dev.mewdeko.mobile.core.ui.NewItemFab
 import dev.mewdeko.mobile.core.ui.MewdekoTextField
 import dev.mewdeko.mobile.core.ui.SectionCard
 import dev.mewdeko.mobile.core.ui.SectionCardHeader
@@ -72,11 +71,7 @@ fun FeedsScreen(
         onRefresh = { viewModel.load(refreshing = true) },
         onRetry = { viewModel.load() },
         floatingActionButton = {
-            ExtendedFloatingActionButton(
-                onClick = { showAdd = true },
-                icon = { Icon(Icons.Default.Add, contentDescription = null) },
-                text = { Text("Add feed") },
-            )
+            NewItemFab(label = "Add feed", onClick = { showAdd = true })
         },
     ) {
         SectionCard {
@@ -129,6 +124,8 @@ fun FeedsScreen(
                 EmptyState(
                     message = "No feeds yet. Add an RSS URL to mirror it into a channel.",
                     icon = Icons.Default.RssFeed,
+                    actionLabel = "Add feed",
+                    onAction = { showAdd = true },
                 )
             }
         } else {
@@ -184,7 +181,7 @@ fun FeedsScreen(
     }
 
     if (showAdd) {
-        AddFeedDialog(
+        AddFeedSheet(
             channelOptions = state.availableChannels.map { SelectorOption(it.id, it.name) },
             onDismiss = { showAdd = false },
             onAdd = { channelId, url ->
@@ -205,30 +202,27 @@ fun FeedsScreen(
     }
 
     editingMessage?.let { feed ->
-        var draft by remember(feed.index) { mutableStateOf(EmbedMessage.parse(feed.message)) }
-        AlertDialog(
-            onDismissRequest = { editingMessage = null },
-            title = { Text("Announcement message") },
-            text = {
-                EmbedMessageEditor(message = draft, onMessageChange = { draft = it })
+        val original = remember(feed.index) { EmbedMessage.parse(feed.message) }
+        var draft by remember(feed.index) { mutableStateOf(original) }
+        FullScreenEditor(
+            title = "Announcement message",
+            onClose = { editingMessage = null },
+            confirmLabel = "Save",
+            confirmEnabled = true,
+            onConfirm = {
+                viewModel.setMessage(feed, draft)
+                editingMessage = null
             },
-            confirmButton = {
-                Button(
-                    onClick = {
-                        viewModel.setMessage(feed, draft)
-                        editingMessage = null
-                    },
-                ) { Text("Save") }
-            },
-            dismissButton = {
-                TextButton(onClick = { editingMessage = null }) { Text("Cancel") }
-            },
-        )
+            hasUnsavedChanges = draft != original,
+        ) {
+            EmbedMessageEditor(message = draft, onMessageChange = { draft = it })
+        }
     }
 }
 
+/** The short sheet for subscribing a channel to a new feed URL. */
 @Composable
-private fun AddFeedDialog(
+private fun AddFeedSheet(
     channelOptions: List<SelectorOption>,
     onDismiss: () -> Unit,
     onAdd: (String, String) -> Unit,
@@ -236,33 +230,26 @@ private fun AddFeedDialog(
     var url by remember { mutableStateOf("") }
     var channelId by remember { mutableStateOf<String?>(null) }
 
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("Add feed") },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                MewdekoTextField(
-                    value = url,
-                    onValueChange = { url = it },
-                    label = "Feed URL",
-                    placeholder = "https://example.com/rss.xml",
-                )
-                DiscordSelectorSingle(
-                    kind = SelectorKind.Channel,
-                    options = channelOptions,
-                    placeholder = "Pick a channel",
-                    label = "Post to",
-                    selectedId = channelId,
-                    onSelect = { channelId = it },
-                )
-            }
-        },
-        confirmButton = {
-            Button(
-                onClick = { channelId?.let { onAdd(it, url.trim()) } },
-                enabled = url.isNotBlank() && channelId != null,
-            ) { Text("Add") }
-        },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
-    )
+    FormSheet(
+        title = "Add feed",
+        confirmLabel = "Add",
+        confirmEnabled = url.isNotBlank() && channelId != null,
+        onConfirm = { channelId?.let { onAdd(it, url.trim()) } },
+        onDismiss = onDismiss,
+    ) {
+        MewdekoTextField(
+            value = url,
+            onValueChange = { url = it },
+            label = "Feed URL",
+            placeholder = "https://example.com/rss.xml",
+        )
+        DiscordSelectorSingle(
+            kind = SelectorKind.Channel,
+            options = channelOptions,
+            placeholder = "Pick a channel",
+            label = "Post to",
+            selectedId = channelId,
+            onSelect = { channelId = it },
+        )
+    }
 }

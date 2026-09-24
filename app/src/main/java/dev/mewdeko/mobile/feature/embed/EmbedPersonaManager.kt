@@ -13,8 +13,8 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Person
@@ -24,11 +24,9 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -37,11 +35,13 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
-import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.mewdeko.mobile.core.ui.Avatar
 import dev.mewdeko.mobile.core.ui.ConfirmDialog
 import dev.mewdeko.mobile.core.ui.EmptyState
+import dev.mewdeko.mobile.core.ui.LocalSheetDismiss
+import dev.mewdeko.mobile.core.ui.MewdekoBottomSheet
 import dev.mewdeko.mobile.core.ui.MewdekoTextField
 import dev.mewdeko.mobile.core.ui.SwitchRow
 
@@ -57,13 +57,13 @@ fun PersonaManagerSheet(
     onDismiss: () -> Unit,
     viewModel: EmbedLibraryViewModel = hiltViewModel(),
 ) {
-    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val library by viewModel.library.collectAsStateWithLifecycle()
     var editing by remember { mutableStateOf<EmbedPersona?>(null) }
     var creating by remember { mutableStateOf(false) }
     var pendingDelete by remember { mutableStateOf<EmbedPersona?>(null) }
 
-    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheetState) {
+    MewdekoBottomSheet(onDismissRequest = onDismiss, showClose = false) {
+        val dismissSheet = LocalSheetDismiss.current
         Column(
             modifier = Modifier
                 .fillMaxSize()
@@ -91,7 +91,7 @@ fun PersonaManagerSheet(
 
             Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
                 Text("Personas", style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f))
-                TextButton(onClick = onDismiss) { Text("Done") }
+                TextButton(onClick = dismissSheet) { Text("Done") }
             }
             Text(
                 "Post under a custom name and avatar instead of the bot.",
@@ -172,7 +172,7 @@ private fun PersonaForm(
 
     Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
         IconButton(onClick = onBack) {
-            Icon(Icons.Default.ArrowBack, contentDescription = "Back")
+            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
         }
         Text(
             if (existing == null) "New persona" else "Edit persona",

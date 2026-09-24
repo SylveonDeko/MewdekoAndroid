@@ -7,7 +7,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AlternateEmail
 import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.Category
@@ -17,7 +16,6 @@ import androidx.compose.material.icons.filled.Groups
 import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.QueryStats
-import androidx.compose.material.icons.filled.Save
 import androidx.compose.material.icons.filled.Security
 import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material.icons.filled.SportsEsports
@@ -25,17 +23,11 @@ import androidx.compose.material.icons.filled.SupervisorAccount
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.VerifiedUser
 import androidx.compose.material3.Button
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.SegmentedButton
-import androidx.compose.material3.SegmentedButtonDefaults
-import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -49,13 +41,17 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.mewdeko.mobile.core.ui.ConfirmDialog
 import dev.mewdeko.mobile.core.ui.DiscordSelectorSingle
 import dev.mewdeko.mobile.core.ui.EmptyState
+import dev.mewdeko.mobile.core.ui.EnumOption
+import dev.mewdeko.mobile.core.ui.EnumPicker
 import dev.mewdeko.mobile.core.ui.ErrorState
 import dev.mewdeko.mobile.core.ui.FeatureScaffold
+import dev.mewdeko.mobile.core.ui.FullScreenEditor
+import dev.mewdeko.mobile.core.ui.NewItemFab
 import dev.mewdeko.mobile.core.ui.SectionCard
 import dev.mewdeko.mobile.core.ui.SectionCardHeader
 import dev.mewdeko.mobile.core.ui.SectionTab
@@ -94,30 +90,8 @@ fun DashboardaccessScreen(
         onRefresh = { viewModel.load(refreshing = true) },
         onRetry = { viewModel.load() },
         floatingActionButton = {
-            if (state.canManageAccess) {
-                when (state.page) {
-                    AccessPage.GRANTS -> ExtendedFloatingActionButton(
-                        onClick = viewModel::startNewGrant,
-                        icon = { Icon(Icons.Default.Add, contentDescription = null) },
-                        text = { Text("New grant") },
-                    )
-
-                    AccessPage.EDITOR -> ExtendedFloatingActionButton(
-                        onClick = { if (!state.isSavingGrant) viewModel.saveGrant() },
-                        icon = { Icon(Icons.Default.Save, contentDescription = null) },
-                        text = {
-                            Text(
-                                when {
-                                    state.isSavingGrant -> "Saving..."
-                                    state.draft.isEditing -> "Save changes"
-                                    else -> "Grant access"
-                                }
-                            )
-                        },
-                    )
-
-                    AccessPage.DELEGATION -> Unit
-                }
+            if (state.canManageAccess && state.page != AccessPage.DELEGATION) {
+                NewItemFab(label = "New grant", onClick = viewModel::startNewGrant)
             }
         },
     ) {
@@ -129,6 +103,30 @@ fun DashboardaccessScreen(
                 viewModel = viewModel,
                 onRemoveGrant = { pendingGrant = it },
                 onRemoveManager = { pendingManager = it },
+            )
+        }
+    }
+
+    if (state.canManageAccess && state.page == AccessPage.EDITOR) {
+        val draft = state.draft
+        FullScreenEditor(
+            title = if (draft.isEditing) "Edit grant" else "New grant",
+            onClose = viewModel::cancelEdit,
+            confirmLabel = when {
+                state.isSavingGrant -> "Saving..."
+                draft.isEditing -> "Save"
+                else -> "Grant"
+            },
+            confirmEnabled = !state.isSavingGrant && !draft.targetId.isNullOrBlank(),
+            onConfirm = viewModel::saveGrant,
+            hasUnsavedChanges = !draft.isEditing &&
+                (!draft.targetId.isNullOrBlank() || draft.grantedSections.isNotEmpty()),
+        ) {
+            GrantEditorPage(
+                state = state,
+                onTargetType = viewModel::setGrantTargetType,
+                onTarget = viewModel::setGrantTarget,
+                onGroupLevel = viewModel::setGroupLevel,
             )
         }
     }
@@ -164,40 +162,24 @@ private fun AccessPages(
     onRemoveGrant: (DashboardAccessGrant) -> Unit,
     onRemoveManager: (DashboardAccessManager) -> Unit,
 ) {
-    val tabs = buildList {
-        add(SectionTab(AccessPage.GRANTS.id, "Grants", Icons.Default.Key))
-        add(
-            SectionTab(
-                AccessPage.EDITOR.id,
-                if (state.draft.isEditing) "Edit grant" else "New grant",
-                Icons.Default.Edit,
-            )
+    if (state.isGuildOwner) {
+        SectionTabs(
+            tabs = listOf(
+                SectionTab(AccessPage.GRANTS.id, "Grants", Icons.Default.Key),
+                SectionTab(AccessPage.DELEGATION.id, "Managers", Icons.Default.SupervisorAccount),
+            ),
+            selectedId = if (state.page == AccessPage.DELEGATION) AccessPage.DELEGATION.id else AccessPage.GRANTS.id,
+            onSelect = { viewModel.selectPage(AccessPage.from(it)) },
         )
-        if (state.isGuildOwner) {
-            add(SectionTab(AccessPage.DELEGATION.id, "Managers", Icons.Default.SupervisorAccount))
-        }
     }
-    SectionTabs(
-        tabs = tabs,
-        selectedId = state.page.id,
-        onSelect = { viewModel.selectPage(AccessPage.from(it)) },
-    )
 
     when (state.page) {
-        AccessPage.GRANTS -> GrantsPage(
+        AccessPage.GRANTS, AccessPage.EDITOR -> GrantsPage(
             state = state,
             onEdit = viewModel::editGrant,
             onRemove = onRemoveGrant,
             onRetry = { viewModel.load(refreshing = true) },
-        )
-
-        AccessPage.EDITOR -> GrantEditorPage(
-            state = state,
-            onTargetType = viewModel::setGrantTargetType,
-            onTarget = viewModel::setGrantTarget,
-            onGroupLevel = viewModel::setGroupLevel,
-            onSave = viewModel::saveGrant,
-            onCancel = viewModel::cancelEdit,
+            onNew = viewModel::startNewGrant,
         )
 
         AccessPage.DELEGATION -> if (state.isGuildOwner) {
@@ -254,6 +236,7 @@ private fun GrantsPage(
     onEdit: (DashboardAccessGrant) -> Unit,
     onRemove: (DashboardAccessGrant) -> Unit,
     onRetry: () -> Unit,
+    onNew: () -> Unit,
 ) {
     SectionCard {
         SectionCardHeader("Access Grants (${state.grants.size})", Icons.Default.Key)
@@ -268,7 +251,12 @@ private fun GrantsPage(
                 ErrorState(message = state.grantsError, onRetry = onRetry)
 
             state.grants.isEmpty() ->
-                EmptyState("No restricted access grants yet.", icon = Icons.Default.Key)
+                EmptyState(
+                    message = "No restricted access grants yet.",
+                    icon = Icons.Default.Key,
+                    actionLabel = "New grant",
+                    onAction = onNew,
+                )
 
             else -> state.grants.forEach { grant ->
                 val count = grant.sections.size
@@ -305,15 +293,17 @@ private fun GrantsPage(
     }
 }
 
-/** The create or edit form: target selection and per-feature levels grouped by category. */
+/**
+ * The body of the grant editor: target selection and per-feature levels
+ * grouped by category. It is long, so it lives in a [FullScreenEditor] whose
+ * top bar holds Save and Close.
+ */
 @Composable
 private fun GrantEditorPage(
     state: DashboardAccessState,
     onTargetType: (AccessTargetType) -> Unit,
     onTarget: (String?) -> Unit,
     onGroupLevel: (DashboardAccessGroup, AccessLevel) -> Unit,
-    onSave: () -> Unit,
-    onCancel: () -> Unit,
 ) {
     val draft = state.draft
     val selectedCount = draft.grantedSections.size
@@ -344,21 +334,7 @@ private fun GrantEditorPage(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            TagChip("$selectedCount section${if (selectedCount == 1) "" else "s"} selected")
-            Row(
-                modifier = Modifier.weight(1f),
-                horizontalArrangement = Arrangement.End,
-            ) {
-                if (draft.isEditing) {
-                    OutlinedButton(onClick = onCancel) { Text("Cancel") }
-                }
-            }
-        }
+        TagChip("$selectedCount section${if (selectedCount == 1) "" else "s"} selected")
     }
 
     DashboardAccessSections.grouped.forEach { (category, groups) ->
@@ -373,32 +349,9 @@ private fun GrantEditorPage(
             }
         }
     }
-
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-        Button(
-            onClick = onSave,
-            enabled = !state.isSavingGrant && !draft.targetId.isNullOrBlank(),
-            modifier = Modifier.weight(1f),
-        ) {
-            Text(
-                when {
-                    state.isSavingGrant -> "Saving..."
-                    draft.isEditing -> "Save Changes"
-                    else -> "Grant Access"
-                }
-            )
-        }
-        if (draft.isEditing) {
-            OutlinedButton(onClick = onCancel, modifier = Modifier.weight(1f)) { Text("Cancel") }
-        }
-    }
 }
 
-/** One dashboard feature with its None, View, and Manage segmented choice. */
-@OptIn(ExperimentalMaterial3Api::class)
+/** One dashboard feature with its None, View, and Manage choice. */
 @Composable
 private fun GroupLevelRow(
     group: DashboardAccessGroup,
@@ -427,21 +380,22 @@ private fun GroupLevelRow(
                 }
             }
         }
-        val levels = AccessLevel.entries
-        SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
-            levels.forEachIndexed { index, option ->
-                SegmentedButton(
-                    selected = option == level,
-                    onClick = { onLevel(option) },
-                    shape = SegmentedButtonDefaults.itemShape(index = index, count = levels.size),
-                    icon = {},
-                ) {
-                    Text(option.label, maxLines = 1)
-                }
-            }
-        }
+        EnumPicker(
+            label = "Access",
+            options = AccessLevelOptions,
+            selected = level,
+            onSelect = onLevel,
+            showDescription = false,
+        )
     }
 }
+
+/** The None, View, and Manage choices, with what each lets the target do. */
+private val AccessLevelOptions = listOf(
+    EnumOption(AccessLevel.NONE, AccessLevel.NONE.label, "Hidden from them on the dashboard."),
+    EnumOption(AccessLevel.VIEW, AccessLevel.VIEW.label, "They can see these settings but not change them."),
+    EnumOption(AccessLevel.MANAGE, AccessLevel.MANAGE.label, "They can see and change these settings."),
+)
 
 /** Owner-only delegation toggle and access-manager list. */
 @Composable

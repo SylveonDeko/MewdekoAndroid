@@ -3,6 +3,7 @@ package dev.mewdeko.mobile.util
 import java.time.Duration
 import java.time.Instant
 import java.time.ZoneId
+import java.time.ZoneOffset
 import java.time.format.DateTimeFormatter
 import java.time.format.FormatStyle
 import kotlin.math.abs
@@ -14,8 +15,18 @@ private val ShortDateTime: DateTimeFormatter =
     DateTimeFormatter.ofLocalizedDateTime(FormatStyle.MEDIUM, FormatStyle.SHORT)
         .withZone(ZoneId.systemDefault())
 
+private val ShortDateUtc: DateTimeFormatter =
+    DateTimeFormatter.ofLocalizedDate(FormatStyle.MEDIUM).withZone(ZoneOffset.UTC)
+
 /** Formats as a medium-length local date, e.g. `12 Mar 2026`. */
 fun Instant.shortDate(): String = ShortDate.format(this)
+
+/**
+ * Formats a calendar date the bot stored as an offsetless midnight, which is
+ * parsed as UTC, in UTC, so it never shifts to the previous or next day in
+ * the device zone. Use for birthdays and other date-only values.
+ */
+fun Instant.calendarDate(): String = ShortDateUtc.format(this)
 
 /** Formats as a medium local date with a short time. */
 fun Instant.shortDateTime(): String = ShortDateTime.format(this)

@@ -27,11 +27,9 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.InputChip
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -41,6 +39,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
+import dev.mewdeko.mobile.core.ui.LocalSheetDismiss
+import dev.mewdeko.mobile.core.ui.MewdekoBottomSheet
 
 /**
  * Renders [value] the way the picker's chip should read: the guild emote's
@@ -128,18 +128,16 @@ fun SuggestionEmotePicker(
     }
 
     if (sheetOpen) {
-        val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-        ModalBottomSheet(
+        MewdekoBottomSheet(
             onDismissRequest = { sheetOpen = false; typed = "" },
-            sheetState = sheetState,
+            title = label,
         ) {
+            val dismissSheet = LocalSheetDismiss.current
             Column(
                 modifier = Modifier
                     .imePadding()
                     .padding(horizontal = 16.dp, vertical = 8.dp),
             ) {
-                Text(label, style = MaterialTheme.typography.titleMedium)
-                Spacer(Modifier.height(12.dp))
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -155,8 +153,7 @@ fun SuggestionEmotePicker(
                         enabled = typed.isNotBlank() && (max <= 1 || selected.size < max),
                         onClick = {
                             choose(typed.trim())
-                            typed = ""
-                            sheetOpen = false
+                            dismissSheet()
                         },
                     ) {
                         Icon(Icons.Default.Check, contentDescription = "Add typed emoji")
@@ -182,7 +179,7 @@ fun SuggestionEmotePicker(
                                     Surface(
                                         onClick = {
                                             choose(emote.mention)
-                                            if (max <= 1) sheetOpen = false
+                                            if (max <= 1) dismissSheet()
                                         },
                                         shape = CircleShape,
                                         color = if (isSelected) {

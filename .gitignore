@@ -22,3 +22,5 @@ local.properties
 # Android Studio / IntelliJ
 .idea/
 *.hprof
+
+.DS_Store

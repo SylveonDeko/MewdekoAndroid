@@ -5,16 +5,12 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.Tag
 import androidx.compose.material.icons.filled.WavingHand
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
-import androidx.compose.material3.ExtendedFloatingActionButton
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -29,13 +25,17 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
-import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.mewdeko.mobile.core.model.EmbedMessage
 import dev.mewdeko.mobile.core.ui.ConfirmDialog
 import dev.mewdeko.mobile.core.ui.DiscordSelectorSingle
 import dev.mewdeko.mobile.core.ui.EmptyState
+import dev.mewdeko.mobile.core.ui.EnumOption
+import dev.mewdeko.mobile.core.ui.EnumPicker
 import dev.mewdeko.mobile.core.ui.FeatureScaffold
+import dev.mewdeko.mobile.core.ui.FormSheet
+import dev.mewdeko.mobile.core.ui.NewItemFab
 import dev.mewdeko.mobile.core.ui.MewdekoTextField
 import dev.mewdeko.mobile.core.ui.SectionCard
 import dev.mewdeko.mobile.core.ui.SectionCardHeader
@@ -70,32 +70,16 @@ fun MultiGreetsScreen(
         onRefresh = { viewModel.load(refreshing = true) },
         onRetry = { viewModel.load() },
         floatingActionButton = {
-            ExtendedFloatingActionButton(
-                onClick = { showAdd = true },
-                icon = { Icon(Icons.Default.Add, contentDescription = null) },
-                text = { Text("Add greet") },
-            )
+            NewItemFab(label = "Add greet", onClick = { showAdd = true })
         },
     ) {
         SectionCard {
             SectionCardHeader("Greet mode", Icons.Default.WavingHand)
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                MultiGreetType.entries.forEach { type ->
-                    FilterChip(
-                        selected = state.greetType == type,
-                        onClick = { viewModel.setType(type) },
-                        label = { Text(type.label) },
-                        modifier = Modifier.weight(1f),
-                    )
-                }
-            }
-            Text(
-                text = state.greetType.blurb,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            EnumPicker(
+                label = "Greet mode",
+                options = MultiGreetType.entries.map { EnumOption(it, title = it.label, description = it.blurb) },
+                selected = state.greetType,
+                onSelect = { viewModel.setType(it) },
             )
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 StatTile("Greets", "${state.greets.size}", Modifier.weight(1f))
@@ -108,6 +92,8 @@ fun MultiGreetsScreen(
                 EmptyState(
                     message = "No welcome messages configured yet.",
                     icon = Icons.Default.WavingHand,
+                    actionLabel = "Add greet",
+                    onAction = { showAdd = true },
                 )
             }
         } else {
@@ -272,30 +258,25 @@ fun MultiGreetsScreen(
 
     if (showAdd) {
         var channelId by remember { mutableStateOf<String?>(null) }
-        AlertDialog(
-            onDismissRequest = { showAdd = false },
-            title = { Text("Add greet channel") },
-            text = {
-                DiscordSelectorSingle(
-                    kind = SelectorKind.Channel,
-                    options = state.availableChannels.map { SelectorOption(it.id, it.name) },
-                    placeholder = "Pick a channel",
-                    label = "Post welcomes in",
-                    selectedId = channelId,
-                    onSelect = { channelId = it },
-                )
+        FormSheet(
+            title = "Add greet channel",
+            confirmLabel = "Add",
+            confirmEnabled = channelId != null,
+            onConfirm = {
+                channelId?.let { viewModel.add(it) }
+                showAdd = false
             },
-            confirmButton = {
-                Button(
-                    onClick = {
-                        channelId?.let { viewModel.add(it) }
-                        showAdd = false
-                    },
-                    enabled = channelId != null,
-                ) { Text("Add") }
-            },
-            dismissButton = { TextButton(onClick = { showAdd = false }) { Text("Cancel") } },
-        )
+            onDismiss = { showAdd = false },
+        ) {
+            DiscordSelectorSingle(
+                kind = SelectorKind.Channel,
+                options = state.availableChannels.map { SelectorOption(it.id, it.name) },
+                placeholder = "Pick a channel",
+                label = "Post welcomes in",
+                selectedId = channelId,
+                onSelect = { channelId = it },
+            )
+        }
     }
 
     pendingDelete?.let { greet ->

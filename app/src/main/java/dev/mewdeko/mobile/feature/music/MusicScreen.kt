@@ -12,6 +12,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.QueueMusic
+import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Block
 import androidx.compose.material.icons.filled.Delete
@@ -28,8 +29,6 @@ import androidx.compose.material.icons.filled.Shuffle
 import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.SkipPrevious
 import androidx.compose.material.icons.filled.Tune
-import androidx.compose.material.icons.filled.VolumeUp
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.FilterChip
@@ -56,7 +55,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil.compose.AsyncImage
 import dev.mewdeko.mobile.core.model.PlayerState
@@ -65,6 +64,7 @@ import dev.mewdeko.mobile.core.ui.ConfirmDialog
 import dev.mewdeko.mobile.core.ui.DiscordSelectorSingle
 import dev.mewdeko.mobile.core.ui.EmptyState
 import dev.mewdeko.mobile.core.ui.FeatureScaffold
+import dev.mewdeko.mobile.core.ui.FormSheet
 import dev.mewdeko.mobile.core.ui.MewdekoTextField
 import dev.mewdeko.mobile.core.ui.SearchField
 import dev.mewdeko.mobile.core.ui.SectionCard
@@ -409,7 +409,7 @@ fun MusicScreen(
                 SectionCard {
                     SectionCardHeader(
                         title = "TTS channels",
-                        icon = Icons.Default.VolumeUp,
+                        icon = Icons.AutoMirrored.Filled.VolumeUp,
                         trailing = {
                             IconButton(onClick = { showAddTtsChannel = true }) {
                                 Icon(Icons.Default.Add, contentDescription = "Add TTS channel")
@@ -417,7 +417,11 @@ fun MusicScreen(
                         },
                     )
                     if (state.tts.voiceChannels.isEmpty()) {
-                        EmptyState("No voice channels wired up for TTS.")
+                        EmptyState(
+                            message = "No voice channels wired up for TTS.",
+                            actionLabel = "Add TTS channel",
+                            onAction = { showAddTtsChannel = true },
+                        )
                     } else {
                         state.tts.voiceChannels.forEach { entry ->
                             TtsChannelRow(
@@ -608,7 +612,7 @@ fun MusicScreen(
                 }
 
                 SectionCard {
-                    SectionCardHeader("Volume", Icons.Default.VolumeUp)
+                    SectionCardHeader("Volume", Icons.AutoMirrored.Filled.VolumeUp)
                     CommittingSliderRow(
                         label = "Player volume",
                         value = player?.volume?.toFloat() ?: state.settings.volume.toFloat(),
@@ -761,7 +765,11 @@ fun MusicScreen(
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                     if (state.linkChannels.isEmpty()) {
-                        EmptyState("No channels have music link conversion enabled.")
+                        EmptyState(
+                            message = "No channels have music link conversion enabled.",
+                            actionLabel = "Add channel",
+                            onAction = { showAddLinkChannel = true },
+                        )
                     } else {
                         state.linkChannels.forEach { channelId ->
                             val name = state.textChannels.firstOrNull { it.id == channelId }?.name
@@ -794,110 +802,94 @@ fun MusicScreen(
         var announceJoinLeave by remember { mutableStateOf(false) }
         var joinFormat by remember { mutableStateOf("") }
         var leaveFormat by remember { mutableStateOf("") }
-        AlertDialog(
-            onDismissRequest = { showAddTtsChannel = false },
-            title = { Text("Add TTS channel") },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    DiscordSelectorSingle(
-                        kind = SelectorKind.Custom(Icons.Default.VolumeUp),
-                        options = state.voiceChannels.map { SelectorOption(it.id, it.name) },
-                        placeholder = "Pick a voice channel",
-                        label = "Voice channel",
-                        selectedId = voiceChannelId,
-                        onSelect = { voiceChannelId = it },
+        FormSheet(
+            title = "Add TTS channel",
+            confirmLabel = "Add",
+            confirmEnabled = voiceChannelId != null,
+            onConfirm = {
+                val vc = voiceChannelId
+                if (vc != null) {
+                    viewModel.upsertTtsChannel(
+                        TtsVoiceChannelEntry(
+                            voiceChannelId = vc,
+                            enabled = true,
+                            linkedTextChannelId = textChannelId,
+                            announceJoinLeave = announceJoinLeave,
+                            joinFormat = joinFormat.takeIf { it.isNotBlank() },
+                            leaveFormat = leaveFormat.takeIf { it.isNotBlank() },
+                        ),
+                        reloadAfter = true,
                     )
-                    DiscordSelectorSingle(
-                        kind = SelectorKind.Channel,
-                        options = state.textChannels.map { SelectorOption(it.id, it.name) },
-                        placeholder = "No linked text channel",
-                        label = "Read messages from",
-                        selectedId = textChannelId,
-                        onSelect = { textChannelId = it },
-                    )
-                    SwitchRow(
-                        title = "Announce join/leave",
-                        checked = announceJoinLeave,
-                        onCheckedChange = { announceJoinLeave = it },
-                    )
-                    if (announceJoinLeave) {
-                        MewdekoTextField(
-                            value = joinFormat,
-                            onValueChange = { joinFormat = it },
-                            label = "Join format",
-                            placeholder = "%user.name% joined the channel",
-                        )
-                        MewdekoTextField(
-                            value = leaveFormat,
-                            onValueChange = { leaveFormat = it },
-                            label = "Leave format",
-                            placeholder = "%user.name% left the channel",
-                        )
-                        Text(
-                            text = "Placeholders: %user.name% %user.mention% %user.id% " +
-                                "%server.name% %server.members% %channel.name%",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
                 }
+                showAddTtsChannel = false
             },
-            confirmButton = {
-                Button(
-                    onClick = {
-                        val vc = voiceChannelId
-                        if (vc != null) {
-                            viewModel.upsertTtsChannel(
-                                TtsVoiceChannelEntry(
-                                    voiceChannelId = vc,
-                                    enabled = true,
-                                    linkedTextChannelId = textChannelId,
-                                    announceJoinLeave = announceJoinLeave,
-                                    joinFormat = joinFormat.takeIf { it.isNotBlank() },
-                                    leaveFormat = leaveFormat.takeIf { it.isNotBlank() },
-                                ),
-                                reloadAfter = true,
-                            )
-                        }
-                        showAddTtsChannel = false
-                    },
-                    enabled = voiceChannelId != null,
-                ) { Text("Add") }
-            },
-            dismissButton = {
-                TextButton(onClick = { showAddTtsChannel = false }) { Text("Cancel") }
-            },
-        )
+            onDismiss = { showAddTtsChannel = false },
+        ) {
+            DiscordSelectorSingle(
+                kind = SelectorKind.Custom(Icons.AutoMirrored.Filled.VolumeUp),
+                options = state.voiceChannels.map { SelectorOption(it.id, it.name) },
+                placeholder = "Pick a voice channel",
+                label = "Voice channel",
+                selectedId = voiceChannelId,
+                onSelect = { voiceChannelId = it },
+            )
+            DiscordSelectorSingle(
+                kind = SelectorKind.Channel,
+                options = state.textChannels.map { SelectorOption(it.id, it.name) },
+                placeholder = "No linked text channel",
+                label = "Read messages from",
+                selectedId = textChannelId,
+                onSelect = { textChannelId = it },
+            )
+            SwitchRow(
+                title = "Announce join/leave",
+                checked = announceJoinLeave,
+                onCheckedChange = { announceJoinLeave = it },
+            )
+            if (announceJoinLeave) {
+                MewdekoTextField(
+                    value = joinFormat,
+                    onValueChange = { joinFormat = it },
+                    label = "Join format",
+                    placeholder = "%user.name% joined the channel",
+                )
+                MewdekoTextField(
+                    value = leaveFormat,
+                    onValueChange = { leaveFormat = it },
+                    label = "Leave format",
+                    placeholder = "%user.name% left the channel",
+                )
+                Text(
+                    text = "Placeholders: %user.name% %user.mention% %user.id% " +
+                        "%server.name% %server.members% %channel.name%",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
     }
 
     if (showAddLinkChannel) {
         var linkChannelId by remember { mutableStateOf<String?>(null) }
-        AlertDialog(
-            onDismissRequest = { showAddLinkChannel = false },
-            title = { Text("Add link conversion channel") },
-            text = {
-                DiscordSelectorSingle(
-                    kind = SelectorKind.Channel,
-                    options = state.textChannels.map { SelectorOption(it.id, it.name) },
-                    placeholder = "Pick a channel",
-                    label = "Channel",
-                    selectedId = linkChannelId,
-                    onSelect = { linkChannelId = it },
-                )
+        FormSheet(
+            title = "Add link conversion channel",
+            confirmLabel = "Enable",
+            confirmEnabled = linkChannelId != null,
+            onConfirm = {
+                linkChannelId?.let { viewModel.addLinkChannel(it) }
+                showAddLinkChannel = false
             },
-            confirmButton = {
-                Button(
-                    onClick = {
-                        linkChannelId?.let { viewModel.addLinkChannel(it) }
-                        showAddLinkChannel = false
-                    },
-                    enabled = linkChannelId != null,
-                ) { Text("Enable") }
-            },
-            dismissButton = {
-                TextButton(onClick = { showAddLinkChannel = false }) { Text("Cancel") }
-            },
-        )
+            onDismiss = { showAddLinkChannel = false },
+        ) {
+            DiscordSelectorSingle(
+                kind = SelectorKind.Channel,
+                options = state.textChannels.map { SelectorOption(it.id, it.name) },
+                placeholder = "Pick a channel",
+                label = "Channel",
+                selectedId = linkChannelId,
+                onSelect = { linkChannelId = it },
+            )
+        }
     }
 
     if (pendingClearQueue) {

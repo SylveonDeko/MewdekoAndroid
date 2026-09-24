@@ -11,27 +11,19 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Bolt
-import androidx.compose.material.icons.filled.ContentCut
 import androidx.compose.material.icons.filled.Gavel
 import androidx.compose.material.icons.filled.Groups
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Insights
-import androidx.compose.material.icons.filled.Mail
-import androidx.compose.material.icons.filled.PanTool
 import androidx.compose.material.icons.filled.Public
 import androidx.compose.material.icons.filled.Security
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material.icons.filled.SmartToy
-import androidx.compose.material.icons.filled.SportsEsports
 import androidx.compose.material3.Button
-import androidx.compose.material3.Checkbox
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
-import androidx.compose.material3.ListItem
-import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -45,14 +37,15 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.mewdeko.mobile.core.model.Snowflake
-import dev.mewdeko.mobile.core.ui.ConfirmDialog
 import dev.mewdeko.mobile.core.ui.DiscordSelectorSingle
 import dev.mewdeko.mobile.core.ui.EmptyState
 import dev.mewdeko.mobile.core.ui.FeatureScaffold
 import dev.mewdeko.mobile.core.ui.InfoRow
+import dev.mewdeko.mobile.core.ui.MewdekoBottomSheet
+import dev.mewdeko.mobile.core.ui.MultiSelectDropdown
 import dev.mewdeko.mobile.core.ui.SectionCard
 import dev.mewdeko.mobile.core.ui.SectionCardHeader
 import dev.mewdeko.mobile.core.ui.SectionTab
@@ -63,6 +56,7 @@ import dev.mewdeko.mobile.core.ui.SliderRow
 import dev.mewdeko.mobile.core.ui.StatTile
 import dev.mewdeko.mobile.core.ui.SwitchRow
 import dev.mewdeko.mobile.core.ui.clickableRow
+import dev.mewdeko.mobile.core.ui.diffSelection
 import dev.mewdeko.mobile.navigation.GuildRouteArgs
 
 /** The Material icon standing in for each section. */
@@ -395,89 +389,77 @@ private fun RolesSection(state: AdministrationState, viewModel: AdministrationVi
         )
     }
 
-    RoleCheckList(
-        title = "Auto-assigned to humans",
-        icon = Icons.Default.Groups,
-        blurb = "Applied automatically to non-bot members on join.",
-        roles = state.availableRoles.map { it.id to it.name },
-        selected = state.autoAssign.normalRoles,
-        onToggle = viewModel::toggleAutoAssignNormal,
-    )
+    SectionCard {
+        SectionCardHeader("Auto-assigned roles", Icons.Default.SmartToy)
+        Text(
+            "Given automatically to new members the moment they join.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        RoleToggleDropdown(
+            label = "Humans",
+            placeholder = "No roles for humans",
+            options = roleOptions,
+            selected = state.autoAssign.normalRoles,
+            onToggle = viewModel::toggleAutoAssignNormal,
+        )
+        RoleToggleDropdown(
+            label = "Bots",
+            placeholder = "No roles for bots",
+            options = roleOptions,
+            selected = state.autoAssign.botRoles,
+            onToggle = viewModel::toggleAutoAssignBot,
+        )
+    }
 
-    RoleCheckList(
-        title = "Auto-assigned to bots",
-        icon = Icons.Default.SmartToy,
-        blurb = "Applied automatically to bot accounts on join.",
-        roles = state.availableRoles.map { it.id to it.name },
-        selected = state.autoAssign.botRoles,
-        onToggle = viewModel::toggleAutoAssignBot,
-    )
-
-    RoleCheckList(
-        title = "Auto-ban roles",
-        icon = Icons.Default.Gavel,
-        blurb = "Members who receive any of these roles are banned automatically.",
-        roles = state.availableRoles.map { it.id to it.name },
-        selected = state.autoBanRoles,
-        onToggle = viewModel::toggleAutoBanRole,
-        destructive = true,
-    )
+    SectionCard {
+        SectionCardHeader("Auto-ban roles", Icons.Default.Gavel, tint = MaterialTheme.colorScheme.error)
+        Text(
+            "Members who receive any of these roles are banned automatically.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        RoleToggleDropdown(
+            label = "Ban on role",
+            placeholder = "No auto-ban roles",
+            options = roleOptions,
+            selected = state.autoBanRoles,
+            onToggle = viewModel::toggleAutoBanRole,
+            destructive = true,
+        )
+    }
 
     SelfAssignableRolesSection(state = state, viewModel = viewModel)
     VoiceChannelRolesSection(state = state, viewModel = viewModel)
     ReactionRolesSection(state = state, viewModel = viewModel)
 }
 
-/** A checklist card used for the simple role toggles (auto-assign, auto-ban). */
+/**
+ * A role [MultiSelectDropdown] for settings whose view model saves one role
+ * at a time: every role added or removed in the dropdown is passed to
+ * [onToggle] once.
+ */
 @Composable
-fun RoleCheckList(
-    title: String,
-    icon: ImageVector,
-    blurb: String,
-    roles: List<Pair<Snowflake, String>>,
+private fun RoleToggleDropdown(
+    label: String,
+    placeholder: String,
+    options: List<SelectorOption>,
     selected: List<Snowflake>,
     onToggle: (Snowflake) -> Unit,
     destructive: Boolean = false,
 ) {
-    var expanded by remember { mutableStateOf(false) }
-    val chosen = remember(selected) { selected.toSet() }
-
-    SectionCard {
-        SectionCardHeader(
-            title = "$title (${chosen.size})",
-            icon = icon,
-            tint = if (destructive) MaterialTheme.colorScheme.error else null,
-            trailing = {
-                OutlinedButton(onClick = { expanded = !expanded }) {
-                    Text(if (expanded) "Done" else "Edit")
-                }
-            },
-        )
-        Text(
-            blurb,
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-
-        val visible = if (expanded) roles else roles.filter { it.first in chosen }
-        if (visible.isEmpty()) {
-            Text(
-                "None selected. Tap Edit to pick roles.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
-        visible.forEach { (id, name) ->
-            ListItem(
-                headlineContent = { Text("@$name") },
-                leadingContent = {
-                    Checkbox(checked = id in chosen, onCheckedChange = { onToggle(id) })
-                },
-                colors = ListItemDefaults.colors(containerColor = androidx.compose.ui.graphics.Color.Transparent),
-                modifier = Modifier.clickableRow { onToggle(id) },
-            )
-        }
-    }
+    MultiSelectDropdown(
+        kind = SelectorKind.Role,
+        options = options,
+        selection = selected,
+        onSelectionChange = { next ->
+            val (added, removed) = diffSelection(selected, next)
+            (removed + added).forEach(onToggle)
+        },
+        label = label,
+        placeholder = placeholder,
+        destructive = destructive,
+    )
 }
 
 @Composable
@@ -536,11 +518,11 @@ private data class ProtectionConfig(
         get() = roleId.takeIf { action == AntiPunishmentAction.ADD_ROLE }
 }
 
-/** Reads a .NET timespan or second count into whole minutes. */
+/** Reads a bare minute count or a legacy `H:MM` timespan into whole minutes. */
 private fun parseMinutes(raw: String): Int? {
     val trimmed = raw.trim()
     if (trimmed.isEmpty()) return null
-    trimmed.toDoubleOrNull()?.let { return (it / 60).toInt() }
+    trimmed.toDoubleOrNull()?.let { return it.toInt() }
     val parts = trimmed.split(':')
     if (parts.size < 2) return null
     val hours = parts[0].toIntOrNull() ?: return null
@@ -561,7 +543,7 @@ private fun ProtectionEditSheet(
         mutableStateOf(hydrate(editor, protection))
     }
 
-    ModalBottomSheet(onDismissRequest = onDismiss) {
+    MewdekoBottomSheet(onDismissRequest = onDismiss, title = editor.label) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
@@ -571,8 +553,6 @@ private fun ProtectionEditSheet(
                 .padding(bottom = 32.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            Text(editor.label, style = MaterialTheme.typography.titleMedium)
-
             SwitchRow(
                 title = "Enabled",
                 checked = config.enabled,
@@ -610,7 +590,7 @@ private fun ProtectionEditSheet(
                             label = "Message threshold",
                             value = config.messageThreshold.toFloat(),
                             onValueChange = { config = config.copy(messageThreshold = it.toInt()) },
-                            valueRange = 2f..100f,
+                            valueRange = 2f..10f,
                         )
                         SliderRow(
                             label = "Mute time",

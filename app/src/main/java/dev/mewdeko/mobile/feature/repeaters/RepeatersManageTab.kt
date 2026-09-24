@@ -50,10 +50,16 @@ fun RepeatersManageTab(
     onEdit: (RepeaterEntry) -> Unit,
     onDelete: (RepeaterEntry) -> Unit,
     onQuickEdit: (RepeaterEntry, QuickEditField) -> Unit,
+    onNew: () -> Unit,
 ) {
     if (state.repeaters.isEmpty()) {
         SectionCard {
-            EmptyState(message = "No repeaters configured yet.", icon = Icons.Default.Repeat)
+            EmptyState(
+                message = "No repeaters configured yet.",
+                icon = Icons.Default.Repeat,
+                actionLabel = "New repeater",
+                onAction = onNew,
+            )
         }
         return
     }

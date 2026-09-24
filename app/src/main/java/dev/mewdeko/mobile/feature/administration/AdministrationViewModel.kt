@@ -16,6 +16,7 @@ import dev.mewdeko.mobile.core.net.asSnowflakeNumber
 import dev.mewdeko.mobile.core.net.jsonBody
 import dev.mewdeko.mobile.core.net.jsonInt
 import dev.mewdeko.mobile.core.net.jsonString
+import dev.mewdeko.mobile.core.net.snowflakeIds
 import dev.mewdeko.mobile.core.ui.FeatureViewModel
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
@@ -23,11 +24,15 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.builtins.nullable
 import kotlinx.serialization.builtins.serializer
 import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.buildJsonObject
 import javax.inject.Inject
 
@@ -54,6 +59,7 @@ data class AdministrationState(
     val serverRecovery: ServerRecoveryStatusPayload = ServerRecoveryStatusPayload(),
     val deleteMessageOnCommand: DeleteMessageOnCommandPayload = DeleteMessageOnCommandPayload(),
     val statsOptOut: Boolean? = null,
+    val autoDeleteSelfAssign: Boolean? = null,
     val staffRoleId: Snowflake? = null,
     val memberRoleId: Snowflake? = null,
     val timezoneId: String = "UTC",
@@ -86,6 +92,13 @@ class AdministrationViewModel @Inject constructor(
 ) : FeatureViewModel(savedStateHandle, api, session) {
 
     private val _state = MutableStateFlow(AdministrationState())
+
+    /**
+     * Runs one-id list toggles one after another. A multi-select change can
+     * fire several at once (Clear, for one), and the bot stores some of these
+     * lists as a single value, so overlapping requests could drop an edit.
+     */
+    private val listToggleLock = Mutex()
 
     /** Observable screen state. */
     val state: StateFlow<AdministrationState> = _state.asStateFlow()
@@ -260,6 +273,11 @@ class AdministrationViewModel @Inject constructor(
                     )
                 }.getOrNull()
             }
+            val guildConfig = async {
+                runCatching {
+                    api.sendRaw(Endpoint("api/GuildConfig/$guildId")) as? JsonObject
+                }.getOrNull()
+            }
 
             _state.update {
                 it.copy(
@@ -293,6 +311,10 @@ class AdministrationViewModel @Inject constructor(
                     timezoneId = timezone.await() ?: "UTC",
                     banMessage = banMessage.await().orEmpty(),
                     gameVoiceChannelId = gameVoice.await(),
+                    statsOptOut = (guildConfig.await()?.get("statsOptOut") as? JsonPrimitive)?.booleanOrNull,
+                    autoDeleteSelfAssign =
+                        (guildConfig.await()?.get("autoDeleteSelfAssignedRoleMessages") as? JsonPrimitive)
+                            ?.booleanOrNull,
                 )
             }
         }
@@ -300,8 +322,6 @@ class AdministrationViewModel @Inject constructor(
 
     /** Switches the visible section. */
     fun setSection(section: AdminSection) = _state.update { it.copy(section = section) }
-
-    // region Special roles, timezone, ban message
 
     /** Names the role that counts as staff, or clears it with null. */
     fun setStaffRole(roleId: Snowflake?) = launchAction("Failed to set staff role.") {
@@ -352,48 +372,51 @@ class AdministrationViewModel @Inject constructor(
         postSuccess("Ban message saved.")
     }
 
-    // endregion
-
-    // region Role automation
 
     /** Adds or removes a role that gets its holder banned on sight. */
     fun toggleAutoBanRole(roleId: Snowflake) = launchAction("Failed to update auto-ban roles.") {
-        val present = roleId in _state.value.autoBanRoles
-        if (present) {
-            api.sendIgnoringBody(
-                Endpoint("api/Administration/$guildId/auto-ban-roles/$roleId", HttpMethod.DELETE)
-            )
-        } else {
-            api.sendIgnoringBody(
-                Endpoint(
-                    "api/Administration/$guildId/auto-ban-roles",
-                    HttpMethod.POST,
-                    roleId.asSnowflakeNumber().toString(),
+        listToggleLock.withLock {
+            val present = roleId in _state.value.autoBanRoles
+            if (present) {
+                api.sendIgnoringBody(
+                    Endpoint("api/Administration/$guildId/auto-ban-roles/$roleId", HttpMethod.DELETE)
                 )
-            )
-        }
-        _state.update {
-            it.copy(autoBanRoles = if (present) it.autoBanRoles - roleId else it.autoBanRoles + roleId)
+            } else {
+                api.sendIgnoringBody(
+                    Endpoint(
+                        "api/Administration/$guildId/auto-ban-roles",
+                        HttpMethod.POST,
+                        roleId.asSnowflakeNumber().toString(),
+                    )
+                )
+            }
+            _state.update {
+                it.copy(autoBanRoles = if (present) it.autoBanRoles - roleId else it.autoBanRoles + roleId)
+            }
         }
     }
 
     /** Adds or removes a role auto-applied to joining humans. */
     fun toggleAutoAssignNormal(roleId: Snowflake) = launchAction("Failed to update roles.") {
-        api.sendIgnoringBody(
-            Endpoint("api/Administration/$guildId/auto-assign-roles/normal/$roleId/toggle", HttpMethod.POST)
-        )
-        _state.update {
-            it.copy(autoAssign = it.autoAssign.copy(normalRoles = it.autoAssign.normalRoles.toggling(roleId)))
+        listToggleLock.withLock {
+            api.sendIgnoringBody(
+                Endpoint("api/Administration/$guildId/auto-assign-roles/normal/$roleId/toggle", HttpMethod.POST)
+            )
+            _state.update {
+                it.copy(autoAssign = it.autoAssign.copy(normalRoles = it.autoAssign.normalRoles.toggling(roleId)))
+            }
         }
     }
 
     /** Adds or removes a role auto-applied to joining bots. */
     fun toggleAutoAssignBot(roleId: Snowflake) = launchAction("Failed to update roles.") {
-        api.sendIgnoringBody(
-            Endpoint("api/Administration/$guildId/auto-assign-roles/bots/$roleId/toggle", HttpMethod.POST)
-        )
-        _state.update {
-            it.copy(autoAssign = it.autoAssign.copy(botRoles = it.autoAssign.botRoles.toggling(roleId)))
+        listToggleLock.withLock {
+            api.sendIgnoringBody(
+                Endpoint("api/Administration/$guildId/auto-assign-roles/bots/$roleId/toggle", HttpMethod.POST)
+            )
+            _state.update {
+                it.copy(autoAssign = it.autoAssign.copy(botRoles = it.autoAssign.botRoles.toggling(roleId)))
+            }
         }
     }
 
@@ -462,9 +485,11 @@ class AdministrationViewModel @Inject constructor(
 
     /** Toggles whether the iam/iamnot confirmation message auto-deletes. */
     fun toggleSelfAssignableAutoDelete() = launchAction("Failed to toggle auto-delete.") {
-        api.sendIgnoringBody(
-            Endpoint("api/Administration/$guildId/self-assignable-roles/auto-delete/toggle", HttpMethod.POST)
+        val newState = api.send(
+            Endpoint("api/Administration/$guildId/self-assignable-roles/auto-delete/toggle", HttpMethod.POST),
+            Boolean.serializer(),
         )
+        _state.update { it.copy(autoDeleteSelfAssign = newState) }
         postSuccess("Auto-delete setting updated.")
     }
 
@@ -530,9 +555,6 @@ class AdministrationViewModel @Inject constructor(
         load()
     }
 
-    // endregion
-
-    // region Protection: raid, spam, alt, mass-mention (existing four)
 
     /** Writes the anti-raid configuration. */
     fun saveAntiRaid(enabled: Boolean, userThreshold: Int, seconds: Int, action: Int, punishDuration: Int) =
@@ -564,13 +586,23 @@ class AdministrationViewModel @Inject constructor(
 
     /** Adds or removes a channel anti-spam ignores. */
     fun toggleAntiSpamIgnoredChannel(channelId: Snowflake) = launchAction("Failed to update ignored channels.") {
-        api.sendIgnoringBody(
-            Endpoint(
-                "api/Administration/$guildId/protection/anti-spam/ignored-channels/$channelId",
-                HttpMethod.POST,
+        listToggleLock.withLock {
+            api.sendIgnoringBody(
+                Endpoint(
+                    "api/Administration/$guildId/protection/anti-spam/ignored-channels/$channelId",
+                    HttpMethod.POST,
+                )
             )
-        )
-        postSuccess("Ignored channel updated.")
+            _state.update { current ->
+                val protection = current.protection ?: return@update current
+                val antiSpam = protection.antiSpam
+                current.copy(
+                    protection = protection.copy(
+                        antiSpam = antiSpam.copy(ignoredChannels = antiSpam.ignoredChannels.toggling(channelId)),
+                    ),
+                )
+            }
+        }
     }
 
     /** Writes the anti-alt configuration. */
@@ -612,9 +644,6 @@ class AdministrationViewModel @Inject constructor(
         ),
     )
 
-    // endregion
-
-    // region Protection: anti-pattern
 
     /** Writes the anti-pattern configuration. */
     fun saveAntiPattern(
@@ -637,6 +666,7 @@ class AdministrationViewModel @Inject constructor(
             "enabled" to enabled,
             "action" to action,
             "punishDuration" to punishDuration,
+            "roleId" to _state.value.protection?.antiPattern?.roleId?.toLongOrNull(),
             "checkAccountAge" to checkAccountAge,
             "maxAccountAgeMonths" to maxAccountAgeMonths,
             "checkJoinTiming" to checkJoinTiming,
@@ -675,9 +705,6 @@ class AdministrationViewModel @Inject constructor(
         _state.update { it.copy(antiPatternPatterns = it.antiPatternPatterns.filterNot { p -> p.id == id }) }
     }
 
-    // endregion
-
-    // region Protection: anti-mass-post
 
     /** Writes the anti-mass-post configuration. */
     fun saveAntiMassPost(
@@ -694,24 +721,24 @@ class AdministrationViewModel @Inject constructor(
             "enabled" to enabled,
             "channelThreshold" to channelThreshold,
             "timeWindowSeconds" to timeWindowSeconds,
-            "contentSimilarityThreshold" to 0.8,
-            "minContentLength" to 20,
+            "contentSimilarityThreshold" to
+                (_state.value.protection?.antiMassPost?.contentSimilarityThreshold ?: 0.8),
+            "minContentLength" to (_state.value.protection?.antiMassPost?.minContentLength ?: 20),
             "checkLinksOnly" to checkLinksOnly,
-            "checkDuplicateContent" to true,
-            "requireIdenticalContent" to false,
-            "caseSensitive" to false,
-            "deleteMessages" to true,
-            "notifyUser" to true,
+            "checkDuplicateContent" to (_state.value.protection?.antiMassPost?.checkDuplicateContent ?: true),
+            "requireIdenticalContent" to
+                (_state.value.protection?.antiMassPost?.requireIdenticalContent ?: false),
+            "caseSensitive" to (_state.value.protection?.antiMassPost?.caseSensitive ?: false),
+            "deleteMessages" to (_state.value.protection?.antiMassPost?.deleteMessages ?: true),
+            "notifyUser" to (_state.value.protection?.antiMassPost?.notifyUser ?: true),
             "action" to action,
             "punishDuration" to punishDuration,
-            "ignoreBots" to true,
-            "maxMessagesTracked" to 50,
+            "roleId" to _state.value.protection?.antiMassPost?.roleId?.toLongOrNull(),
+            "ignoreBots" to (_state.value.protection?.antiMassPost?.ignoreBots ?: true),
+            "maxMessagesTracked" to (_state.value.protection?.antiMassPost?.maxMessagesTracked ?: 50),
         ),
     )
 
-    // endregion
-
-    // region Protection: anti-post-channel (honeypot)
 
     /** Writes the anti-post-channel configuration. */
     fun saveAntiPostChannel(enabled: Boolean, action: Int, punishDuration: Int, deleteMessages: Boolean, notifyUser: Boolean, ignoreBots: Boolean) =
@@ -722,6 +749,7 @@ class AdministrationViewModel @Inject constructor(
                 "enabled" to enabled,
                 "action" to action,
                 "punishDuration" to punishDuration,
+                "roleId" to _state.value.protection?.antiPostChannel?.roleId?.toLongOrNull(),
                 "deleteMessages" to deleteMessages,
                 "notifyUser" to notifyUser,
                 "ignoreBots" to ignoreBots,
@@ -772,9 +800,6 @@ class AdministrationViewModel @Inject constructor(
         load()
     }
 
-    // endregion
-
-    // region Protection: anti-image-hash
 
     /** Writes the anti-image-hash configuration. */
     fun saveAntiImageHash(
@@ -796,6 +821,7 @@ class AdministrationViewModel @Inject constructor(
                     "enabled" to enabled,
                     "action" to action,
                     "punishDuration" to punishDuration,
+                    "roleId" to _state.value.imageHash.roleId?.toLongOrNull(),
                     "hashThreshold" to hashThreshold,
                     "deleteMessages" to deleteMessages,
                     "notifyUser" to notifyUser,
@@ -870,9 +896,6 @@ class AdministrationViewModel @Inject constructor(
         ).firstOrNull { it.guild.id == guildId }?.emojis.orEmpty()
     }.getOrDefault(emptyList())
 
-    // endregion
-
-    // region Protection: quick enable/disable
 
     /** Quick-toggles a protection module on or off without opening its editor. */
     fun quickToggleProtection(module: QuickProtectionModule) = launchAction("Failed to update protection.") {
@@ -943,9 +966,6 @@ class AdministrationViewModel @Inject constructor(
         load()
     }
 
-    // endregion
-
-    // region Automation: game voice channel, delete-on-command, stats
 
     /**
      * Sets the game voice channel, or clears it by passing the currently set channel again (the
@@ -1003,9 +1023,6 @@ class AdministrationViewModel @Inject constructor(
         postSuccess("Statistics deleted.")
     }
 
-    // endregion
-
-    // region Automation: command cooldowns, permission overrides, permissions manager
 
     /** Sets a command's cooldown, in seconds. */
     fun setCommandCooldown(commandName: String, seconds: Int) = launchAction("Failed to set cooldown.") {
@@ -1142,9 +1159,6 @@ class AdministrationViewModel @Inject constructor(
         _state.update { it.copy(permissions = it.permissions.copy(permRole = roleId)) }
     }
 
-    // endregion
-
-    // region Advanced: server recovery, mass operations
 
     /** Generates and stores new server recovery keys. */
     fun setupServerRecovery(recoveryKey: String, twoFactorKey: String) =
@@ -1219,8 +1233,6 @@ class AdministrationViewModel @Inject constructor(
         postSuccess("Channel pruned.")
     }
 
-    // endregion
-
     private fun protectionSave(path: String, success: String, body: String) =
         launchAction("Failed to save protection.") {
             api.sendIgnoringBody(Endpoint(path, HttpMethod.PUT, body))
@@ -1229,10 +1241,7 @@ class AdministrationViewModel @Inject constructor(
         }
 
     private suspend fun ids(tail: String): List<Snowflake> = runCatching {
-        api.send(
-            Endpoint("api/Administration/$guildId/$tail"),
-            ListSerializer(SnowflakeSerializer),
-        )
+        api.sendRaw(Endpoint("api/Administration/$guildId/$tail")).snowflakeIds()
     }.getOrDefault(emptyList())
 
     private suspend fun scalar(tail: String): String? = runCatching {

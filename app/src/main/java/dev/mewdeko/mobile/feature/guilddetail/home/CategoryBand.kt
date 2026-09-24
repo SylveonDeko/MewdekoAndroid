@@ -68,7 +68,7 @@ fun CategoryBand(
     icon: ImageVector,
     role: ToneRole,
     badgeShape: Shape,
-    seeAllId: String,
+    onSeeAll: () -> Unit,
     headline: Long?,
     descriptor: String,
     headlineLoading: Boolean,
@@ -83,7 +83,7 @@ fun CategoryBand(
         modifier = Modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(HomeDimens.bandInner),
     ) {
-        BandHeader(title, icon, role, badgeShape, seeAllId, onOpenFeature)
+        BandHeader(title, icon, role, badgeShape, onSeeAll)
         BandHeadline(
             headline = if (headlineLoading) null else (headline ?: 0L),
             headlineText = headlineText,
@@ -111,8 +111,7 @@ private fun BandHeader(
     icon: ImageVector,
     role: ToneRole,
     badgeShape: Shape,
-    seeAllId: String,
-    onOpenFeature: (String) -> Unit,
+    onSeeAll: () -> Unit,
 ) {
     Row(
         modifier = Modifier
@@ -132,7 +131,7 @@ private fun BandHeader(
                 .semantics { heading() },
         )
         TextButton(
-            onClick = { onOpenFeature(seeAllId) },
+            onClick = onSeeAll,
             colors = ButtonDefaults.textButtonColors(contentColor = role.onContainer),
         ) {
             Text("See all", style = MaterialTheme.typography.labelLarge)
@@ -415,14 +414,14 @@ fun SkeletonBand(
     icon: ImageVector,
     role: ToneRole,
     badgeShape: Shape,
-    seeAllId: String,
+    onSeeAll: () -> Unit,
     onOpenFeature: (String) -> Unit,
 ) {
     Column(
         modifier = Modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(HomeDimens.bandInner),
     ) {
-        BandHeader(title, icon, role, badgeShape, seeAllId, onOpenFeature)
+        BandHeader(title, icon, role, badgeShape, onSeeAll)
         BandHeadline(
             headline = null,
             headlineText = null,

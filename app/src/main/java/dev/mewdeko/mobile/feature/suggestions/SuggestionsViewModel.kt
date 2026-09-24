@@ -4,8 +4,6 @@ import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dev.mewdeko.mobile.core.auth.SessionHolder
-import dev.mewdeko.mobile.core.model.EmbedMessage
-import dev.mewdeko.mobile.core.model.ScalarString
 import dev.mewdeko.mobile.core.model.Snowflake
 import dev.mewdeko.mobile.core.model.SnowflakeSerializer
 import dev.mewdeko.mobile.core.model.TextChannelLite
@@ -17,6 +15,7 @@ import dev.mewdeko.mobile.core.net.jsonBody
 import dev.mewdeko.mobile.core.net.jsonBool
 import dev.mewdeko.mobile.core.net.jsonInt
 import dev.mewdeko.mobile.core.net.jsonString
+import dev.mewdeko.mobile.core.net.scalarText
 import dev.mewdeko.mobile.core.ui.FeatureViewModel
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
@@ -465,7 +464,7 @@ class SuggestionsViewModel @Inject constructor(
     }.getOrDefault(false)
 
     private suspend fun text(tail: String): String? = runCatching {
-        api.send(Endpoint("api/Suggestions/$guildId/$tail"), ScalarString.serializer()).value
+        api.sendRaw(Endpoint("api/Suggestions/$guildId/$tail")).scalarText()
     }.getOrNull()
 
     private suspend fun snowflake(tail: String): Snowflake? =

@@ -21,17 +21,14 @@ import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.Tune
-import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -44,6 +41,8 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.mewdeko.mobile.core.theme.NavBarLabelStyle
+import dev.mewdeko.mobile.core.ui.EmptyState
+import dev.mewdeko.mobile.core.ui.MewdekoBottomSheet
 import dev.mewdeko.mobile.core.ui.SearchField
 import dev.mewdeko.mobile.core.ui.clickableRow
 
@@ -125,14 +124,12 @@ fun GuildNavBar(
  * filter and search are kept, because scanning a flat 41-tile grid on a phone
  * is markedly slower than filtering first.
  */
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun FeatureCatalogSheet(
     activeFeatureId: String?,
     onSelect: (String) -> Unit,
     onDismiss: () -> Unit,
 ) {
-    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     var query by remember { mutableStateOf("") }
     var category by remember { mutableStateOf<FeatureCategory?>(null) }
 
@@ -142,18 +139,14 @@ fun FeatureCatalogSheet(
                 (category == null || item.category == category) &&
                     (query.isBlank() ||
                         item.label.contains(query, ignoreCase = true) ||
-                        item.summary.contains(query, ignoreCase = true))
+                        item.summary.contains(query, ignoreCase = true) ||
+                        item.keywords.any { it.contains(query, ignoreCase = true) })
             }
             .sortedBy { it.label.lowercase() }
     }
 
-    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheetState) {
+    MewdekoBottomSheet(onDismissRequest = onDismiss, title = "All features") {
         Column(modifier = Modifier.fillMaxSize().imePadding()) {
-            Text(
-                "All features",
-                style = MaterialTheme.typography.titleMedium,
-                modifier = Modifier.padding(horizontal = 16.dp),
-            )
             SearchField(
                 value = query,
                 onValueChange = { query = it },
@@ -180,23 +173,32 @@ fun FeatureCatalogSheet(
                     )
                 }
             }
-            LazyVerticalGrid(
-                columns = GridCells.Adaptive(minSize = 104.dp),
-                modifier = Modifier
-                    .weight(1f)
-                    .padding(horizontal = 12.dp)
-                    .navigationBarsPadding(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
-                contentPadding = androidx.compose.foundation.layout.PaddingValues(vertical = 12.dp),
-            ) {
-                items(visible, key = { it.id }) { item ->
-                    CatalogTile(
-                        label = item.label,
-                        icon = item.icon,
-                        selected = item.id == activeFeatureId,
-                        onClick = { onSelect(item.id) },
-                    )
+            if (visible.isEmpty()) {
+                EmptyState(
+                    message = "No features match \"$query\".",
+                    icon = Icons.Default.Apps,
+                    modifier = Modifier.weight(1f),
+                )
+            } else {
+                LazyVerticalGrid(
+                    columns = GridCells.Adaptive(minSize = 108.dp),
+                    modifier = Modifier
+                        .weight(1f)
+                        .padding(horizontal = 12.dp)
+                        .navigationBarsPadding(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                    contentPadding = androidx.compose.foundation.layout.PaddingValues(vertical = 12.dp),
+                ) {
+                    items(visible, key = { it.id }) { item ->
+                        CatalogTile(
+                            label = item.label,
+                            summary = item.summary,
+                            icon = item.icon,
+                            selected = item.id == activeFeatureId,
+                            onClick = { onSelect(item.id) },
+                        )
+                    }
                 }
             }
         }
@@ -206,6 +208,7 @@ fun FeatureCatalogSheet(
 @Composable
 private fun CatalogTile(
     label: String,
+    summary: String,
     icon: ImageVector,
     selected: Boolean,
     onClick: () -> Unit,
@@ -222,12 +225,12 @@ private fun CatalogTile(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(vertical = 14.dp, horizontal = 8.dp),
+                .padding(vertical = 14.dp, horizontal = 10.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
         ) {
             Box(
-                modifier = Modifier.size(40.dp),
+                modifier = Modifier.size(36.dp),
                 contentAlignment = Alignment.Center,
             ) {
                 Icon(
@@ -246,6 +249,18 @@ private fun CatalogTile(
                 textAlign = TextAlign.Center,
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                summary,
+                style = MaterialTheme.typography.labelSmall,
+                textAlign = TextAlign.Center,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+                color = if (selected) {
+                    MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.8f)
+                } else {
+                    MaterialTheme.colorScheme.onSurfaceVariant
+                },
             )
         }
     }

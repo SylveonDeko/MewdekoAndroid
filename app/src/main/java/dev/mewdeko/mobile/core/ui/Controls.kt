@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
@@ -26,10 +27,15 @@ import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Slider
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -44,6 +50,7 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
 import dev.mewdeko.mobile.core.theme.DashAlpha
@@ -55,6 +62,8 @@ import dev.mewdeko.mobile.core.theme.DashAlpha
  * other row on the screen. The row sits on the dashboard's row surface, the
  * primary at the `08` tint, which deepens to the `15` selected tint while
  * the switch is on.
+ *
+ * Passing [icon] leads the row with a small [GlyphOrb] in the primary.
  */
 @Composable
 fun SwitchRow(
@@ -64,11 +73,13 @@ fun SwitchRow(
     modifier: Modifier = Modifier,
     subtitle: String? = null,
     enabled: Boolean = true,
+    icon: ImageVector? = null,
 ) {
     val primary = MaterialTheme.colorScheme.primary
     ListItem(
         headlineContent = { Text(title) },
         supportingContent = subtitle?.let { { Text(it) } },
+        leadingContent = icon?.let { { GlyphOrb(it, tint = primary) } },
         trailingContent = {
             Switch(checked = checked, onCheckedChange = onCheckedChange, enabled = enabled)
         },
@@ -264,7 +275,16 @@ fun Avatar(
     shape: Shape = CircleShape,
     ring: BorderStroke? = null,
     fallbackText: String? = null,
+    fallbackUrl: String? = null,
 ) {
+    /**
+     * URLs that failed to load, so a dead link (an expired attachment, for
+     * example) steps down to [fallbackUrl] and then to the initial or icon
+     * instead of leaving the avatar blank.
+     */
+    var failed by remember(url, fallbackUrl) { mutableStateOf(emptySet<String>()) }
+    val resolvedUrl = listOfNotNull(url, fallbackUrl)
+        .firstOrNull { it.isNotEmpty() && it !in failed }
     Box(
         modifier = modifier
             .size(size.dp)
@@ -282,10 +302,11 @@ fun Avatar(
     ) {
         val initial = fallbackText?.trim()?.firstOrNull()?.uppercaseChar()
         when {
-            !url.isNullOrEmpty() -> AsyncImage(
-                model = url,
+            resolvedUrl != null -> AsyncImage(
+                model = resolvedUrl,
                 contentDescription = contentDescription,
                 contentScale = ContentScale.Crop,
+                onError = { failed = failed + resolvedUrl },
                 modifier = Modifier.matchParentSize(),
             )
 
@@ -315,21 +336,60 @@ fun Avatar(
     }
 }
 
-/** Small labelled chip used for tags and enum values. */
+/**
+ * Small labelled chip used for tags and enum values.
+ *
+ * When [onClick] is null this renders as a non-interactive label instead of
+ * an [AssistChip], so it never grows to Material's 48dp interactive touch
+ * target. That keeps rows of metadata labels from squeezing a trailing
+ * action column when several are shown at once.
+ */
 @Composable
 fun TagChip(
     label: String,
     modifier: Modifier = Modifier,
     icon: ImageVector? = null,
     onClick: (() -> Unit)? = null,
+    maxLines: Int = if (onClick == null) 1 else Int.MAX_VALUE,
 ) {
-    AssistChip(
-        onClick = onClick ?: {},
-        enabled = onClick != null,
-        label = { Text(label, style = MaterialTheme.typography.labelSmall) },
-        leadingIcon = icon?.let {
-            { Icon(it, contentDescription = null, modifier = Modifier.size(16.dp)) }
-        },
-        modifier = modifier,
-    )
+    if (onClick != null) {
+        AssistChip(
+            onClick = onClick,
+            label = {
+                Text(
+                    text = label,
+                    style = MaterialTheme.typography.labelSmall,
+                    maxLines = maxLines,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            },
+            leadingIcon = icon?.let {
+                { Icon(it, contentDescription = null, modifier = Modifier.size(16.dp)) }
+            },
+            modifier = modifier,
+        )
+    } else {
+        val primary = MaterialTheme.colorScheme.primary
+        Surface(
+            modifier = modifier.heightIn(min = 32.dp),
+            shape = RoundedCornerShape(8.dp),
+            color = primary.copy(alpha = DashAlpha.Hex10),
+            border = BorderStroke(1.dp, primary.copy(alpha = DashAlpha.Hex30)),
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+            ) {
+                icon?.let { Icon(it, contentDescription = null, tint = primary, modifier = Modifier.size(14.dp)) }
+                Text(
+                    text = label,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = maxLines,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
+    }
 }

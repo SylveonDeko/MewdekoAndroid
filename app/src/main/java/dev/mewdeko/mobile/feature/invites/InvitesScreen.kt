@@ -58,7 +58,7 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.mewdeko.mobile.core.model.Snowflake
 import dev.mewdeko.mobile.core.ui.Avatar
@@ -166,8 +166,6 @@ fun InvitesScreen(
         )
     }
 }
-
-// region Overview
 
 @Composable
 private fun OverviewSection(state: InvitesState, viewModel: InvitesViewModel) {
@@ -309,9 +307,6 @@ private fun DrawScope.drawGrowthSeries(values: List<Int>, peak: Int, color: Colo
     drawPath(line, color = color, style = Stroke(width = 2.5f))
 }
 
-// endregion
-
-// region Leaderboard
 
 @Composable
 private fun LeaderboardSection(state: InvitesState, viewModel: InvitesViewModel) {
@@ -487,9 +482,6 @@ private fun RankBadge(rank: Int) {
     }
 }
 
-// endregion
-
-// region Members
 
 @Composable
 private fun MembersSection(state: InvitesState, viewModel: InvitesViewModel) {
@@ -590,9 +582,6 @@ private fun InvitedRow(item: InvitedRecord, guildMembers: List<InviteMemberLite>
     )
 }
 
-// endregion
-
-// region Codes
 
 @Composable
 private fun CodesSection(state: InvitesState, viewModel: InvitesViewModel, onDeleteCode: (String) -> Unit) {
@@ -683,9 +672,6 @@ private fun CodeCard(
     }
 }
 
-// endregion
-
-// region Settings
 
 @Composable
 private fun SettingsSection(
@@ -862,8 +848,6 @@ private fun ExclusionCard(
         }
     }
 }
-
-// endregion
 
 private fun formatPercent(value: Double?): String = if (value == null) "-" else "%.0f%%".format(value * 100)
 

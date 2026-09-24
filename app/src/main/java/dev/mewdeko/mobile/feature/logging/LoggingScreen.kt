@@ -8,9 +8,9 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ManageSearch
 import androidx.compose.material.icons.filled.Block
 import androidx.compose.material.icons.filled.CleaningServices
-import androidx.compose.material.icons.filled.ManageSearch
 import androidx.compose.material.icons.filled.PowerSettingsNew
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.Tag
@@ -30,7 +30,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
-import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.mewdeko.mobile.core.ui.ConfirmDialog
 import dev.mewdeko.mobile.core.ui.DiscordSelectorSingle
@@ -73,7 +73,7 @@ private fun logTypesFor(filter: String): List<LogType> = when (filter) {
 }
 
 private val Tabs = listOf(
-    SectionTab("types", "Log types", Icons.Default.ManageSearch),
+    SectionTab("types", "Log types", Icons.AutoMirrored.Filled.ManageSearch),
     SectionTab("ignored", "Ignored", Icons.Default.Block),
 )
 
@@ -190,7 +190,7 @@ fun LoggingScreen(
             }
 
             SectionCard {
-                SectionCardHeader("Log destinations", Icons.Default.ManageSearch)
+                SectionCardHeader("Log destinations", Icons.AutoMirrored.Filled.ManageSearch)
                 Text(
                     text = "Pick the channel each event type is written to. Leaving one unset " +
                         "disables logging for that event.",
@@ -199,7 +199,7 @@ fun LoggingScreen(
                 )
                 val visibleTypes = logTypesFor(typeFilter)
                 if (visibleTypes.isEmpty()) {
-                    EmptyState("No event types in this category.", icon = Icons.Default.ManageSearch)
+                    EmptyState("No event types in this category.", icon = Icons.AutoMirrored.Filled.ManageSearch)
                 } else {
                     visibleTypes.forEach { type ->
                         Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {

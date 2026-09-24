@@ -61,13 +61,15 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.mewdeko.mobile.core.ui.Avatar
 import dev.mewdeko.mobile.core.ui.ConfirmDialog
 import dev.mewdeko.mobile.core.ui.DiscordSelectorSingle
 import dev.mewdeko.mobile.core.ui.EmptyState
 import dev.mewdeko.mobile.core.ui.FeatureScaffold
+import dev.mewdeko.mobile.core.ui.FullScreenEditor
+import dev.mewdeko.mobile.core.ui.NewItemFab
 import dev.mewdeko.mobile.core.ui.InfoRow
 import dev.mewdeko.mobile.core.ui.MewdekoTextField
 import dev.mewdeko.mobile.core.ui.SectionCard
@@ -126,10 +128,9 @@ fun CurrencyScreen(
                     text = { Text(if (state.isSaving) "Saving…" else "Save settings") },
                 )
 
-                section == CurrencySection.SHOP && state.shopDraft == null -> ExtendedFloatingActionButton(
+                section == CurrencySection.SHOP -> NewItemFab(
+                    label = "Add item",
                     onClick = { viewModel.openShopEditor(null) },
-                    icon = { Icon(Icons.Default.Add, contentDescription = null) },
-                    text = { Text("Add item") },
                 )
             }
         },
@@ -141,6 +142,23 @@ fun CurrencyScreen(
             CurrencySection.CONFIG -> ConfigSection(state, viewModel, onReset = { pendingReset = true })
             CurrencySection.SHOP -> ShopSection(state, viewModel, onDelete = { pendingDelete = it })
             CurrencySection.LEADERBOARD -> LeaderboardSection(state, viewModel)
+        }
+    }
+
+    state.shopDraft?.let { draft ->
+        FullScreenEditor(
+            title = draft.originalName?.let { "Edit $it" } ?: "New shop item",
+            onClose = viewModel::closeShopEditor,
+            confirmLabel = when {
+                state.shopSaving -> "Saving…"
+                draft.isEditing -> "Save"
+                else -> "Add"
+            },
+            confirmEnabled = !state.shopSaving && draft.name.isNotBlank(),
+            onConfirm = { viewModel.saveShopDraft() },
+            hasUnsavedChanges = !draft.isEditing && draft != ShopItemDraft(),
+        ) {
+            ShopEditor(draft = draft, state = state, viewModel = viewModel)
         }
     }
 
@@ -639,10 +657,6 @@ private fun ColumnScope.ShopSection(
     viewModel: CurrencyViewModel,
     onDelete: (ShopItem) -> Unit,
 ) {
-    state.shopDraft?.let { draft ->
-        ShopEditor(draft = draft, state = state, viewModel = viewModel)
-    }
-
     SectionCard {
         SectionCardHeader("Shop items", Icons.Default.Storefront)
         Caption("The shop is the economy's main sink. Without one, balances only ever accumulate.")
@@ -651,7 +665,12 @@ private fun ColumnScope.ShopSection(
                 RetryNote("Failed to load the shop.", onRetry = viewModel::reloadShop)
 
             state.shopItems.isEmpty() ->
-                EmptyState("No shop items yet. Add one to give currency somewhere to go.", icon = Icons.Default.Storefront)
+                EmptyState(
+                    message = "No shop items yet. Add one to give currency somewhere to go.",
+                    icon = Icons.Default.Storefront,
+                    actionLabel = "Add item",
+                    onAction = { viewModel.openShopEditor(null) },
+                )
         }
     }
 
@@ -729,16 +748,17 @@ private fun ShopItemCard(
     }
 }
 
+/**
+ * The body of the shop item editor, shown inside a [FullScreenEditor] whose
+ * top bar holds Add or Save and Close.
+ */
 @Composable
 private fun ShopEditor(draft: ShopItemDraft, state: CurrencyState, viewModel: CurrencyViewModel) {
     val edit = viewModel::editShopDraft
     val roleOptions = state.roles.map { SelectorOption(it.id, it.name) }
 
     SectionCard {
-        SectionCardHeader(
-            title = draft.originalName?.let { "Editing $it" } ?: "New shop item",
-            icon = Icons.Default.Inventory2,
-        )
+        SectionCardHeader(title = "Item details", icon = Icons.Default.Inventory2)
         MewdekoTextField(
             value = draft.name,
             onValueChange = { value -> edit { it.copy(name = value) } },
@@ -835,23 +855,6 @@ private fun ShopEditor(draft: ShopItemDraft, state: CurrencyState, viewModel: Cu
             checked = draft.enabled,
             onCheckedChange = { value -> edit { it.copy(enabled = value) } },
         )
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
-        ) {
-            OutlinedButton(onClick = viewModel::closeShopEditor, enabled = !state.shopSaving) {
-                Text("Cancel")
-            }
-            Button(onClick = { viewModel.saveShopDraft() }, enabled = !state.shopSaving) {
-                Text(
-                    when {
-                        state.shopSaving -> "Saving…"
-                        draft.isEditing -> "Save item"
-                        else -> "Add item"
-                    }
-                )
-            }
-        }
     }
 }
 
