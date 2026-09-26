@@ -135,6 +135,16 @@ data class WordEntry(
     val isCustom: Boolean = false,
 )
 
+/** Result of the post-now endpoint, including whether the custom template was ignored. */
+@Serializable
+data class WordOfTheDayPostResult(
+    val entry: WordEntry = WordEntry(),
+    /** True when the template rendered an empty message and the default embed was sent. */
+    val usedFallback: Boolean = false,
+    /** Explanation to show the user when [usedFallback] is true. */
+    val warning: String? = null,
+)
+
 /** Editable draft of one weekday or month rule on the schedule tab. */
 data class RuleDraft(
     val type: ScheduleRuleType,

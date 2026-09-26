@@ -229,11 +229,17 @@ class WordOfTheDayViewModel @Inject constructor(
     fun postNow() = viewModelScope.launch {
         _state.update { it.copy(isPosting = true) }
         val result = runCatching {
-            api.send(Endpoint("$base/post", HttpMethod.POST), WordEntry.serializer())
+            api.send(Endpoint("$base/post", HttpMethod.POST), WordOfTheDayPostResult.serializer())
         }
         _state.update { it.copy(isPosting = false) }
-        result.onSuccess { entry ->
-            postSuccess("Posted \"${entry.word}\".")
+        result.onSuccess { posted ->
+            if (posted.usedFallback) {
+                val reason = posted.warning
+                    ?: "Your custom template rendered an empty message, so the default embed was posted instead."
+                postError("Posted \"${posted.entry.word}\" with the default embed. $reason")
+            } else {
+                postSuccess("Posted \"${posted.entry.word}\".")
+            }
             val history = fetchHistory()
             val cfg = runCatching {
                 api.send(Endpoint("$base/config"), WordOfTheDayConfig.serializer())
