@@ -1,0 +1,2 @@
+- Word of the Day: the post result is decoded and the template fallback is shown
+- First release prepared for F-Droid

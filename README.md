@@ -22,6 +22,14 @@ obtainium://add/https://github.com/SylveonDeko/MewdekoAndroid
 
 Releases are signed with the same key as the Play Store build, so Obtainium and Play installs upgrade over each other.
 
+### F-Droid
+
+The app has no proprietary dependencies and is licensed under the GPL-3.0, so it qualifies for F-Droid. The build recipe is kept in [`fdroid/mobile.mewdeko.tech.yml`](fdroid/mobile.mewdeko.tech.yml) and the store listing (descriptions, changelogs, screenshots) in [`fastlane/metadata/android/en-US/`](fastlane/metadata/android/en-US/), which F-Droid reads straight from the repository. New releases are picked up from the `vX.Y.Z` tags the release workflow creates.
+
+F-Droid signs its builds with its own key, so an F-Droid install cannot be upgraded over a Play or GitHub install, or the other way round, without uninstalling first.
+
+Changelog entries for the listing go in `fastlane/metadata/android/en-US/changelogs/<versionCode>.txt`.
+
 ## Requirements
 
 - Android Studio (or a JDK 17-26 + Android SDK toolchain; Gradle 9.5 and AGP 9.2 run on any of them)

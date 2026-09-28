@@ -1,0 +1,19 @@
+Mewdeko is a free and open source Discord bot. This app is its native Android client. It talks to the same dashboard API as the web dashboard, so server owners and staff can manage bot settings and read server statistics from a phone instead of a browser or Discord commands.
+
+Every dashboard feature is available natively:
+
+- Moderation, including warning ladders, ban purge settings, and the audit log
+- XP and leveling, with leaderboards, voice XP, and per-server rank card templates
+- Music playback control for the bot in your server's voice channel
+- Tickets, forms, suggestions, giveaways, starboard, and confessions
+- Embed and component building with a live preview
+- Chat triggers, repeaters, multigreets, role greets, role states, and status roles
+- Stream alerts, feeds, highlights, invites, logging, and message stats
+- Server settings, guild administration, custom voice, and the Minecraft bridge
+- Account, reputation, currency, AFK, birthdays, counting, chat saving, a Word of the Day, and a todo list
+
+The app themes itself from each server's icon, the same way the web dashboard does, and follows the dashboard's mobile layout.
+
+You need a running Mewdeko bot behind a dashboard that exposes the mobile sign in endpoints, or the hosted dashboard at mewdeko.tech. Sign in is through Discord.
+
+Source code, the bot, and the web dashboard are all on GitHub under the SylveonDeko organisation.

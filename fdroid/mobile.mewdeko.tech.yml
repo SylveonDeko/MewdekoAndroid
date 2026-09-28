@@ -1,0 +1,49 @@
+# F-Droid build recipe for Mewdeko.
+#
+# This is the file to submit to https://gitlab.com/fdroid/fdroiddata as
+# metadata/mobile.mewdeko.tech.yml. It is kept here so the recipe lives next
+# to the code it describes; fdroiddata is the copy that F-Droid actually
+# builds from, so changes should be sent there as merge requests.
+#
+# Signing: F-Droid builds from the tagged source and signs with its own key.
+# That signature differs from the GitHub release and Play builds, so a user
+# moving between F-Droid and either of those has to uninstall first. To keep
+# one key everywhere instead, add a `Binaries:` line pointing at the GitHub
+# release APK and make the build reproducible (pinned JDK, no timestamps in
+# the APK). See https://f-droid.org/docs/Reproducible_Builds/.
+
+Categories:
+  - Internet
+  - Connectivity
+License: GPL-3.0-only
+AuthorName: SylveonDeko
+WebSite: https://mewdeko.tech/
+SourceCode: https://github.com/SylveonDeko/MewdekoAndroid
+IssueTracker: https://github.com/SylveonDeko/MewdekoAndroid/issues
+Changelog: https://github.com/SylveonDeko/MewdekoAndroid/releases
+Donate: https://ko-fi.com/mewdeko
+
+AutoName: Mewdeko
+Description: |-
+  Native Android client for the Mewdeko Discord bot. Manage bot settings and
+  read server statistics from your phone through the same dashboard API the
+  web dashboard uses. Sign in is through Discord. Needs a running Mewdeko bot
+  behind a dashboard, or the hosted dashboard at mewdeko.tech.
+
+RepoType: git
+Repo: https://github.com/SylveonDeko/MewdekoAndroid.git
+
+Builds:
+  - versionName: 0.1.16
+    versionCode: 17
+    commit: v0.1.16
+    subdir: app
+    gradle:
+      - yes
+
+# The release workflow bumps versionCode and versionName on every push to
+# main and tags the result vX.Y.Z, so the tag check picks up each release.
+AutoUpdateMode: Version
+UpdateCheckMode: Tags ^v[0-9]+\.[0-9]+\.[0-9]+$
+CurrentVersion: 0.1.16
+CurrentVersionCode: 17
