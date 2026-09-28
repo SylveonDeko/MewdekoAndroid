@@ -5,21 +5,24 @@ import dev.mewdeko.mobile.core.auth.AuthManager
 import dev.mewdeko.mobile.core.model.MusicStatus
 import dev.mewdeko.mobile.core.model.Snowflake
 import io.ktor.client.HttpClient
-import io.ktor.client.plugins.websocket.webSocketSession
+import io.ktor.client.plugins.HttpTimeoutConfig
+import io.ktor.client.plugins.timeout
 import io.ktor.client.request.header
-import io.ktor.websocket.Frame
-import io.ktor.websocket.close
-import io.ktor.websocket.readText
+import io.ktor.client.request.prepareGet
+import io.ktor.client.statement.bodyAsChannel
+import io.ktor.http.HttpStatusCode
+import io.ktor.utils.io.readUTF8Line
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.channelFlow
+import kotlinx.coroutines.isActive
 import kotlinx.serialization.json.JsonObject
 import javax.inject.Inject
 import javax.inject.Singleton
 
-private const val TAG = "MewdekoMusicWs"
+private const val TAG = "MewdekoMusicStream"
 
-/** A frame received from the music event WebSocket. */
+/** A frame received from the live music event stream. */
 sealed interface MusicSocketEvent {
     /** A decoded player snapshot. */
     data class Status(val status: MusicStatus) : MusicSocketEvent
@@ -27,17 +30,20 @@ sealed interface MusicSocketEvent {
     /** A frame that did not decode as a status snapshot. */
     data class Raw(val text: String) : MusicSocketEvent
 
-    /** The socket closed cleanly. */
+    /** The stream ended cleanly. */
     data object Closed : MusicSocketEvent
 
-    /** The socket failed. */
+    /** The stream failed. */
     data class Failed(val cause: Throwable) : MusicSocketEvent
 }
 
 /**
- * Live music event stream backed by the dashboard's WebSocket relay.
+ * Live music event stream, as Server-Sent Events from the dashboard's
+ * `/api/music/stream` route. The dashboard opens the bot's events endpoint
+ * server side with the credentials the bot's access filter expects and pipes
+ * the frames through, so nothing here needs a WebSocket upgrade.
  *
- * Emits a [Flow]; collecting starts the socket and cancelling the collection
+ * Emits a [Flow]; collecting starts the stream and cancelling the collection
  * closes it, so callers never manage the connection by hand.
  */
 @Singleton
@@ -51,49 +57,66 @@ class MusicSocket @Inject constructor(
      * @param baseUrl The dashboard base URL, e.g. `https://dash.example.com`.
      * @param instanceBotId The bot instance the dashboard should route to.
      * @param guildId The guild whose player to subscribe to.
-     * @param userId The acting Discord user.
+     * @param userId The acting Discord user. The dashboard resolves the user
+     *   from the token, so this is not sent.
      */
     fun connect(
         baseUrl: String,
         instanceBotId: Snowflake?,
         guildId: Snowflake,
-        userId: Snowflake,
+        @Suppress("UNUSED_PARAMETER") userId: Snowflake,
     ): Flow<MusicSocketEvent> = channelFlow {
         val token = runCatching { auth.currentAccessToken() }.getOrElse { cause ->
             send(MusicSocketEvent.Failed(cause))
             return@channelFlow
         }
 
-        val wsUrl = buildString {
-            append(baseUrl.replaceFirst("https://", "wss://").replaceFirst("http://", "ws://"))
-            append("/api/mobile/music/ws")
-            append("?guildId=$guildId&userId=$userId")
-            if (instanceBotId != null) append("&instance=$instanceBotId")
-        }
-        Log.i(TAG, "connecting to ${wsUrl.substringBefore("?")}")
+        val url = "${baseUrl.trimEnd('/')}/api/music/stream?guildId=$guildId"
+        Log.i(TAG, "connecting to ${url.substringBefore("?")}")
 
         try {
-            val session = http.webSocketSession(wsUrl) {
+            http.prepareGet(url) {
                 header("Authorization", "Bearer $token")
+                header("Accept", "text/event-stream")
+                header("Cache-Control", "no-cache")
                 if (instanceBotId != null) header("X-Mobile-Instance", instanceBotId)
-            }
+                // The bot heartbeats every 30 seconds; the stream itself is open-ended.
+                timeout {
+                    requestTimeoutMillis = HttpTimeoutConfig.INFINITE_TIMEOUT_MS
+                    socketTimeoutMillis = 120_000
+                }
+            }.execute { response ->
+                if (response.status != HttpStatusCode.OK) {
+                    send(MusicSocketEvent.Failed(IllegalStateException("stream responded ${response.status.value}")))
+                    return@execute
+                }
 
-            try {
-                for (frame in session.incoming) {
-                    val text = when (frame) {
-                        is Frame.Text -> frame.readText()
-                        is Frame.Binary -> String(frame.data)
-                        else -> continue
+                val channel = response.bodyAsChannel()
+                var eventName = "message"
+                val dataLines = ArrayList<String>()
+
+                while (isActive) {
+                    val line = channel.readUTF8Line() ?: break
+                    when {
+                        line.isEmpty() -> {
+                            if (dataLines.isNotEmpty() && eventName == "status") {
+                                send(decode(dataLines.joinToString("\n")))
+                            }
+                            eventName = "message"
+                            dataLines.clear()
+                        }
+                        line.startsWith(":") -> Unit
+                        line.startsWith("event:") -> eventName = line.substring(6).trim()
+                        line.startsWith("data:") -> dataLines.add(line.substring(5).trimStart(' '))
                     }
-                    send(decode(text))
                 }
                 send(MusicSocketEvent.Closed)
-            } finally {
-                runCatching { session.close() }
             }
         } catch (cause: Throwable) {
-            Log.e(TAG, "socket failed: ${cause.message}")
-            send(MusicSocketEvent.Failed(cause))
+            if (isActive) {
+                Log.e(TAG, "stream failed: ${cause.message}")
+                send(MusicSocketEvent.Failed(cause))
+            }
         }
 
         awaitClose { }

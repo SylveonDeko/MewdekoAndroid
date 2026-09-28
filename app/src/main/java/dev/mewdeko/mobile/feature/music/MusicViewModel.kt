@@ -22,10 +22,12 @@ import dev.mewdeko.mobile.core.ui.FeatureViewModel
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
@@ -504,26 +506,39 @@ class MusicViewModel @Inject constructor(
     }
 
     /**
-     * Subscribes to the live player feed.
+     * Subscribes to the live player feed and keeps it alive.
      *
-     * The socket pushes a full snapshot on every change, so its frames simply
-     * replace the polled state; if it drops, the screen still works through
-     * pull to refresh.
+     * Every frame is a full snapshot, so it replaces the current player state.
+     * When the stream drops it reconnects with a growing delay, capped at
+     * thirty seconds; while disconnected the screen still works through pull
+     * to refresh. A stream that ends before delivering a single frame is
+     * treated as a failure, so a rejected connection backs off too.
      */
     private fun connectLiveUpdates() {
         socketJob?.cancel()
         socketJob = viewModelScope.launch {
             val baseUrl = api.currentBaseUrl() ?: return@launch
             val instance = api.currentInstance()
-            socket.connect(baseUrl, instance, guildId, userId).collect { event ->
-                when (event) {
-                    is MusicSocketEvent.Status ->
-                        _state.update { it.copy(player = event.status, isLive = true) }
+            var attempt = 0
+            while (isActive) {
+                var receivedFrame = false
+                socket.connect(baseUrl, instance, guildId, userId).collect { event ->
+                    when (event) {
+                        is MusicSocketEvent.Status -> {
+                            receivedFrame = true
+                            attempt = 0
+                            _state.update { it.copy(player = event.status, isLive = true) }
+                        }
 
-                    is MusicSocketEvent.Closed -> _state.update { it.copy(isLive = false) }
-                    is MusicSocketEvent.Failed -> _state.update { it.copy(isLive = false) }
-                    is MusicSocketEvent.Raw -> Unit
+                        is MusicSocketEvent.Closed -> _state.update { it.copy(isLive = false) }
+                        is MusicSocketEvent.Failed -> _state.update { it.copy(isLive = false) }
+                        is MusicSocketEvent.Raw -> Unit
+                    }
                 }
+                if (!isActive) break
+                if (!receivedFrame) attempt++
+                val backoff = (2_000L shl attempt.coerceAtMost(4)).coerceAtMost(30_000L)
+                delay(backoff)
             }
         }
     }
