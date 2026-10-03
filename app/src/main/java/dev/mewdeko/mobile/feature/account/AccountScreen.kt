@@ -200,6 +200,12 @@ fun AccountScreen(
 
             if (state.selectedGuild != null) {
                 MeNumbersSection(state, Modifier.riseOnce("numbers", entered))
+                MeAchievementsSection(
+                    state = state,
+                    onSlot = { slot, key -> viewModel.setAchievementBadge(slot, key) },
+                    onPreference = { key, value -> viewModel.setAchievementPreference(key, value) },
+                    modifier = Modifier.riseOnce("achievements", entered),
+                )
                 MeChannelsSection(state, Modifier.riseOnce("channels", entered))
                 MeAfkSection(
                     state = state,

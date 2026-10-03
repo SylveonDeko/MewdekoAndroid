@@ -91,6 +91,7 @@ object NavigationCatalog {
     /** Every feature page, in catalog order. */
     val items: List<FeatureCatalogItem> = listOf(
         FeatureCatalogItem("xp", "XP System", Icons.Default.Star, FeatureCategory.COMMUNITY, "Leveling, leaderboard, and rewards"),
+        FeatureCatalogItem("achievements", "Achievements", Icons.Default.MilitaryTech, FeatureCategory.COMMUNITY, "Milestones, badges, ranks, and custom achievements for members"),
         FeatureCatalogItem("reputation", "Reputation", Icons.Default.EmojiEvents, FeatureCategory.COMMUNITY, "Member-to-member reputation"),
         FeatureCatalogItem("highlights", "Highlights", Icons.Default.NotificationsActive, FeatureCategory.COMMUNITY, "Word and phrase notifications"),
         FeatureCatalogItem("birthday", "Birthdays", Icons.Default.Cake, FeatureCategory.COMMUNITY, "Birthday announcements and roles"),

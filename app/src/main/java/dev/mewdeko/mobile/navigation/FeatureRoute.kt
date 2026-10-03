@@ -39,6 +39,7 @@ import dev.mewdeko.mobile.feature.messagestats.MessageStatsScreen
 import dev.mewdeko.mobile.feature.serverstats.ServerstatsScreen
 import dev.mewdeko.mobile.feature.repeaters.RepeatersScreen
 import dev.mewdeko.mobile.feature.reputation.ReputationScreen
+import dev.mewdeko.mobile.feature.achievements.AchievementsScreen
 import dev.mewdeko.mobile.feature.rolegreets.RoleGreetsScreen
 import dev.mewdeko.mobile.feature.rolemenus.RoleMenusScreen
 import dev.mewdeko.mobile.feature.patreon.PatreonScreen
@@ -110,6 +111,7 @@ fun FeatureRoute(
             "repeaters" -> RepeatersScreen(guild = guild, onBack = onBack)
             "streams" -> StreamsScreen(guild = guild, onBack = onBack)
             "twitch" -> TwitchScreen(guild = guild, onBack = onBack)
+            "achievements" -> AchievementsScreen(guild = guild, onBack = onBack)
             "reputation" -> ReputationScreen(guild = guild, onBack = onBack)
             "customvoice" -> CustomVoiceScreen(guild = guild, onBack = onBack)
             "patreon" -> PatreonScreen(guild = guild, onBack = onBack)

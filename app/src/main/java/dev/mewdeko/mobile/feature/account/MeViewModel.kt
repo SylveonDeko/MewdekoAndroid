@@ -66,6 +66,7 @@ enum class MeSection {
     Invites,
     Messages,
     Starboard,
+    Achievements,
 }
 
 /**
@@ -100,10 +101,25 @@ data class MeState(
     val invites: InviteStats? = null,
     val messages: MessageStats? = null,
     val starboard: StarboardResult? = null,
+    /** The member's achievements in the selected guild. */
+    val achievements: MyAchievementsData? = null,
     val failed: Set<MeSection> = emptySet(),
     val isRefreshing: Boolean = false,
     val dashboardHost: String? = null,
+    /** The dashboard address, for uploaded achievement icons served under /cdn. */
+    val dashboardBaseUrl: String? = null,
 ) {
+    /**
+     * Where to load an achievement icon image from the API's iconUrl; uploads come back as an API path the
+     * dashboard serves publicly under /cdn/achievement.
+     */
+    fun achievementIconUrl(iconUrl: String?): String? {
+        if (iconUrl.isNullOrBlank()) return null
+        val upload = Regex("^achievements/(\\d+)/icons/(\\d+)$").find(iconUrl) ?: return iconUrl
+        val root = dashboardBaseUrl?.trimEnd('/') ?: return null
+        return "$root/cdn/achievement/${upload.groupValues[1]}/${upload.groupValues[2]}.png"
+    }
+
     /** The guild whose per-guild sections are shown, once the list has loaded. */
     val selectedGuild: Guild? get() = guilds?.firstOrNull { it.id == selectedGuildId }
 
@@ -122,6 +138,7 @@ data class MeState(
         invites = null,
         messages = null,
         starboard = null,
+        achievements = null,
         failed = failed - GuildSections,
     )
 }
@@ -138,6 +155,7 @@ private val GuildSections = setOf(
     MeSection.Invites,
     MeSection.Messages,
     MeSection.Starboard,
+    MeSection.Achievements,
 )
 
 /**
@@ -180,7 +198,8 @@ class MeViewModel @Inject constructor(
     init {
         viewModelScope.launch {
             _state.update { state ->
-                state.copy(dashboardHost = api.currentBaseUrl()?.let { it.toUri().host })
+                val base = api.currentBaseUrl()
+                state.copy(dashboardHost = base?.let { it.toUri().host }, dashboardBaseUrl = base?.toString())
             }
         }
         viewModelScope.launch {
@@ -451,6 +470,9 @@ class MeViewModel @Inject constructor(
             section(MeSection.Starboard, current, { getStarboard(guildId) }) { s, v ->
                 s.copy(starboard = v)
             }
+            section(MeSection.Achievements, current, { get(guildId, "achievements", MyAchievementsData.serializer()) }) { s, v ->
+                s.copy(achievements = v)
+            }
         }.also { guildJob = it }
     }
 
@@ -526,6 +548,36 @@ class MeViewModel @Inject constructor(
     }
 
     private fun isSelected(guildId: Snowflake) = _state.value.selectedGuildId == guildId
+
+    /** Puts a badge in one of the four slots, taking it out of any other slot; null empties the slot. */
+    fun setAchievementBadge(slot: Int, key: String?) = mutate { guildId ->
+        val data = _state.value.achievements ?: return@mutate
+        val slots = (data.equipped + List(maxOf(0, 4 - data.equipped.size)) { null }).toMutableList()
+        if (key != null) slots.indices.filter { slots[it] == key }.forEach { slots[it] = null }
+        slots[slot] = key
+        val body = MewdekoJson.encodeToString(MyAchievementBadgesRequest.serializer(), MyAchievementBadgesRequest(slots))
+        val result = api.send(Endpoint(mePath(guildId, "achievements/badges"), HttpMethod.PUT, body),
+            MyAchievementBadgesResponse.serializer())
+        if (isSelected(guildId)) {
+            _state.update { s -> s.copy(achievements = s.achievements?.copy(equipped = result.equipped)) }
+        }
+    }
+
+    /** Changes one achievement privacy or notification preference. */
+    fun setAchievementPreference(key: String, value: Any) = mutate { guildId ->
+        val primitive = when (value) {
+            is Boolean -> kotlinx.serialization.json.JsonPrimitive(value)
+            is Number -> kotlinx.serialization.json.JsonPrimitive(value)
+            else -> kotlinx.serialization.json.JsonPrimitive(value.toString())
+        }
+        val body = MewdekoJson.encodeToString(kotlinx.serialization.json.JsonObject.serializer(),
+            kotlinx.serialization.json.JsonObject(mapOf(key to primitive)))
+        val settings = api.send(Endpoint(mePath(guildId, "achievements/settings"), HttpMethod.PUT, body),
+            MyAchievementSettings.serializer())
+        if (isSelected(guildId)) {
+            _state.update { s -> s.copy(achievements = s.achievements?.copy(settings = settings)) }
+        }
+    }
 
     private fun mePath(guildId: Snowflake, tail: String) = "api/me/$guildId/$userId/$tail"
 

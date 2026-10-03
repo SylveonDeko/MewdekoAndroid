@@ -74,12 +74,17 @@ fun SwitchRow(
     subtitle: String? = null,
     enabled: Boolean = true,
     icon: ImageVector? = null,
+    glyph: FaGlyph? = null,
 ) {
     val primary = MaterialTheme.colorScheme.primary
     ListItem(
         headlineContent = { Text(title) },
         supportingContent = subtitle?.let { { Text(it) } },
-        leadingContent = icon?.let { { GlyphOrb(it, tint = primary) } },
+        leadingContent = when {
+            glyph != null -> { { GlyphOrb(glyph, tint = primary) } }
+            icon != null -> { { GlyphOrb(icon, tint = primary) } }
+            else -> null
+        },
         trailingContent = {
             Switch(checked = checked, onCheckedChange = onCheckedChange, enabled = enabled)
         },

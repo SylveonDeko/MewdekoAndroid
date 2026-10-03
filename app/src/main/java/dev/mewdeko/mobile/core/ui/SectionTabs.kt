@@ -67,6 +67,7 @@ data class SectionTab(
     val id: String,
     val title: String,
     val icon: ImageVector? = null,
+    val glyph: FaGlyph? = null,
 )
 
 /** Which tier of navigation a [SectionTabs] row switches. */
@@ -197,7 +198,7 @@ private fun rememberPillWidths(
                 maxLines = 1,
                 softWrap = false,
             ).size.width
-            val icon = if (tab.icon != null) PillIcon + PillIconGap else 0.dp
+            val icon = if (tab.icon != null || tab.glyph != null) PillIcon + PillIconGap else 0.dp
             with(density) { text.toDp() } + icon + PillPadding * 2 + 1.dp
         }
     }
@@ -260,7 +261,9 @@ private fun TabPill(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(PillIconGap, Alignment.CenterHorizontally),
     ) {
-        if (tab.icon != null) {
+        if (tab.glyph != null) {
+            FaIcon(tab.glyph, size = PillIcon - 2.dp, tint = ink, modifier = Modifier.size(PillIcon))
+        } else if (tab.icon != null) {
             Icon(tab.icon, contentDescription = null, tint = ink, modifier = Modifier.size(PillIcon))
         }
         Text(
@@ -344,24 +347,33 @@ fun SearchField(
     onValueChange: (String) -> Unit,
     placeholder: String,
     modifier: Modifier = Modifier,
+    fontAwesome: Boolean = false,
 ) {
     androidx.compose.material3.OutlinedTextField(
         value = value,
         onValueChange = onValueChange,
         placeholder = { Text(placeholder) },
         leadingIcon = {
-            Icon(
-                Icons.Default.Search,
-                contentDescription = null,
-            )
+            if (fontAwesome) {
+                FaIcon(FaGlyph.MagnifyingGlass, size = 18.dp)
+            } else {
+                Icon(
+                    Icons.Default.Search,
+                    contentDescription = null,
+                )
+            }
         },
         trailingIcon = {
             if (value.isNotEmpty()) {
                 androidx.compose.material3.IconButton(onClick = { onValueChange("") }) {
-                    Icon(
-                        Icons.Default.Close,
-                        contentDescription = "Clear",
-                    )
+                    if (fontAwesome) {
+                        FaIcon(FaGlyph.Xmark, size = 18.dp, contentDescription = "Clear")
+                    } else {
+                        Icon(
+                            Icons.Default.Close,
+                            contentDescription = "Clear",
+                        )
+                    }
                 }
             }
         },

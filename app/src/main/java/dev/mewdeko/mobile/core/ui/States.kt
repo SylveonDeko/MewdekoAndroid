@@ -79,6 +79,7 @@ fun EmptyState(
     icon: ImageVector? = null,
     actionLabel: String? = null,
     onAction: (() -> Unit)? = null,
+    glyph: FaGlyph? = null,
 ) {
     Column(
         modifier = modifier
@@ -87,7 +88,9 @@ fun EmptyState(
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
-        if (icon != null) {
+        if (glyph != null) {
+            FaIcon(glyph, size = 30.dp, tint = MaterialTheme.colorScheme.primary)
+        } else if (icon != null) {
             Icon(
                 icon,
                 contentDescription = null,

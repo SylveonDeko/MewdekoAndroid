@@ -212,6 +212,64 @@ fun SectionCardHeader(
     }
 }
 
+/** A section header with a Font Awesome icon in its tinted badge. */
+@Composable
+fun SectionCardHeader(
+    title: String,
+    glyph: FaGlyph,
+    modifier: Modifier = Modifier,
+    tint: Color? = null,
+    trailing: (@Composable () -> Unit)? = null,
+) {
+    FaSectionCardHeader(title, modifier, tint, trailing) { accent -> FaIcon(glyph, size = 16.dp, tint = accent) }
+}
+
+/** A section header with a Font Awesome icon by name, such as fa:trophy, in its tinted badge. */
+@Composable
+fun SectionCardHeader(
+    title: String,
+    iconName: String,
+    modifier: Modifier = Modifier,
+    tint: Color? = null,
+    trailing: (@Composable () -> Unit)? = null,
+) {
+    FaSectionCardHeader(title, modifier, tint, trailing) { accent -> FaIcon(iconName, size = 16.dp, tint = accent) }
+}
+
+@Composable
+private fun FaSectionCardHeader(
+    title: String,
+    modifier: Modifier,
+    tint: Color?,
+    trailing: (@Composable () -> Unit)?,
+    icon: @Composable (Color) -> Unit,
+) {
+    val accent = tint ?: MaterialTheme.colorScheme.primary
+    val badgeShape = RoundedCornerShape(10.dp)
+    Row(
+        modifier = modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Box(
+            modifier = Modifier
+                .size(32.dp)
+                .background(accent.copy(alpha = DashAlpha.Hex20), badgeShape)
+                .border(1.dp, accent.copy(alpha = DashAlpha.Hex30), badgeShape),
+            contentAlignment = Alignment.Center,
+        ) {
+            icon(accent)
+        }
+        Text(
+            text = title,
+            style = MaterialTheme.typography.titleMedium,
+            color = MaterialTheme.colorScheme.onSurface,
+            modifier = Modifier.weight(1f),
+        )
+        trailing?.invoke()
+    }
+}
+
 /** Tappable feature row used inside section tabs to navigate to a deeper view. */
 @Composable
 fun FeatureLinkCard(
@@ -288,6 +346,7 @@ fun StatTile(
     icon: ImageVector? = null,
     valueModifier: Modifier = Modifier,
     valueMaxLines: Int = 1,
+    glyph: FaGlyph? = null,
 ) {
     val accent = tint ?: MaterialTheme.colorScheme.primary
     val shape = MaterialTheme.shapes.medium
@@ -306,7 +365,9 @@ fun StatTile(
         border = guildBorder(accent),
     ) {
         Column(modifier = Modifier.padding(10.dp)) {
-            if (icon != null) {
+            if (glyph != null) {
+                FaIcon(glyph, size = 16.dp, tint = accent, modifier = Modifier.padding(bottom = 2.dp))
+            } else if (icon != null) {
                 Icon(
                     icon,
                     contentDescription = null,

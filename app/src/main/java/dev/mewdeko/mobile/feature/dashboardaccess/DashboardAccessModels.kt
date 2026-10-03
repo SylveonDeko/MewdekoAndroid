@@ -184,6 +184,7 @@ object DashboardAccessSections {
         DashboardAccessGroup("Music", AccessCategory.ENTERTAINMENT, Icons.Default.MusicNote, listOf("Music")),
         DashboardAccessGroup("Patreon", AccessCategory.COMMUNITY, Icons.Default.Favorite, listOf("Patreon")),
         DashboardAccessGroup("Repeaters", AccessCategory.ACTIONS, Icons.Default.Repeat, listOf("Repeaters")),
+        DashboardAccessGroup("Achievements", AccessCategory.COMMUNITY, Icons.Default.EmojiEvents, listOf("Achievements")),
         DashboardAccessGroup("Reputation", AccessCategory.COMMUNITY, Icons.Default.EmojiEvents, listOf("Reputation")),
         DashboardAccessGroup("Role Greets", AccessCategory.ACTIONS, Icons.Default.PersonAddAlt, listOf("RoleGreet")),
         DashboardAccessGroup("Role Menus", AccessCategory.ACTIONS, Icons.AutoMirrored.Filled.PlaylistAddCheck, listOf("RoleMenus")),

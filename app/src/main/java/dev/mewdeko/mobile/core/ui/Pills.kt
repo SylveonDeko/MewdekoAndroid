@@ -99,3 +99,22 @@ fun GlyphOrb(
         Icon(icon, contentDescription = null, tint = tint, modifier = Modifier.size(size.glyph))
     }
 }
+
+/** A [GlyphOrb] around a Font Awesome icon. */
+@Composable
+fun GlyphOrb(
+    glyph: FaGlyph,
+    tint: Color,
+    modifier: Modifier = Modifier,
+    size: OrbSize = OrbSize.Small,
+) {
+    Box(
+        modifier = modifier
+            .size(size.diameter)
+            .background(tint.copy(alpha = DashAlpha.Hex20), CircleShape)
+            .border(1.dp, tint.copy(alpha = DashAlpha.Hex30), CircleShape),
+        contentAlignment = Alignment.Center,
+    ) {
+        FaIcon(glyph, size = size.glyph * 0.9f, tint = tint)
+    }
+}

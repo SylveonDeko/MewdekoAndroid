@@ -70,10 +70,17 @@ fun NewItemFab(
     label: String,
     onClick: () -> Unit,
     expanded: Boolean = true,
+    glyph: FaGlyph? = null,
 ) {
     ExtendedFloatingActionButton(
         text = { Text(label, maxLines = 1) },
-        icon = { Icon(Icons.Default.Add, contentDescription = if (expanded) null else label) },
+        icon = {
+            if (glyph != null) {
+                FaIcon(glyph, size = 20.dp, contentDescription = if (expanded) null else label)
+            } else {
+                Icon(Icons.Default.Add, contentDescription = if (expanded) null else label)
+            }
+        },
         expanded = expanded,
         onClick = onClick,
         containerColor = MaterialTheme.colorScheme.primaryContainer,

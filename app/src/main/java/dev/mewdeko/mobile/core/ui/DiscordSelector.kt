@@ -75,6 +75,7 @@ data class SelectorOption(
     val colorHex: Int? = null,
     val imageUrl: String? = null,
     val icon: ImageVector? = null,
+    val glyph: FaGlyph? = null,
 )
 
 /** The option's role color as a Compose color, or null when it has none. */
@@ -103,6 +104,7 @@ fun DiscordSelector(
     enabled: Boolean = true,
     multiple: Boolean = false,
     selection: List<String> = emptyList(),
+    glyph: FaGlyph? = null,
     onSelectionChange: (List<String>) -> Unit,
 ) {
     if (multiple) {
@@ -115,6 +117,7 @@ fun DiscordSelector(
             placeholder = placeholder,
             modifier = modifier,
             enabled = enabled,
+            glyph = glyph,
         )
         return
     }
@@ -133,6 +136,7 @@ fun DiscordSelector(
         onClick = { expanded = true },
         modifier = modifier,
         swatch = selected?.swatch,
+        glyph = glyph,
     )
 
     if (expanded) {
@@ -144,6 +148,7 @@ fun DiscordSelector(
             onSelectionChange = onSelectionChange,
             onDismiss = { expanded = false },
             title = label,
+            glyph = glyph,
         )
     }
 }
@@ -164,6 +169,7 @@ internal fun SelectorField(
     modifier: Modifier = Modifier,
     destructive: Boolean = false,
     swatch: Color? = null,
+    glyph: FaGlyph? = null,
 ) {
     val tone = if (destructive) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary
     Column(modifier = modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -197,6 +203,8 @@ internal fun SelectorField(
                     ) {
                         Surface(shape = CircleShape, color = swatch, modifier = Modifier.size(10.dp)) {}
                     }
+                } else if (glyph != null) {
+                    FaIcon(glyph, size = 16.dp, tint = tone)
                 } else {
                     Icon(
                         kind.icon,
@@ -248,6 +256,7 @@ fun DiscordSelectorSheet(
     onDismiss: () -> Unit,
     multiple: Boolean = false,
     title: String? = null,
+    glyph: FaGlyph? = null,
 ) {
     var query by remember { mutableStateOf("") }
     val pinned = remember { selection.toSet() }
@@ -319,6 +328,7 @@ fun DiscordSelectorSheet(
                         option = option,
                         selected = isSelected,
                         multiple = multiple,
+                        glyph = glyph,
                         onClick = {
                             if (multiple) {
                                 onSelectionChange(
@@ -365,6 +375,7 @@ private fun SelectorOptionRow(
     selected: Boolean,
     multiple: Boolean,
     onClick: () -> Unit,
+    glyph: FaGlyph? = null,
 ) {
     val primary = MaterialTheme.colorScheme.primary
     val interaction = if (multiple) {
@@ -400,6 +411,9 @@ private fun SelectorOptionRow(
                     Surface(shape = CircleShape, color = swatch, modifier = Modifier.size(14.dp)) {}
                 }
 
+                option.glyph != null || (option.icon == null && glyph != null) ->
+                    FaIcon(option.glyph ?: glyph!!, size = 20.dp, tint = primary)
+
                 else -> Icon(option.icon ?: kind.icon, contentDescription = null, tint = primary)
             }
         },
@@ -432,6 +446,7 @@ fun DiscordSelectorSingle(
     modifier: Modifier = Modifier,
     label: String? = null,
     enabled: Boolean = true,
+    glyph: FaGlyph? = null,
 ) {
     DiscordSelector(
         kind = kind,
@@ -442,6 +457,7 @@ fun DiscordSelectorSingle(
         enabled = enabled,
         multiple = false,
         selection = listOfNotNull(selectedId),
+        glyph = glyph,
         onSelectionChange = { onSelect(it.firstOrNull()) },
     )
 }

@@ -60,6 +60,7 @@ fun MultiSelectDropdown(
     enabled: Boolean = true,
     destructive: Boolean = false,
     maxVisibleChips: Int = 12,
+    glyph: FaGlyph? = null,
 ) {
     var expanded by remember { mutableStateOf(false) }
     val byId = remember(options) { options.associateBy { it.id } }
@@ -80,6 +81,7 @@ fun MultiSelectDropdown(
             destructive = destructive,
             onClick = { expanded = true },
             swatch = if (selection.size == 1 && first != null) byId[first]?.swatch else null,
+            glyph = glyph,
         )
 
         if (selection.isNotEmpty()) {
@@ -119,6 +121,7 @@ fun MultiSelectDropdown(
             onDismiss = { expanded = false },
             multiple = true,
             title = label,
+            glyph = glyph,
         )
     }
 }
