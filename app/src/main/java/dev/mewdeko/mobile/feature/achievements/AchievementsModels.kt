@@ -222,11 +222,15 @@ data class AchievementSettingsInfo(
     /** Unlock messages carry a generated image. */
     val unlockImage: Boolean = true,
     /** Seconds after which unlock messages in channels are deleted; 0 keeps them. */
-    val deleteAfter: Int = 0,
+    val deleteAfter: Int = 5,
     val disabledCategories: List<String> = emptyList(),
     val categoryOrder: List<String> = emptyList(),
     val excludedRoleIds: List<@Serializable(with = SnowflakeSerializer::class) Snowflake> = emptyList(),
     val excludedChannelIds: List<@Serializable(with = SnowflakeSerializer::class) Snowflake> = emptyList(),
+    /** Channels where achievements are earned but unlocks are never announced. */
+    val quietChannelIds: List<@Serializable(with = SnowflakeSerializer::class) Snowflake> = emptyList(),
+    /** Unlocks stay out of channels the member can't send messages in. */
+    val requireSendPermission: Boolean = true,
     @Serializable(with = InstantSerializer::class) val backfilledAt: Instant? = null,
 )
 
@@ -430,7 +434,9 @@ data class AchievementSettingsDraft(
     val xpPerPoint: Int = 0,
     val revealHidden: Boolean = false,
     val unlockImage: Boolean = true,
-    val deleteAfter: Int = 0,
+    val deleteAfter: Int = 5,
+    val quietChannelIds: List<Snowflake> = emptyList(),
+    val requireSendPermission: Boolean = true,
     val excludedRoleIds: List<Snowflake> = emptyList(),
     val excludedChannelIds: List<Snowflake> = emptyList(),
 ) {
@@ -446,6 +452,8 @@ data class AchievementSettingsDraft(
             revealHidden = settings.revealHidden,
             unlockImage = settings.unlockImage,
             deleteAfter = settings.deleteAfter,
+            quietChannelIds = settings.quietChannelIds,
+            requireSendPermission = settings.requireSendPermission,
             excludedRoleIds = settings.excludedRoleIds,
             excludedChannelIds = settings.excludedChannelIds,
         )

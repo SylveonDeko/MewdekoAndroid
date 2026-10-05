@@ -758,6 +758,8 @@ class AchievementsViewModel @Inject constructor(
             put("revealHidden", JsonPrimitive(draft.revealHidden))
             put("unlockImage", JsonPrimitive(draft.unlockImage))
             put("deleteAfter", JsonPrimitive(draft.deleteAfter))
+            put("quietChannelIds", JsonArray(draft.quietChannelIds.filter { it != draft.logChannelId }.map { JsonPrimitive(it) }))
+            put("requireSendPermission", JsonPrimitive(draft.requireSendPermission))
             put("excludedRoleIds", JsonArray(draft.excludedRoleIds.map { JsonPrimitive(it) }))
             put("excludedChannelIds", JsonArray(draft.excludedChannelIds.map { JsonPrimitive(it) }))
         }

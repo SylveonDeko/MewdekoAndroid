@@ -487,12 +487,42 @@ private fun AnnounceSection(state: AchievementsState, viewModel: AchievementsVie
             label = "Delete unlock messages",
             options = listOf(
                 EnumOption(0, "Never", "They stay in the channel"),
+                EnumOption(5, "After 5 seconds", "The default"),
                 EnumOption(15, "After 15 seconds"), EnumOption(30, "After 30 seconds"), EnumOption(60, "After 1 minute"),
                 EnumOption(300, "After 5 minutes"), EnumOption(900, "After 15 minutes"), EnumOption(3600, "After 1 hour"),
                 EnumOption(86400, "After 1 day"),
             ),
             selected = draft.deleteAfter,
             onSelect = { value -> viewModel.editSettings { it.copy(deleteAfter = value) } },
+        )
+    }
+
+    SectionCard {
+        SectionCardHeader("Keep unlocks out of some channels", FaGlyph.Filter)
+        DiscordSelector(
+            kind = SelectorKind.Channel,
+            options = state.lookups?.channels.orEmpty().map {
+                SelectorOption(it.id, it.name, it.categoryName, glyph = if (it.type == 2) FaGlyph.Microphone else FaGlyph.Comments)
+            },
+            placeholder = "No quiet channels",
+            label = "Quiet channels",
+            multiple = true,
+            glyph = FaGlyph.Comments,
+            selection = draft.quietChannelIds,
+            onSelectionChange = { ids -> viewModel.editSettings { it.copy(quietChannelIds = ids) } },
+        )
+        SwitchRow(
+            glyph = FaGlyph.Comments,
+            title = "Only post where the member can talk",
+            subtitle = "Skips channels the member can't send messages in, such as a read only channel they reacted in.",
+            checked = draft.requireSendPermission,
+            onCheckedChange = { value -> viewModel.editSettings { it.copy(requireSendPermission = value) } },
+        )
+        Text(
+            "Members still earn achievements in quiet channels. The unlock is posted in the log channel instead, or not " +
+                "at all when there isn't one. The log channel is never skipped.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
     }
 
