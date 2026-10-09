@@ -51,7 +51,10 @@ enum class XpCurveType(val raw: Int, val label: String) {
     LINEAR(1, "Linear"),
     ACCELERATED(2, "Quadratic"),
     DECELERATED(3, "Exponential"),
-    LEGACY(5, "Legacy");
+    LEGACY(5, "Legacy"),
+    MEE6(6, "MEE6"),
+    LURKR(7, "Lurkr"),
+    AMARI(8, "Amari");
 
     companion object {
         /** Maps a wire value onto a curve, defaulting to [STANDARD]. */

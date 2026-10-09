@@ -8,6 +8,7 @@ import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.AdminPanelSettings
 import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.Build
+import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Cake
 import androidx.compose.material.icons.filled.CardGiftcard
 import androidx.compose.material.icons.filled.Checklist
@@ -91,6 +92,7 @@ object NavigationCatalog {
     /** Every feature page, in catalog order. */
     val items: List<FeatureCatalogItem> = listOf(
         FeatureCatalogItem("xp", "XP System", Icons.Default.Star, FeatureCategory.COMMUNITY, "Leveling, leaderboard, and rewards"),
+        FeatureCatalogItem("import", "Import", Icons.Default.Download, FeatureCategory.COMMUNITY, "Bring XP, levels and balances over from other bots"),
         FeatureCatalogItem("achievements", "Achievements", Icons.Default.MilitaryTech, FeatureCategory.COMMUNITY, "Milestones, badges, ranks, and custom achievements for members"),
         FeatureCatalogItem("reputation", "Reputation", Icons.Default.EmojiEvents, FeatureCategory.COMMUNITY, "Member-to-member reputation"),
         FeatureCatalogItem("highlights", "Highlights", Icons.Default.NotificationsActive, FeatureCategory.COMMUNITY, "Word and phrase notifications"),

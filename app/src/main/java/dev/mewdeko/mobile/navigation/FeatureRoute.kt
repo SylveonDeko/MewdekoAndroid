@@ -61,6 +61,7 @@ import dev.mewdeko.mobile.feature.utility.UtilityScreen
 import dev.mewdeko.mobile.feature.votes.VotesScreen
 import dev.mewdeko.mobile.feature.polls.PollsScreen
 import dev.mewdeko.mobile.feature.xp.XpScreen
+import dev.mewdeko.mobile.feature.dataimport.ImportScreen
 import dev.mewdeko.mobile.feature.palette.GuildPaletteViewModel
 
 /**
@@ -121,6 +122,7 @@ fun FeatureRoute(
             "counting" -> CountingScreen(guild = guild, onBack = onBack)
             "todo" -> TodoScreen(guild = guild, onBack = onBack)
             "xp" -> XpScreen(guild = guild, onBack = onBack)
+            "import" -> ImportScreen(guild = guild, onBack = onBack)
             "embedbuilder" -> EmbedBuilderScreen(guild = guild, onBack = onBack)
             "minecraft" -> MinecraftScreen(guild = guild, onBack = onBack)
             "music" -> MusicScreen(guild = guild, onBack = onBack)
