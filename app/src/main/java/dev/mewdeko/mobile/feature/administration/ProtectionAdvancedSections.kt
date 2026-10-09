@@ -545,6 +545,83 @@ fun AntiImageHashCard(state: AdministrationState, viewModel: AdministrationViewM
     }
 }
 
+/**
+ * Anti-external-app card: summary, quick toggle and editor. It watches messages members send through
+ * apps they added to their own account, which post as the app and so get past checks that look at who
+ * sent a message. Apps added to the server itself are left alone.
+ */
+@Composable
+fun AntiExternalAppCard(state: AdministrationState, viewModel: AdministrationViewModel, onQuickToggle: () -> Unit) {
+    val summary = state.externalApp
+    var editing by remember { mutableStateOf(false) }
+
+    ProtectionCard(
+        title = "Anti-external-app",
+        enabled = summary.enabled,
+        onEdit = { editing = true },
+        onQuickToggle = onQuickToggle,
+    ) {
+        val mentions = if (summary.mentionThreshold > 0) "mention limit ${summary.mentionThreshold}" else "no mention limit"
+        val rate = if (summary.maxMessages > 0) {
+            "${summary.maxMessages} app messages per ${summary.timeWindowSeconds}s"
+        } else {
+            "no message limit"
+        }
+        Text("$mentions, $rate, caught ${summary.counter}.", style = MaterialTheme.typography.bodySmall)
+    }
+
+    if (editing) {
+        var enabled by remember(summary) { mutableStateOf(summary.enabled) }
+        var action by remember(summary) { mutableStateOf(AntiPunishmentAction.from(summary.action)) }
+        var punishDuration by remember(summary) { mutableStateOf(summary.punishDuration) }
+        var mentionThreshold by remember(summary) { mutableStateOf(summary.mentionThreshold) }
+        var maxMessages by remember(summary) { mutableStateOf(summary.maxMessages) }
+        var timeWindowSeconds by remember(summary) { mutableStateOf(summary.timeWindowSeconds.coerceAtLeast(1)) }
+        var blockInvites by remember(summary) { mutableStateOf(summary.blockInvites) }
+        var deleteMessages by remember(summary) { mutableStateOf(summary.deleteMessages) }
+        var notifyUser by remember(summary) { mutableStateOf(summary.notifyUser) }
+
+        EditorSheet(title = "Anti-external-app", onDismiss = { editing = false }) {
+            Text(
+                "Checks apps members added to their own account. A ping of everyone or here always counts " +
+                    "as too many mentions, and a limit of 0 turns that check off.",
+                style = MaterialTheme.typography.bodySmall,
+            )
+            SwitchRow("Enabled", enabled, { enabled = it })
+            ActionPicker(action) { action = it }
+            SliderRow(
+                "Punish duration", punishDuration.toFloat(), { punishDuration = it.toInt() }, 0f..1440f,
+                valueLabel = "${punishDuration}m",
+            )
+            SliderRow(
+                "Mention limit", mentionThreshold.toFloat(), { mentionThreshold = it.toInt() }, 0f..50f,
+                valueLabel = if (mentionThreshold > 0) mentionThreshold.toString() else "Off",
+            )
+            SliderRow(
+                "App messages allowed", maxMessages.toFloat(), { maxMessages = it.toInt() }, 0f..30f,
+                valueLabel = if (maxMessages > 0) maxMessages.toString() else "Off",
+            )
+            SliderRow(
+                "Within", timeWindowSeconds.toFloat(), { timeWindowSeconds = it.toInt() }, 1f..120f,
+                valueLabel = "${timeWindowSeconds}s",
+            )
+            SwitchRow("Remove invite links", blockInvites, { blockInvites = it })
+            SwitchRow("Delete the app message", deleteMessages, { deleteMessages = it })
+            SwitchRow("Tell the member by DM", notifyUser, { notifyUser = it })
+            SaveCancelRow(
+                onCancel = { editing = false },
+                onSave = {
+                    editing = false
+                    viewModel.saveAntiExternalApp(
+                        enabled, action.raw, punishDuration, mentionThreshold, blockInvites,
+                        maxMessages, timeWindowSeconds, deleteMessages, notifyUser,
+                    )
+                },
+            )
+        }
+    }
+}
+
 /** Shared punishment action picker used by the advanced protection editors. */
 @Composable
 private fun ActionPicker(action: AntiPunishmentAction, onChange: (AntiPunishmentAction) -> Unit) {

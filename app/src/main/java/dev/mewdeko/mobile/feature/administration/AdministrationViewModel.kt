@@ -40,6 +40,7 @@ import javax.inject.Inject
 data class AdministrationState(
     val protection: ProtectionStatusDetail? = null,
     val imageHash: AntiImageHashSummary = AntiImageHashSummary(),
+    val externalApp: AntiExternalAppSummary = AntiExternalAppSummary(),
     val autoAssign: AutoAssignRolesResponse = AutoAssignRolesResponse(),
     val selfAssignable: SelfAssignableRolesPayload = SelfAssignableRolesPayload(),
     val autoBanRoles: List<Snowflake> = emptyList(),
@@ -67,7 +68,7 @@ data class AdministrationState(
     val gameVoiceChannelId: Snowflake? = null,
     val section: AdminSection = AdminSection.OVERVIEW,
 ) {
-    /** How many of the seven protection modules are switched on. */
+    /** How many of the protection modules are switched on. */
     val activeProtections: Int
         get() = protection?.let {
             listOf(
@@ -79,6 +80,7 @@ data class AdministrationState(
                 it.antiPattern.enabled,
                 it.antiPostChannel.enabled,
                 imageHash.enabled,
+                externalApp.enabled,
             ).count { enabled -> enabled }
         } ?: 0
 }
@@ -118,13 +120,13 @@ class AdministrationViewModel @Inject constructor(
                     )
                 }.getOrNull()
             }
-            val imageHash = async {
+            val protectionExtra = async {
                 runCatching {
                     api.send(
                         Endpoint("api/Protection/$guildId/status"),
                         ImageHashStatusWrapper.serializer(),
-                    ).antiImageHash
-                }.getOrDefault(AntiImageHashSummary())
+                    )
+                }.getOrDefault(ImageHashStatusWrapper())
             }
             val autoAssign = async {
                 runCatching {
@@ -279,10 +281,12 @@ class AdministrationViewModel @Inject constructor(
                 }.getOrNull()
             }
 
+            val extra = protectionExtra.await()
             _state.update {
                 it.copy(
                     protection = protection.await(),
-                    imageHash = imageHash.await(),
+                    imageHash = extra.antiImageHash,
+                    externalApp = extra.antiExternalApp,
                     autoAssign = autoAssign.await(),
                     selfAssignable = selfAssignable.await(),
                     autoBanRoles = autoBan.await(),
@@ -837,6 +841,40 @@ class AdministrationViewModel @Inject constructor(
         postSuccess("Anti-image-hash saved.")
     }
 
+    /** Writes the anti-external-app configuration. */
+    fun saveAntiExternalApp(
+        enabled: Boolean,
+        action: Int,
+        punishDuration: Int,
+        mentionThreshold: Int,
+        blockInvites: Boolean,
+        maxMessages: Int,
+        timeWindowSeconds: Int,
+        deleteMessages: Boolean,
+        notifyUser: Boolean,
+    ) = launchAction("Failed to save protection.") {
+        api.sendIgnoringBody(
+            Endpoint(
+                "api/Protection/$guildId/anti-external-app",
+                HttpMethod.PUT,
+                jsonBody(
+                    "enabled" to enabled,
+                    "action" to action,
+                    "punishDuration" to punishDuration,
+                    "roleId" to _state.value.externalApp.roleId?.toLongOrNull(),
+                    "mentionThreshold" to mentionThreshold,
+                    "blockInvites" to blockInvites,
+                    "maxMessages" to maxMessages,
+                    "timeWindowSeconds" to timeWindowSeconds,
+                    "deleteMessages" to deleteMessages,
+                    "notifyUser" to notifyUser,
+                ),
+            )
+        )
+        load()
+        postSuccess("Anti-external-app saved.")
+    }
+
     /** Turns the bot's shipped scam image list on or off. */
     fun togglePresetScamImages() = launchAction("Failed to toggle the preset list.") {
         api.sendIgnoringBody(
@@ -909,6 +947,7 @@ class AdministrationViewModel @Inject constructor(
             QuickProtectionModule.PATTERN -> protection?.antiPattern?.enabled
             QuickProtectionModule.POST_CHANNEL -> protection?.antiPostChannel?.enabled
             QuickProtectionModule.IMAGE_HASH -> _state.value.imageHash.enabled
+            QuickProtectionModule.EXTERNAL_APP -> _state.value.externalApp.enabled
         } ?: false
 
         val disableBody = jsonBody("enabled" to false)
@@ -957,6 +996,12 @@ class AdministrationViewModel @Inject constructor(
                 "enabled" to true, "action" to 2, "punishDuration" to 0, "hashThreshold" to 31,
                 "deleteMessages" to true, "notifyUser" to true, "ignoreBots" to true, "checkEmbeds" to true,
                 "checkBorders" to true, "usePresetList" to true, "maxImageSizeMb" to 8,
+            )
+
+            QuickProtectionModule.EXTERNAL_APP -> "api/Protection/$guildId/anti-external-app" to jsonBody(
+                "enabled" to true, "action" to 10, "punishDuration" to 60, "mentionThreshold" to 5,
+                "blockInvites" to true, "maxMessages" to 5, "timeWindowSeconds" to 10,
+                "deleteMessages" to true, "notifyUser" to true,
             )
         }
 
@@ -1255,5 +1300,5 @@ private fun List<Snowflake>.toggling(id: Snowflake): List<Snowflake> =
 
 /** The eight protection modules that support a one-tap quick toggle. */
 enum class QuickProtectionModule {
-    RAID, SPAM, ALT, MASS_MENTION, MASS_POST, PATTERN, POST_CHANNEL, IMAGE_HASH
+    RAID, SPAM, ALT, MASS_MENTION, MASS_POST, PATTERN, POST_CHANNEL, IMAGE_HASH, EXTERNAL_APP
 }

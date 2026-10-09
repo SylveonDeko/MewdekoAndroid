@@ -142,10 +142,33 @@ data class AntiImageHashSummary(
     val counter: Int = 0,
 )
 
-/** Wraps the `Protection/{g}/status` response just far enough to pull the image-hash block out of it. */
+/**
+ * Anti-external-app's current configuration and hit counter. It watches messages members send through
+ * apps they added to their own account; a limit of 0 means that check is off.
+ */
+@Serializable
+data class AntiExternalAppSummary(
+    val enabled: Boolean = false,
+    val action: Int = 10,
+    val punishDuration: Int = 60,
+    @Serializable(with = SnowflakeSerializer::class) val roleId: Snowflake? = null,
+    val mentionThreshold: Int = 5,
+    val blockInvites: Boolean = true,
+    val maxMessages: Int = 5,
+    val timeWindowSeconds: Int = 10,
+    val deleteMessages: Boolean = true,
+    val notifyUser: Boolean = true,
+    val counter: Int = 0,
+)
+
+/**
+ * Wraps the `Protection/{g}/status` response just far enough to pull out the image-hash and
+ * external-app blocks. Bots older than anti-external-app leave it out, which then reads as off.
+ */
 @Serializable
 data class ImageHashStatusWrapper(
     val antiImageHash: AntiImageHashSummary = AntiImageHashSummary(),
+    val antiExternalApp: AntiExternalAppSummary = AntiExternalAppSummary(),
 )
 
 /** Every protection module's state in one payload, as returned by `Administration/{g}/protection/status`. */

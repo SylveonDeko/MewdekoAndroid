@@ -170,7 +170,7 @@ private fun OverviewSection(state: AdministrationState) {
     SectionCard {
         SectionCardHeader("Protection", Icons.Default.Shield)
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            StatTile("Active", "${state.activeProtections}/8", Modifier.weight(1f))
+            StatTile("Active", "${state.activeProtections}/9", Modifier.weight(1f))
             StatTile("Auto-ban roles", "${state.autoBanRoles.size}", Modifier.weight(1f))
         }
     }
@@ -295,6 +295,10 @@ private fun ProtectionSection(
 
     AntiImageHashCard(state = state, viewModel = viewModel, onQuickToggle = {
         viewModel.quickToggleProtection(QuickProtectionModule.IMAGE_HASH)
+    })
+
+    AntiExternalAppCard(state = state, viewModel = viewModel, onQuickToggle = {
+        viewModel.quickToggleProtection(QuickProtectionModule.EXTERNAL_APP)
     })
 }
 
